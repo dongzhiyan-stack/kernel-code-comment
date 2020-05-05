@@ -23,12 +23,14 @@ struct flex_array {
 			int total_nr_elements;
 			int elems_per_part;
 			u32 reciprocal_elems;
+            //struct flex_array_part成员就是4096大小的一片buf
 			struct flex_array_part *parts[];
 		};
 		/*
 		 * This little trick makes sure that
 		 * sizeof(flex_array) == PAGE_SIZE
 		 */
+		//该数组PAGE_SIZE即4096大小
 		char padding[FLEX_ARRAY_BASE_SIZE];
 	};
 };

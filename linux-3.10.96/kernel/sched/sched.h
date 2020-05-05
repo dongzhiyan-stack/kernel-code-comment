@@ -110,11 +110,12 @@ struct cfs_rq;
 struct rt_rq;
 
 extern struct list_head task_groups;
-
+//进程组带宽控制
 struct cfs_bandwidth {
 #ifdef CONFIG_CFS_BANDWIDTH
 	raw_spinlock_t lock;
-	ktime_t period;
+	ktime_t period;//运行周期
+	//时间配额和运行时间
 	u64 quota, runtime;
 	s64 hierarchal_quota;
 	u64 runtime_expires;
@@ -130,9 +131,16 @@ struct cfs_bandwidth {
 };
 
 /* task group related information */
-//cpu_cgroup_css_alloc()函数中分配,
+
+/*
+cgroup_create()中创建cgroup目录分配，调用cpu cgroup的struct cgroup_subsys结构的cpu_cgroup_css_alloc()
+分配cpu cgroup控制结构task_group,看着像是cpu cgroup下每创建一个目录，都会创建一个task_group呀?????????，应该是的，想想进程组控制不
+也是树状结构，一个进程组必然有一个父亲struct task_group，和调度实体se对应，其下的调度实体se，有的对应实际的进程task_struct，有的
+对应的还是调度组，那这也对应一个struct task_group，然后再从这个struct task_group向下，它的孩子调度实体se，
+有的代表实际的进程，有的代表调度组，又是一个struct task_group
+*/
 struct task_group {
-    //task_group就是靠css与外界联系的。
+    //task_group就是靠css与cgroup联系的，通过container_of(cgroup_subsys_state)，就找到了cpu的struct task_group结构体
 	struct cgroup_subsys_state css;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -174,7 +182,7 @@ struct task_group {
 #ifdef CONFIG_SCHED_AUTOGROUP
 	struct autogroup *autogroup;
 #endif
-    //调度补偿
+    //进程带宽控制
 	struct cfs_bandwidth cfs_bandwidth;
 };
 

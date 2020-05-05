@@ -555,6 +555,7 @@ struct inode {
 	struct posix_acl	*i_default_acl;
 #endif
 
+    //cgroupÊÇcgroup_dir_inode_operationsºÍcgroup_file_inode_operations£¬ÔÚcgroup_create_file()ÖÐÉèÖÃ
 	const struct inode_operations	*i_op;
 	struct super_block	*i_sb;//³¬¼¶¿ì
 	//¿éÉè±¸µÄi_mappingÊÇÔÚblkdev_open->bd_acquire ÖÐ¸³Öµ
@@ -631,7 +632,7 @@ struct inode {
      ¿éÉè±¸×Ö·ûÉè±¸ÔÚshmem_get_inode->init_special_inode¸³Öµ¡£
        ext4ÎÄ¼þÏµÍ³µÄÔÚext4_iget¸³Öµ£
       */
-	const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */
+	const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops *///cgroupÊÇsimple_dir_operations£¬cgroup_create_file()ÖÐÉèÖÃ
 	struct file_lock	*i_flock;
     //mmclbk0p5¿éÉè±¸µÄinodeµÄstruct address_spacede i_dataµÄa_opsÊÇdef_blk_aops£¬bdgetº¯Êý¸³Öµ
 	struct address_space	i_data;
@@ -1287,14 +1288,14 @@ struct super_block {
 	unsigned char		s_blocksize_bits;
 	unsigned long		s_blocksize;
 	loff_t			s_maxbytes;	/* Max file size */
-	struct file_system_type	*s_type;
+	struct file_system_type	*s_type;//ÎÄ¼þÏµÍ³ÀàÐÍ
 	const struct super_operations	*s_op;
 	const struct dquot_operations	*dq_op;
 	const struct quotactl_ops	*s_qcop;
 	const struct export_operations *s_export_op;
 	unsigned long		s_flags;
 	unsigned long		s_magic;
-	struct dentry		*s_root;
+	struct dentry		*s_root;//¶¥²ãÄ¿Â¼µÄdentry½á¹¹
 	struct rw_semaphore	s_umount;
 	int			s_count;
 	atomic_t		s_active;
@@ -1326,7 +1327,7 @@ struct super_block {
 	char s_id[32];				/* Informational name */
 	u8 s_uuid[16];				/* UUID */
 
-	void 			*s_fs_info;	/* Filesystem private info */
+	void 			*s_fs_info;	/* Filesystem private info *///cpu cgroupÀïÖ¸Ïòstruct cgroupfs_root
 	unsigned int		s_max_links;
 	fmode_t			s_mode;
 
@@ -1351,7 +1352,7 @@ struct super_block {
 	 * generic_show_options()
 	 */
 	char __rcu *s_options;
-	const struct dentry_operations *s_d_op; /* default d_op for dentries */
+	const struct dentry_operations *s_d_op; /* default d_op for dentries *///cgroupÊÇcgroup_dops()
 
 	/*
 	 * Saved pool identifier for cleancache (-1 means none)
@@ -1556,11 +1557,12 @@ struct block_device_operations;
  * fields in struct file_operations. */
 #define HAVE_COMPAT_IOCTL 1
 #define HAVE_UNLOCKED_IOCTL 1
-
+//cgroupÏµÍ³µÄÊÇcgroup_file_operations
 struct file_operations {
 	struct module *owner;
 	loff_t (*llseek) (struct file *, loff_t, int);
 	ssize_t (*read) (struct file *, char __user *, size_t, loff_t *);
+    //cgroupÐ´ÎÄ¼þÊ±µ÷ÓÃµÄÊÇcgroup_file_write()
 	ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
 	ssize_t (*aio_read) (struct kiocb *, const struct iovec *, unsigned long, loff_t);
 	ssize_t (*aio_write) (struct kiocb *, const struct iovec *, unsigned long, loff_t);
@@ -1587,7 +1589,7 @@ struct file_operations {
 			  loff_t len);
 	int (*show_fdinfo)(struct seq_file *m, struct file *f);
 };
-
+//cgroup×ÓÏµÍ³µÄÓÐcgroup_dir_inode_operationsºÍcgroup_file_inode_operations
 struct inode_operations {
 	struct dentry * (*lookup) (struct inode *,struct dentry *, unsigned int);
 	void * (*follow_link) (struct dentry *, struct nameidata *);
@@ -1601,6 +1603,7 @@ struct inode_operations {
 	int (*link) (struct dentry *,struct inode *,struct dentry *);
 	int (*unlink) (struct inode *,struct dentry *);
 	int (*symlink) (struct inode *,struct dentry *,const char *);
+    //cgroup´´½¨Ä¿Â¼Ê±Ö´ÐÐµÄÊÇcgroup_mkdir()
 	int (*mkdir) (struct inode *,struct dentry *,umode_t);
 	int (*rmdir) (struct inode *,struct dentry *);
 	int (*mknod) (struct inode *,struct dentry *,umode_t,dev_t);

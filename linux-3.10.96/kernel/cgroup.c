@@ -107,6 +107,9 @@ static struct workqueue_struct *cgroup_destroy_wq;
  */
 #define SUBSYS(_x) [_x ## _subsys_id] = &_x ## _subsys,
 #define IS_SUBSYS_ENABLED(option) IS_BUILTIN(option)
+//struct cgroup_subsys *subsys[]每个数组成员代表一个cgroup系统，比如subsys[2]就是cpu cgroup的struct cgroup_subsys
+//cgroup_subsys.h这个头文件就是包含SUBSYS(cpu_cgroup)、SUBSYS(mem_cgroup)这些限制结构体，
+//展开就是cpu或者mem等的struct cgroup_subsys结构
 static struct cgroup_subsys *subsys[CGROUP_SUBSYS_COUNT] = {
 #include <linux/cgroup_subsys.h>
 };
@@ -121,9 +124,11 @@ static struct cgroupfs_root rootnode;
 /*
  * cgroupfs file entry, pointed to from leaf dentry->d_fsdata.
  */
+//保存了一个cgroup控制文件的基本信息，创建文件时cgroup_add_file()中赋值
 struct cfent {
 	struct list_head		node;
 	struct dentry			*dentry;
+    //指向该文件对应的struct cftype结构，struct cftype包含了该文件的读写控制函数，如echo设置进程运行时间要调用的函数
 	struct cftype			*type;
 
 	/* file xattrs */
@@ -202,6 +207,7 @@ static int next_hierarchy_id;
 static DEFINE_SPINLOCK(hierarchy_id_lock);
 
 /* dummytop is a shorthand for the dummy hierarchy's top cgroup */
+//这应该是所有cgroup系统最底层的cgroup吧???????????
 #define dummytop (&rootnode.top_cgroup)
 
 static struct cgroup_name root_cgroup_name = { .name = "/" };
@@ -321,19 +327,23 @@ static DECLARE_WORK(release_agent_work, cgroup_release_agent);
 static void check_for_release(struct cgroup *cgrp);
 
 /* Link structure for associating css_set objects with cgroups */
+//进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应，find_css_set()函数详细讲解他们的关系
 struct cg_cgroup_link {
 	/*
 	 * List running through cg_cgroup_links associated with a
 	 * cgroup, anchored on cgroup->css_sets
 	 */
+    //struct cg_cgroup_link靠其成员struct list_head cgrp_link_list添加到struct cgroup的css_sets链表，
+    //这样struct cg_cgroup_link与struct cgroup建立联系
 	struct list_head cgrp_link_list;
-	struct cgroup *cgrp;
+	struct cgroup *cgrp;//指向对应的struct cgroup
 	/*
 	 * List running through cg_cgroup_links pointing at a
 	 * single css_set object, anchored on css_set->cg_links
 	 */
+	//struct cg_cgroup_link靠其成员struct list_head cg_link_list添加到到struct css_set的cg_links
 	struct list_head cg_link_list;
-	struct css_set *cg;
+	struct css_set *cg;//指向对应的struct css_set
 };
 
 /* The default css_set - used by init and its children prior to any
@@ -589,6 +599,7 @@ static void free_cg_links(struct list_head *tmp)
  * and chains them on tmp through their cgrp_link_list fields. Returns 0 on
  * success or a negative error
  */
+//分配count个struct cg_cgroup_link并添加到struct list_head链表
 static int allocate_cg_links(int count, struct list_head *tmp)
 {
 	struct cg_cgroup_link *link;
@@ -611,22 +622,29 @@ static int allocate_cg_links(int count, struct list_head *tmp)
  * @cg: the css_set to be linked
  * @cgrp: the destination cgroup
  */
+//对struct cg_cgroup_link关键成员赋值，并添加到struct css_set 和 struct cgroup各自的链表，建立与二者的联系
 static void link_css_set(struct list_head *tmp_cg_links,
 			 struct css_set *cg, struct cgroup *cgrp)
 {
 	struct cg_cgroup_link *link;
 
 	BUG_ON(list_empty(tmp_cg_links));
+    //找到tmp_cg_links链表上第一个struct cg_cgroup_link
 	link = list_first_entry(tmp_cg_links, struct cg_cgroup_link,
 				cgrp_link_list);
+    //link->cg指向本次绑定的struct css_set
 	link->cg = cg;
+    //link->cgrp指向本次绑定的struct cgroup
 	link->cgrp = cgrp;
 	atomic_inc(&cgrp->count);
+    //struct cg_cgroup_link移动到struct cgroup的css_sets链表，因为这里会先把link->cgrp_link_list从原struct cg_cgroup_link的
+    //tmp_cg_links链表删除。下一次执行该函数list_first_entry()返回的实际是原来的第二个struct cg_cgroup_link，其他类推
 	list_move(&link->cgrp_link_list, &cgrp->css_sets);
 	/*
 	 * Always add links to the tail of the list so that the list
 	 * is sorted by order of hierarchy creation
 	 */
+	//struct cg_cgroup_link添加到到struct css_set的cg_links
 	list_add_tail(&link->cg_link_list, &cg->cg_links);
 }
 
@@ -637,6 +655,9 @@ static void link_css_set(struct list_head *tmp_cg_links,
  * substituted into the appropriate hierarchy. Must be called with
  * cgroup_mutex held
  */
+//找到已经存在的struct css_set直接返回。否则，分配新的struct css_set *res和root_count个struct cg_cgroup_link
+//建立新分配的struct css_set *res、新分配的struct cg_cgroup_link、struct css_set *oldcg链表上原有的struct cgroup或者本次
+//建立绑定的struct cgroup *cgrp，三者相互的联系
 static struct css_set *find_css_set(
 	struct css_set *oldcg, struct cgroup *cgrp)
 {
@@ -651,6 +672,8 @@ static struct css_set *find_css_set(
 	/* First see if we already have a cgroup group that matches
 	 * the desired set */
 	read_lock(&css_set_lock);
+    //如果找到已经存在的struct css_set，我觉得struct css_set *oldcg是存在的，
+    //这是试图找到与本次绑定的struct cgroup *cgrp的匹配的struct css_set，一般不会成立的吧????????????????????????????????
 	res = find_existing_css_set(oldcg, cgrp, template);
 	if (res)
 		get_css_set(res);
@@ -658,12 +681,13 @@ static struct css_set *find_css_set(
 
 	if (res)
 		return res;
-
+    //分配struct css_set
 	res = kmalloc(sizeof(*res), GFP_KERNEL);
 	if (!res)
 		return NULL;
 
 	/* Allocate all the cg_cgroup_link objects that we'll need */
+    //分配root_count个struct cg_cgroup_link并添加到struct list_head tmp_cg_links链表
 	if (allocate_cg_links(root_count, &tmp_cg_links) < 0) {
 		kfree(res);
 		return NULL;
@@ -680,10 +704,26 @@ static struct css_set *find_css_set(
 
 	write_lock(&css_set_lock);
 	/* Add reference counts and links from the new css_set. */
+    //遍历struct css_set *oldcg的cg_links链表上的已经存在的struct cg_cgroup_link,通过它找到对应的struct cgroup c，然后
+    //把tmp_cg_links链表上的struct cg_cgroup_link移动到struct cgroup c的css_sets链表，
+    //并把tmp_cg_links链表上的struct cg_cgroup_link添加到struct css_set *res的cg_links链表
+    /*struct css_set *oldcg是该进程之前绑定的struct cgroup(即struct cgroup c)对应的struct css_set，tmp_cg_links链表上的
+     struct cg_cgroup_link和struct css_set *res是本次针对要绑定的进程新分配，下边的执行的link_css_set()是建立进程task_struct与
+     struct cgroup关键一步，令struct cg_cgroup_link指向struct css_set和struct cgroup，
+     并添加到struct css_set 和 struct cgroup各自的链表，建立三者的联系，struct cgroup代表cgroup系统，struct css_set包含在进程
+     task_struct结构中，struct cg_cgroup_link作为中间桥梁连接着struct cgroup和进程task_struct结构。当我要echo > shares设置进程的
+     权重时，先找到该控制文件share的父目录dentry，就找到了该目录的struct cgroup结构，通过struct cgroup结构的css_sets链表找到挂在
+     上边的struct cg_cgroup_link，struct cg_cgroup_link的struct css_set *cg成员就指向对应的struct css_set结构，有了struct css_set,
+     就可以找到进程task_struct结构。
+     */
 	list_for_each_entry(link, &oldcg->cg_links, cg_link_list) {
 		struct cgroup *c = link->cgrp;
+        //如果struct cg_cgroup_link *link指向的struct cgroup与本次要绑定的 struct cgroup *cgrp属于同一个cgroup系统，因为是同一个struct cgroupfs_root
 		if (c->root == cgrp->root)
-			c = cgrp;
+			c = cgrp;//c指向的本次要绑定的struct cgroup
+
+        //对tmp_cg_links链表上新分配的struct cg_cgroup_link关键成员赋值，并添加到struct css_set 和 struct cgroup各自的链表，
+        //建立与二者的联系
 		link_css_set(&tmp_cg_links, res, c);
 	}
 
@@ -704,6 +744,10 @@ static struct css_set *find_css_set(
  * Return the cgroup for "task" from the given hierarchy. Must be
  * called with cgroup_mutex held.
  */
+//找到要绑定的进程task_struct的struct css_set，依次找到css_set的cg_links链表上挂着的struct cg_cgroup_link，看哪个struct cg_cgroup_link
+//对应的struct cgroup与本次绑定的struct cgroup属于同一个cgroup子系统，比较的规则是两个struct cgroup对应的struct cgroupfs_root是否一致
+//其实就是找到返回该进程之前绑定的struct cgroup吧,因为进程绑定struct cgroup后，
+//才会把绑定的struct cgroup添加到task_struct的css_set的cg_links链表
 static struct cgroup *task_cgroup_from_root(struct task_struct *task,
 					    struct cgroupfs_root *root)
 {
@@ -717,11 +761,15 @@ static struct cgroup *task_cgroup_from_root(struct task_struct *task,
 	 * task can't change groups, so the only thing that can happen
 	 * is that it exits and its css is set back to init_css_set.
 	 */
+	//进程原有的struct css_set *css
 	css = task->cgroups;
 	if (css == &init_css_set) {
 		res = &root->top_cgroup;
 	} else {
 		struct cg_cgroup_link *link;
+        //在css->cg_links链表依次遍历struct cg_cgroup_link，每个struct cg_cgroup_link对应一个struct cgroup吧。
+        //看哪个struct cg_cgroup_link对应的struct cgroup的struct cgroupfs_root与传入的一致，就是比较这两个struct cgroup
+        //是否属于同一个cgroup子系统吧??????，这样肯定能找到，因为cgroup子系统就那几个
 		list_for_each_entry(link, &css->cg_links, cg_link_list) {
 			struct cgroup *c = link->cgrp;
 			if (c->root == root) {
@@ -995,16 +1043,18 @@ static void cgroup_d_remove_dir(struct dentry *dentry)
  * any duplicate ones that parse_cgroupfs_options took. If this function
  * returns an error, no reference counts are touched.
  */
+//建立本次的cgroup，cgroupfs_root与subsys[i]和dummytop->subsys[i]的联系，相当于添加本次的cpu cgroup系统到系统?????
 static int rebind_subsystems(struct cgroupfs_root *root,
 			      unsigned long final_subsys_mask)
 {
 	unsigned long added_mask, removed_mask;
+    //cpu cgroup根目录对应的cgroup吧
 	struct cgroup *cgrp = &root->top_cgroup;
 	int i;
 
 	BUG_ON(!mutex_is_locked(&cgroup_mutex));
 	BUG_ON(!mutex_is_locked(&cgroup_root_mutex));
-
+    //该cgroup子系统的add和remove标志位??????
 	removed_mask = root->actual_subsys_mask & ~final_subsys_mask;
 	added_mask = final_subsys_mask & ~root->actual_subsys_mask;
 	/* Check that any added subsystems are currently free */
@@ -1034,17 +1084,21 @@ static int rebind_subsystems(struct cgroupfs_root *root,
 
 	/* Process each subsystem */
 	for (i = 0; i < CGROUP_SUBSYS_COUNT; i++) {
+        //ss来自系统总的subsys[i]结构
 		struct cgroup_subsys *ss = subsys[i];
 		unsigned long bit = 1UL << i;
+        //该cgroup子系统添加到系统?????
 		if (bit & added_mask) {
 			/* We're binding this subsystem to this hierarchy */
 			BUG_ON(ss == NULL);
 			BUG_ON(cgrp->subsys[i]);
 			BUG_ON(!dummytop->subsys[i]);
 			BUG_ON(dummytop->subsys[i]->cgroup != dummytop);
+            //cgroup就是本次的cgroup子系统，比如cpu cgroup，此时cgrp->subsys[i]和dummytop->subsys[i]代表cpu的那个cgroup的吧??????
 			cgrp->subsys[i] = dummytop->subsys[i];
 			cgrp->subsys[i]->cgroup = cgrp;
 			list_move(&ss->sibling, &root->subsys_list);
+            //ss此时应该也指向代表cpu的那个cgroup
 			ss->root = root;
 			if (ss->bind)
 				ss->bind(cgrp);
@@ -1419,7 +1473,7 @@ static void init_cgroup_housekeeping(struct cgroup *cgrp)
 	spin_lock_init(&cgrp->event_list_lock);
 	simple_xattrs_init(&cgrp->xattrs);
 }
-
+//初始化顶层struct cgroup，即struct cgroupfs_root里包含的struct cgroup
 static void init_cgroup_root(struct cgroupfs_root *root)
 {
 	struct cgroup *cgrp = &root->top_cgroup;
@@ -1478,14 +1532,14 @@ static int cgroup_test_super(struct super_block *sb, void *data)
 
 	return 1;
 }
-
+//分配struct cgroupfs_root，初始化顶层struct cgroup，即struct cgroupfs_root里包含的struct cgroup
 static struct cgroupfs_root *cgroup_root_from_opts(struct cgroup_sb_opts *opts)
 {
 	struct cgroupfs_root *root;
 
 	if (!opts->subsys_mask && !opts->none)
 		return NULL;
-
+    //挂载cpu cgroup文件系统时，分配顶层的cgroupfs_root
 	root = kzalloc(sizeof(*root), GFP_KERNEL);
 	if (!root)
 		return ERR_PTR(-ENOMEM);
@@ -1494,6 +1548,7 @@ static struct cgroupfs_root *cgroup_root_from_opts(struct cgroup_sb_opts *opts)
 		kfree(root);
 		return ERR_PTR(-ENOMEM);
 	}
+    //初始化顶层struct cgroup，即struct cgroupfs_root里包含的struct cgroup
 	init_cgroup_root(root);
 
 	root->subsys_mask = opts->subsys_mask;
@@ -1535,7 +1590,7 @@ static int cgroup_set_super(struct super_block *sb, void *data)
 	ret = set_anon_super(sb, NULL);
 	if (ret)
 		return ret;
-
+    //指向struct cgroupfs_root
 	sb->s_fs_info = opts->new_root;
 	opts->new_root->sb = sb;
 
@@ -1553,7 +1608,7 @@ static int cgroup_get_rootdir(struct super_block *sb)
 		.d_iput = cgroup_diput,
 		.d_delete = cgroup_delete,
 	};
-
+    //分配根目录inode
 	struct inode *inode =
 		cgroup_new_inode(S_IFDIR | S_IRUGO | S_IXUGO | S_IWUSR, sb);
 
@@ -1564,6 +1619,7 @@ static int cgroup_get_rootdir(struct super_block *sb)
 	inode->i_op = &cgroup_dir_inode_operations;
 	/* directories start off with i_nlink == 2 (for "." entry) */
 	inc_nlink(inode);
+    //根目录dentry结构
 	sb->s_root = d_make_root(inode);
 	if (!sb->s_root)
 		return -ENOMEM;
@@ -1572,6 +1628,13 @@ static int cgroup_get_rootdir(struct super_block *sb)
 	return 0;
 }
 
+/* cgroup_mount干的事
+ 1 分配struct cgroupfs_root，初始化顶层struct cgroup，即struct cgroupfs_root里包含的struct cgroup
+ 2 cpu cgroup对应的超级快初始化，分配cpu cgroup文件系统的目录dentry和inode
+ 3 建立本次的cgroup、cgroupfs_root与struct cgroup_subsys subsys[i]和dummytop->subsys[i]的联系
+ 4 创建cpu cgroup顶层目录，也就是该文件系统根目录下的基础文件"tasks"等等
+ 5 其他....待续
+*/
 static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 			 int flags, const char *unused_dev_name,
 			 void *data)
@@ -1594,6 +1657,7 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 	 * Allocate a new cgroup root. We may not need it if we're
 	 * reusing an existing hierarchy.
 	 */
+	//分配struct cgroupfs_root，初始化顶层struct cgroup，即struct cgroupfs_root里包含的struct cgroup
 	new_root = cgroup_root_from_opts(&opts);
 	if (IS_ERR(new_root)) {
 		ret = PTR_ERR(new_root);
@@ -1602,18 +1666,20 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 	opts.new_root = new_root;
 
 	/* Locate an existing or new sb for this hierarchy */
+    //cpu cgroup对应的超级快初始化
 	sb = sget(fs_type, cgroup_test_super, cgroup_set_super, 0, &opts);
 	if (IS_ERR(sb)) {
 		ret = PTR_ERR(sb);
 		cgroup_drop_root(opts.new_root);
 		goto drop_modules;
 	}
-
+    //就是刚分配的struct cgroupfs_root，绕来绕去的,cpu cgroup文件系统
 	root = sb->s_fs_info;
 	BUG_ON(!root);
 	if (root == opts.new_root) {
 		/* We used the new root structure, so this is a new hierarchy */
 		struct list_head tmp_cg_links;
+        //cpu cgroup文件系统顶级的目录对应的cgroup
 		struct cgroup *root_cgrp = &root->top_cgroup;
 		struct cgroupfs_root *existing_root;
 		const struct cred *cred;
@@ -1621,10 +1687,11 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		struct css_set *cg;
 
 		BUG_ON(sb->s_root != NULL);
-
+        //分配cpu cgroup文件系统的目录dentry和inode
 		ret = cgroup_get_rootdir(sb);
 		if (ret)
 			goto drop_new_super;
+        //根目录inode
 		inode = sb->s_root->d_inode;
 
 		mutex_lock(&inode->i_mutex);
@@ -1645,10 +1712,12 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		 * that's us. The worst that can happen is that we
 		 * have some link structures left over
 		 */
+		//分配css_set_count个struct cg_cgroup_link，并添加到tmp_cg_links
 		ret = allocate_cg_links(css_set_count, &tmp_cg_links);
 		if (ret)
 			goto unlock_drop;
-
+        //建立本次的cgroup、cgroupfs_root与struct cgroup_subsys subsys[i]和dummytop->subsys[i]的联系，
+        //相当于添加本次的cpu cgroup系统到系统?????
 		ret = rebind_subsystems(root, root->subsys_mask);
 		if (ret == -EBUSY) {
 			free_cg_links(&tmp_cg_links);
@@ -1682,6 +1751,7 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		BUG_ON(root->number_of_cgroups != 1);
 
 		cred = override_creds(&init_cred);
+        //创建cpu cgroup顶层目录---也就是该文件系统根目录下的基础文件"tasks"等等，看到没，这个文件系统在mount时，就创建文件了
 		cgroup_populate_dir(root_cgrp, true, root->subsys_mask);
 		revert_creds(cred);
 		mutex_unlock(&cgroup_root_mutex);
@@ -1918,6 +1988,7 @@ EXPORT_SYMBOL_GPL(cgroup_taskset_size);
  *
  * Must be called with cgroup_mutex and threadgroup locked.
  */
+//建立待绑定进程的struct task_struct结构与绑定的struct css_set的相互联系
 static void cgroup_task_migrate(struct cgroup *oldcgrp,
 				struct task_struct *tsk, struct css_set *newcg)
 {
@@ -1929,16 +2000,18 @@ static void cgroup_task_migrate(struct cgroup *oldcgrp,
 	 * css_set to init_css_set and dropping the old one.
 	 */
 	WARN_ON_ONCE(tsk->flags & PF_EXITING);
+    //之前进程绑定的struct css_set
 	oldcg = tsk->cgroups;
 
 	task_lock(tsk);
+    //就是tsk->cgroups=newcg，task_struct结构的cgroups指针指向本次绑定操作新分配的struct css_set
 	rcu_assign_pointer(tsk->cgroups, newcg);
 	task_unlock(tsk);
 
 	/* Update the css_set linked lists if we're using them */
 	write_lock(&css_set_lock);
 	if (!list_empty(&tsk->cg_list))
-		list_move(&tsk->cg_list, &newcg->tasks);
+		list_move(&tsk->cg_list, &newcg->tasks);//把task_struct结构的cg_list添加到struct css_set的tasks链表
 	write_unlock(&css_set_lock);
 
 	/*
@@ -1964,7 +2037,7 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 {
 	int retval, i, group_size;
 	struct cgroup_subsys *ss, *failed_ss = NULL;
-	struct cgroupfs_root *root = cgrp->root;
+	struct cgroupfs_root *root = cgrp->root;//代表cgroup子系统对应的文件系统
 	/* threadgroup list cursor and array */
 	struct task_struct *leader = tsk;
 	struct task_and_cgroup *tc;
@@ -1982,6 +2055,8 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 		group_size = get_nr_threads(tsk);
 	else
 		group_size = 1;
+    //分配struct flex_array，顺带着分配内存，下边执行flex_array_put()往group指向的struct flex_array填充数据
+    //然后再下边通过flex_array_get()从group指向的struct flex_array取出数据
 	/* flex_array supports very large thread-groups better than kmalloc. */
 	group = flex_array_alloc(sizeof(*tc), group_size, GFP_KERNEL);
 	if (!group)
@@ -2007,15 +2082,23 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 
 		/* as per above, nr_threads may decrease, but not increase. */
 		BUG_ON(i >= group_size);
+        //ent.task保存待绑定进程的task_struct结构
 		ent.task = tsk;
+        
+        //找到要绑定的进程task_struct的struct css_set，依次找到css_set的cg_links链表上挂着的struct cg_cgroup_link，看哪个struct cg_cgroup_link
+        //对应的struct cgroup与本次绑定的struct cgroup属于同一个cgroup子系统。函数返回的就是从cg_cgroup_link找到的struct cgroup
+        //其实就是找到返回该进程之前绑定的struct cgroup吧
 		ent.cgrp = task_cgroup_from_root(tsk, root);
 		/* nothing to do if this task is already in the cgroup */
+        //因为task_cgroup_from_root()只是比较两个是否属于同一个cgroup子系统，所以二者不一定相等
 		if (ent.cgrp == cgrp)
 			goto next;
 		/*
 		 * saying GFP_ATOMIC has no effect here because we did prealloc
 		 * earlier, but it's good form to communicate our expectations.
 		 */
+		//把struct task_and_cgroup ent保存到group指向的struct flex_array，
+		//ent包含了本次待绑定的进程task_struct和该进程之前绑定的struct cgroup
 		retval = flex_array_put(group, i, &ent, GFP_ATOMIC);
 		BUG_ON(retval != 0);
 		i++;
@@ -2026,6 +2109,7 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	rcu_read_unlock();
 	/* remember the number of threads in the array for later. */
 	group_size = i;
+    //tset.tc_array指向新分配的struct flex_array *group
 	tset.tc_array = group;
 	tset.tc_array_len = group_size;
 
@@ -2052,7 +2136,13 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	 * we use find_css_set, which allocates a new one if necessary.
 	 */
 	for (i = 0; i < group_size; i++) {
+        //从group指向的struct flex_array，找到并返回前边保存的struct task_and_cgroup给tc，
+		//tc包含了本次待绑定的进程task_struct和该进程之前绑定的struct cgroup,
+		//tc->cgrp是该进程之前绑定的struct cgroup，tc->task是本次要绑定的进程task结构
 		tc = flex_array_get(group, i);
+        //找到已经存在的struct css_set直接返回。否则，分配新的struct css_set *res和root_count个struct cg_cgroup_link,
+        //建立新分配的struct css_set *res、新分配的struct cg_cgroup_link、struct css_set *tc->task->cgroups链表上原有的struct cgroup
+        //或者本次建立绑定的struct cgroup *cgrp，三者相互的联系。struct css_set、struct cg_cgroup_link、struct cgroup的关系就是在这里完成的。
 		tc->cg = find_css_set(tc->task->cgroups, cgrp);
 		if (!tc->cg) {
 			retval = -ENOMEM;
@@ -2066,7 +2156,11 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	 * failure cases after here, so this is the commit point.
 	 */
 	for (i = 0; i < group_size; i++) {
+        //从group指向的struct flex_array，找到并返回前边保存的struct task_and_cgroup给tc
+        //tc->cgrp是该进程之前绑定的struct cgroup，tc->task是本次要绑定的进程task结构,tc->cg是本次为了绑定操作新分配的struct css_set
 		tc = flex_array_get(group, i);
+        //前边建立了struct css_set、struct cg_cgroup_link、struct cgroup的关系，
+        //这是建立待绑定进程的struct task_struct结构与绑定的struct css_set的相互联系
 		cgroup_task_migrate(tc->cgrp, tc->task, tc->cg);
 	}
 	/* nothing is sensitive to fork() after this point. */
@@ -2075,8 +2169,8 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	 * step 4: do subsystem attach callbacks.
 	 */
 	for_each_subsys(root, ss) {
-		if (ss->attach)
-			ss->attach(cgrp, &tset);
+		if (ss->attach)//调用该cgroup子系统struct cgroup_subsys的atach函数，cpu 子系统时是cpu_cgroup_attach()
+			ss->attach(cgrp, &tset);//进程绑定了新的cpu cgroup，要从之前cpu cgroup清理干净，然后设置进程在新的进程组的关系
 	}
 
 	/*
@@ -2111,7 +2205,7 @@ out_free_group_list:
  * function to attach either it or all tasks in its threadgroup. Will lock
  * cgroup_mutex and threadgroup; may take task_lock of task.
  */
-static int attach_task_by_pid(struct cgroup *cgrp, u64 pid, bool threadgroup)
+static int attach_task_by_pid(struct cgroup *cgrp, u64 pid, bool threadgroup)//threadgroup是false
 {
 	struct task_struct *tsk;
 	const struct cred *cred = current_cred(), *tcred;
@@ -2123,6 +2217,7 @@ static int attach_task_by_pid(struct cgroup *cgrp, u64 pid, bool threadgroup)
 retry_find_task:
 	rcu_read_lock();
 	if (pid) {
+        //通过进程ID获取task_struct结构
 		tsk = find_task_by_vpid(pid);
 		if (!tsk) {
 			rcu_read_unlock();
@@ -2162,7 +2257,7 @@ retry_find_task:
 	rcu_read_unlock();
 
 	threadgroup_lock(tsk);
-	if (threadgroup) {
+	if (threadgroup) {//cpu cgroup绑定进程时不成立
 		if (!thread_group_leader(tsk)) {
 			/*
 			 * a race with de_thread from another thread's exec()
@@ -2324,15 +2419,20 @@ out:
 		kfree(buffer);
 	return retval;
 }
-
+//cgroup 控制文件写函数
 static ssize_t cgroup_file_write(struct file *file, const char __user *buf,
 						size_t nbytes, loff_t *ppos)
 {
+    //通过文件dentry得到struct cfent，再由struct cfent的type得到文件的struct cftype
+    //struct cftype包含了该文件的读写控制函数，如echo设置进程运行时间要调用的write函数
 	struct cftype *cft = __d_cft(file->f_dentry);
+    //通过父目录的dentry获取父目录对应的struct cgroup结构体，这个struct cgroup就代表了这个目录，这一层的控制
 	struct cgroup *cgrp = __d_cgrp(file->f_dentry->d_parent);
-
+    //该cgroup目录不存在
 	if (cgroup_is_removed(cgrp))
 		return -ENODEV;
+    //原来调用的是struct cftype *cft的的写函数,echo设置进程运行时间要调用的write函数是cpu_cfs_quota_write_s64()
+    //echo 123 > tasks写文件或者echo 123 >> task追加文件，绑定进程到cgroup系统，调用的写函数是cgroup_tasks_write()
 	if (cft->write)
 		return cft->write(cgrp, cft, file, buf, nbytes, ppos);
 	if (cft->write_u64 || cft->write_s64)
@@ -2586,7 +2686,7 @@ static const struct inode_operations cgroup_file_inode_operations = {
 
 static const struct inode_operations cgroup_dir_inode_operations = {
 	.lookup = cgroup_lookup,
-	.mkdir = cgroup_mkdir,
+	.mkdir = cgroup_mkdir,//cgroup创建文件时执行
 	.rmdir = cgroup_rmdir,
 	.rename = cgroup_rename,
 	.setxattr = cgroup_setxattr,
@@ -2612,7 +2712,7 @@ static inline struct cftype *__file_cft(struct file *file)
 		return ERR_PTR(-EINVAL);
 	return __d_cft(file->f_dentry);
 }
-
+//分配文件的inode，建立inode和dentry联系
 static int cgroup_create_file(struct dentry *dentry, umode_t mode,
 				struct super_block *sb)
 {
@@ -2622,11 +2722,11 @@ static int cgroup_create_file(struct dentry *dentry, umode_t mode,
 		return -ENOENT;
 	if (dentry->d_inode)
 		return -EEXIST;
-
+    //分配文件的inode
 	inode = cgroup_new_inode(mode, sb);
 	if (!inode)
 		return -ENOMEM;
-
+    //cgroup创建目录时，目录的inode操作函数结构体
 	if (S_ISDIR(mode)) {
 		inode->i_op = &cgroup_dir_inode_operations;
 		inode->i_fop = &simple_dir_operations;
@@ -2645,10 +2745,12 @@ static int cgroup_create_file(struct dentry *dentry, umode_t mode,
 		 */
 		WARN_ON_ONCE(!mutex_trylock(&inode->i_mutex));
 	} else if (S_ISREG(mode)) {
+	    //cgroup创建目录下的控制文件时，目录的inode操作函数结构体
 		inode->i_size = 0;
 		inode->i_fop = &cgroup_file_operations;
 		inode->i_op = &cgroup_file_inode_operations;
 	}
+    //建立inode和dentry联系
 	d_instantiate(dentry, inode);
 	dget(dentry);	/* Extra count - pin the dentry in core */
 	return 0;
@@ -2680,10 +2782,11 @@ static umode_t cgroup_file_mode(const struct cftype *cft)
 
 	return mode;
 }
-
+//以cft指向成员内容，创建cgroup下的文件，常见的"tasks"等等
 static int cgroup_add_file(struct cgroup *cgrp, struct cgroup_subsys *subsys,
-			   struct cftype *cft)
+			   struct cftype *cft)//创建cgroup基本文件时，cft指向struct cftype files[]定义的每个基本文件结构
 {
+    //这应该是cpu cgroup子系统父目录的dentry吧，下边就是在这个dentry下创建子文件"tasks"等等
 	struct dentry *dir = cgrp->dentry;
 	struct cgroup *parent = __d_cgrp(dir);
 	struct dentry *dentry;
@@ -2696,26 +2799,28 @@ static int cgroup_add_file(struct cgroup *cgrp, struct cgroup_subsys *subsys,
 		strcpy(name, subsys->name);
 		strcat(name, ".");
 	}
+    //文件名字，比如"tasks"
 	strcat(name, cft->name);
 
 	BUG_ON(!mutex_is_locked(&dir->d_inode->i_mutex));
-
+    //分配cfe
 	cfe = kzalloc(sizeof(*cfe), GFP_KERNEL);
 	if (!cfe)
 		return -ENOMEM;
-
+    //在父目录base下，查找或者也创建name指定的文件dentry
 	dentry = lookup_one_len(name, dir, strlen(name));
 	if (IS_ERR(dentry)) {
 		error = PTR_ERR(dentry);
 		goto out;
 	}
-
+    //看来cfe保存了一个cgroup文件的基本信息
 	cfe->type = (void *)cft;
 	cfe->dentry = dentry;
 	dentry->d_fsdata = cfe;
 	simple_xattrs_init(&cfe->xattrs);
 
 	mode = cgroup_file_mode(cft);
+    //分配文件的inode，建立inode和dentry联系
 	error = cgroup_create_file(dentry, mode | S_IFREG, cgrp->root->sb);
 	if (!error) {
 		list_add_tail(&cfe->node, &parent->files);
@@ -2726,13 +2831,13 @@ out:
 	kfree(cfe);
 	return error;
 }
-
+//以cft指向成员内容，创建cgroup下的文件，常见的"tasks"等等
 static int cgroup_addrm_files(struct cgroup *cgrp, struct cgroup_subsys *subsys,
 			      struct cftype cfts[], bool is_add)
 {
 	struct cftype *cft;
 	int err, ret = 0;
-
+    //依次取出struct cftype files定义的文件
 	for (cft = cfts; cft->name[0] != '\0'; cft++) {
 		/* does cft->flags tell us to skip this file on @cgrp? */
 		if ((cft->flags & CFTYPE_INSANE) && cgroup_sane_behavior(cgrp))
@@ -2742,7 +2847,8 @@ static int cgroup_addrm_files(struct cgroup *cgrp, struct cgroup_subsys *subsys,
 		if ((cft->flags & CFTYPE_ONLY_ON_ROOT) && cgrp->parent)
 			continue;
 
-		if (is_add) {
+		if (is_add) {//cft指向struct cftype files[]定义的每个基本文件结构
+		    //以cft指向成员内容，创建cgroup下的文件，常见的"tasks"等等
 			err = cgroup_add_file(cgrp, subsys, cft);
 			if (err)
 				pr_warn("cgroup_addrm_files: failed to add %s, err=%d\n",
@@ -3970,6 +4076,7 @@ static int cgroup_clone_children_write(struct cgroup *cgrp,
  */
 /* for hysterical raisins, we can't put this on the older files */
 #define CGROUP_FILE_GENERIC_PREFIX "cgroup."
+//每个cgroup子系统base控制文件是struct cftype files[]
 static struct cftype files[] = {
 	{
 		.name = "tasks",
@@ -4022,12 +4129,14 @@ static struct cftype files[] = {
  * @base_files: true if the base files should be added
  * @subsys_mask: mask of the subsystem ids whose files should be added
  */
+//创建每个cgroup系统共有的基本文件和每个cgroup系统的特有文件
 static int cgroup_populate_dir(struct cgroup *cgrp, bool base_files,
 			       unsigned long subsys_mask)
 {
 	int err;
 	struct cgroup_subsys *ss;
-
+    //从struct cftype files结构体获取基本的文件，比如"task"、"release_agent"等基本文件，
+    //然后在cpu group子系统的目录下下创建这些基本文件
 	if (base_files) {
 		err = cgroup_addrm_files(cgrp, NULL, files, true);
 		if (err < 0)
@@ -4037,9 +4146,12 @@ static int cgroup_populate_dir(struct cgroup *cgrp, bool base_files,
 	/* process cftsets of each subsystem */
 	for_each_subsys(cgrp->root, ss) {
 		struct cftype_set *set;
+        //是当前的cgroup子系统，我猜测因为有cpu、mem等cgroup系统，所以这是创建cpu cgroup的目录时，
+        //这里限定只允许创建cpu cgroup的目录吧???????
 		if (!test_bit(ss->subsys_id, &subsys_mask))
 			continue;
-        //cgroup_addrm_files中创建各个控制文件
+        //cgroup_addrm_files中创建各个控制文件,cgroup中，ss代表的是每个cgroup系统struct cgroup_subsys，
+        //struct cgroup_subsys包含了cgroup系统的操作函数、控制文件，下边看着像是取出其cftsets链表上的控制文件struct cftype_set
 		list_for_each_entry(set, &ss->cftsets, node)
 			cgroup_addrm_files(cgrp, ss, set->cfts, true);
 	}
@@ -4142,7 +4254,7 @@ static long cgroup_create(struct cgroup *parent, struct dentry *dentry,
 	struct super_block *sb = root->sb;
 
 	/* allocate the cgroup and its ID, 0 is reserved for the root */
-    //分配本次的cgroup结构体
+    //分配本次的cgroup结构体，一个目录对应一个struct cgroup
 	cgrp = kzalloc(sizeof(*cgrp), GFP_KERNEL);
 	if (!cgrp)
 		return -ENOMEM;
@@ -4191,13 +4303,14 @@ static long cgroup_create(struct cgroup *parent, struct dentry *dentry,
 
 	for_each_subsys(root, ss) {
 		struct cgroup_subsys_state *css;
-    //创建各个subsys的结构，即task_group，返回该结构的第一个成员struct cgroup_subsys_state css
+    //创建各个subsys的结构，cpu的是task_group，返回task_group结构的第一个成员struct cgroup_subsys_state css
+    //看着像是cpu cgroup下每创建一个目录，都会创建一个task_group呀，其他cgroup系统估计也是这样
 		css = ss->css_alloc(cgrp);//控制cpu是cpu_cgroup_css_alloc()
 		if (IS_ERR(css)) {
 			err = PTR_ERR(css);
 			goto err_free_all;
 		}
-        //初始化css
+        //初始化struct cgroup_subsys_state css
 		init_cgroup_css(css, ss, cgrp);
 		if (ss->use_id) {
 			err = alloc_css_id(ss, parent, cgrp);
@@ -4244,7 +4357,7 @@ static long cgroup_create(struct cgroup *parent, struct dentry *dentry,
 			ss->warned_broken_hierarchy = true;
 		}
 	}
-    //生成该cgroup目录下相关子系统的控制文件
+    //生成该cgroup目录下相关子系统的控制文件，cgroup创建目录时，直接创建文件，不支持上层单独创建文件
 	err = cgroup_populate_dir(cgrp, true, root->subsys_mask);
 	if (err)
 		goto err_destroy;
@@ -4276,9 +4389,10 @@ err_destroy:
 	mutex_unlock(&dentry->d_inode->i_mutex);
 	return err;
 }
-
+//创建目录，cgroup不支持上层创建文件，dir是父目录inode，dentry是新创建的目录的dentry
 static int cgroup_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
+    //通过父目录dentry的d_fsdata成员获取父目录对应的struct cgroup结构体
 	struct cgroup *c_parent = dentry->d_parent->d_fsdata;
 
 	/* the vfs holds inode->i_mutex already */

@@ -50,6 +50,7 @@ extern int proc_cgroup_show(struct seq_file *, void *);
 #define SUBSYS(_x) _x ## _subsys_id,
 enum cgroup_subsys_id {
 #define IS_SUBSYS_ENABLED(option) IS_BUILTIN(option)
+//这个头文件就是包含SUBSYS(cpu_cgroup)、SUBSYS(mem_cgroup)这些限制结构体，
 #include <linux/cgroup_subsys.h>
 #undef IS_SUBSYS_ENABLED
 	CGROUP_BUILTIN_SUBSYS_COUNT,
@@ -59,19 +60,22 @@ enum cgroup_subsys_id {
 #define IS_SUBSYS_ENABLED(option) IS_MODULE(option)
 #include <linux/cgroup_subsys.h>
 #undef IS_SUBSYS_ENABLED
-	CGROUP_SUBSYS_COUNT,
+	CGROUP_SUBSYS_COUNT,//应该是cgroup子系统总的个数吧???就是限制cpu、mem、io的系统。每个系统占一个编号,cpu是2
 };
 #undef SUBSYS
 
 /* Per-subsystem/per-cgroup state maintained by the system. */
-//struct cgroup_subsys_state结构包含在task_group结构体中
-struct cgroup_subsys_state {
+
+//通过struct cgroup的struct cgroup_subsys_state *subsys[cpu_cgroup_subsys_id]成员，得到cpu cgroup对应的
+//struct cgroup_subsys_state结构，再由struct cgroup_subsys_state的container_of操作，得到struct task_group
+//struct cgroup_subsys_state真的是连接struct cgroup、struct task_group的桥梁呀
+struct cgroup_subsys_state {//struct cgroup_subsys_state结构包含在task_group结构体中
 	/*
 	 * The cgroup that this subsystem is attached to. Useful
 	 * for subsystems that want to know about the cgroup
 	 * hierarchy structure
 	 */
-	//指向对应的cgroup结构，cgroup_create->init_cgroup_css()中赋值
+	//指向对应的cgroup结构，创建cgroup目录时执行cgroup_create->init_cgroup_css()中赋值
 	struct cgroup *cgroup;
 
 	/*
@@ -167,7 +171,8 @@ struct cgroup_name {
 	struct rcu_head rcu_head;
 	char name[];
 };
-
+//以cpu cgroup为例，顶层的控制目录cpu，就对应一个struct cgroup吧?????????然后在这个目录mkdir test目录，应该又会创建一个struct cgroup
+//最顶层的cgroup结构包含在struct cgroupfs_root里
 struct cgroup {
 	unsigned long flags;		/* "unsigned long" so bitops work */
 
@@ -175,7 +180,7 @@ struct cgroup {
 	 * count users of this cgroup. >0 means busy, but doesn't
 	 * necessarily indicate the number of tasks in the cgroup
 	 */
-	atomic_t count;
+	atomic_t count;//cgroup引用计数
 
 	int id;				/* ida allocated in-hierarchy ID */
 
@@ -186,8 +191,9 @@ struct cgroup {
 	struct list_head sibling;	/* my parent's children */
 	struct list_head children;	/* my children */
 	struct list_head files;		/* my files */
-
+    //父struct cgroup结构，一个目录对应一个struct cgroup结构，父子目录的struct cgroup结构彼此构成联系
 	struct cgroup *parent;		/* my parent */
+    //每一层cgroup目录的dentry，如果是顶层的cgroup，那就是cpu cgroup子系统根目录的dentry
 	struct dentry *dentry;		/* cgroup fs entry, RCU protected */
 
 	/*
@@ -204,14 +210,22 @@ struct cgroup {
 	struct cgroup_name __rcu *name;
 
 	/* Private pointers for each registered subsystem */
+  //创建cgroup目录时执行cgroup_create->init_cgroup_css()中赋值,只赋值该cgroup系统的，比如当前是cpu cgroup，
+  //则只会subsys[2]= struct cgroup_subsys_state *css，其他struct cgroup_subsys_state *subsys[]估计都是NULL，浪费了
+  //通过struct cgroup_subsys_state *subsys[x]找到实际的控制实体，比如限制CPU的struct task_group结构体
+  //比如这个cgroup代表cpu cgroup，假设cpu cgroup在该数组的下标是2，则subsys[2]这个struct cgroup_subsys_state就代表cpu的
+  //通过container_of(cgroup_subsys_state)，就找到了cpu的struct task_group结构体
 	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
 
-	struct cgroupfs_root *root;//
+	struct cgroupfs_root *root;//每个cgroup系统一个struct cgroupfs_root，就像根目录dentry一样
 
 	/*
 	 * List of cg_cgroup_links pointing at css_sets with
 	 * tasks in this cgroup. Protected by css_set_lock
 	 */
+	//struct cg_cgroup_link靠其成员struct list_head cgrp_link_list添加到struct cgroup的css_sets链表，
+    //这样struct cg_cgroup_link与struct cgroup建立的联系。find_css_set()函数详细讲解他们的关系。
+    //进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应
 	struct list_head css_sets;
 
 	struct list_head allcg_node;	/* cgroupfs_root->allcg_list */
@@ -309,7 +323,7 @@ struct cgroupfs_root {
 	struct list_head subsys_list;
 
 	/* The root cgroup for this hierarchy */
-	struct cgroup top_cgroup;
+	struct cgroup top_cgroup;//顶层的cgroup
 
 	/* Tracks how many cgroups are currently defined in hierarchy.*/
 	int number_of_cgroups;
@@ -340,7 +354,8 @@ struct cgroupfs_root {
  * list_add()/del() can bump the reference count on the entire cgroup
  * set for a task.
  */
-
+//进程绑定struct cgroup后，会把绑定的struct cgroup对应的struct cg_cgroup_link添加到
+//task_struct的struct css_set  *cgroups的cg_links链表
 struct css_set {
 
 	/* Reference count */
@@ -356,6 +371,8 @@ struct css_set {
 	 * List running through all tasks using this cgroup
 	 * group. Protected by css_set_lock
 	 */
+	//进程绑定cgroup时，cgroup_attach_task->cgroup_task_migrate函数中，把task_struct结构的cg_list添加到struct css_set的tasks链表
+    //而之前task_struct结构的struct css_set __rcu *cgroups指向这个struct css_set结构，相互连接，这关系真是错综复杂呀
 	struct list_head tasks;
 
 	/*
@@ -363,7 +380,12 @@ struct css_set {
 	 * cgroups referenced from this css_set. Protected by
 	 * css_set_lock
 	 */
-	struct list_head cg_links;
+ //进程绑定struct cgroup后，会把绑定的struct cgroup对应的struct cg_cgroup_link添加到task_struct的struct css_set  *cgroups的cg_links链表
+ //struct cg_cgroup_link靠其成员struct list_head cg_link_list添加到struct css_set的cg_links，这样struct cg_cgroup_link
+ //和struct css_set建立了联系。进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应
+// find_css_set()函数详细讲解他们的关系
+
+   struct list_head cg_links;
 
 	/*
 	 * Set of subsystem states, one for each subsystem. This array
@@ -401,7 +423,9 @@ struct cgroup_map_cb {
 #define CFTYPE_INSANE		(1U << 2)	/* don't create if sane_behavior */
 
 #define MAX_CFTYPE_NAME		64
-
+//代表cgroup下的一个文件，比如cpu cgroup每个目录的基本文件"tasks"，控制进程运行时间的cfs_quota_us和cpu_cfs_period文件
+//struct cftype包含了该文件的读写控制函数，如echo设置进程运行时间要调用的write函数
+//cpu cgroup特有的控制文件包含在struct cftype cpu_files[]，每个cgroup子系统base控制文件是struct cftype files[]
 struct cftype {
 	/*
 	 * By convention, the name should begin with the name of the
@@ -424,7 +448,7 @@ struct cftype {
 
 	/* CFTYPE_* flags */
 	unsigned int flags;
-
+    //cfs_quota_us、cpu_cfs_period这些文件的open
 	int (*open)(struct inode *inode, struct file *file);
 	ssize_t (*read)(struct cgroup *cgrp, struct cftype *cft,
 			struct file *file,
@@ -433,6 +457,7 @@ struct cftype {
 	 * read_u64() is a shortcut for the common case of returning a
 	 * single integer. Use it in place of read()
 	 */
+     //cfs_quota_us、cpu_cfs_period这些文件的read
 	u64 (*read_u64)(struct cgroup *cgrp, struct cftype *cft);
 	/*
 	 * read_s64() is a signed version of read_u64()
@@ -462,6 +487,7 @@ struct cftype {
 	 * a single integer (as parsed by simple_strtoull) from
 	 * userspace. Use in place of write(); return 0 or error.
 	 */
+	//cfs_quota_us、cpu_cfs_period这些文件的write
 	int (*write_u64)(struct cgroup *cgrp, struct cftype *cft, u64 val);
 	/*
 	 * write_s64() is a signed version of write_u64()
@@ -573,8 +599,12 @@ int cgroup_taskset_size(struct cgroup_taskset *tset);
  * Control Group subsystem type.
  * See Documentation/cgroups/cgroups.txt for details
  */
-
+//struct cgroup_subsys *subsys[]每个数组成员代表一个cgroup系统，比如subsys[2]就是cpu cgroup的struct cgroup_subsys
+//该结构与cgroup建立联系是在mount过程的rebind_subsystems()
+//cpu cgroup的是struct cgroup_subsys cpu_cgroup_subsys，这个结构包含了该子系统的基本操作函数、ID、控制文件信息
 struct cgroup_subsys {
+    //cgroup_create()中创建cgroup目录分配，调用cpu cgroup的struct cgroup_subsys结构的cpu_cgroup_css_alloc()函数
+    //分配cpu cgroup控制结构task_group,看着像是cpu cgroup下每创建一个目录，都会创建一个task_group呀
 	struct cgroup_subsys_state *(*css_alloc)(struct cgroup *cgrp);
 	int (*css_online)(struct cgroup *cgrp);
 	void (*css_offline)(struct cgroup *cgrp);
@@ -588,7 +618,7 @@ struct cgroup_subsys {
 		     struct task_struct *task);
 	void (*bind)(struct cgroup *root);
 
-	int subsys_id;
+	int subsys_id;// subsys id 子系统的ID，应该就是cpu、mem这些cgroup系统都独有的编号，cpu的好像是2
 	int disabled;
 	int early_init;
 	/*
@@ -626,11 +656,11 @@ struct cgroup_subsys {
 	spinlock_t id_lock;
 
 	/* list of cftype_sets */
-	struct list_head cftsets;
-
+	struct list_head cftsets;// cftype结构体链表
+	
 	/* base cftypes, automatically [de]registered with subsys itself */
-	struct cftype *base_cftypes;
-	struct cftype_set base_cftset;
+	struct cftype *base_cftypes;//代表cgroup系统目录下的基本文件吧???
+	struct cftype_set base_cftset;//这个也代表cgroup系统目录下的基本文件吧
 
 	/* should be defined only by modular subsystems */
 	struct module *module;
@@ -641,7 +671,8 @@ struct cgroup_subsys {
 #include <linux/cgroup_subsys.h>
 #undef IS_SUBSYS_ENABLED
 #undef SUBSYS
-
+//通过struct cgroup的struct cgroup_subsys_state *subsys[cpu_cgroup_subsys_id]成员，得到cpu cgroup对应的
+//struct cgroup_subsys_state结构
 static inline struct cgroup_subsys_state *cgroup_subsys_state(
 	struct cgroup *cgrp, int subsys_id)
 {

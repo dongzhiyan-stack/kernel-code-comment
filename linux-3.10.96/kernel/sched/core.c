@@ -7340,6 +7340,7 @@ void sched_offline_group(struct task_group *tg)
  *	by now. This function just updates tsk->se.cfs_rq and tsk->se.parent to
  *	reflect its new group.
  */
+//进程绑定了新的cpu cgroup，要从之前cpu cgroup清理干净，然后设置进程在新的进程组的关系
 void sched_move_task(struct task_struct *tsk)
 {
 	struct task_group *tg;
@@ -7348,32 +7349,33 @@ void sched_move_task(struct task_struct *tsk)
 	struct rq *rq;
 
 	rq = task_rq_lock(tsk, &flags);
-
+    //进程是否在当前的的cpu运行队列上正在运行
 	running = task_current(rq, tsk);
 	on_rq = tsk->on_rq;
 
-	if (on_rq)
+	if (on_rq)//在运行队列就出队列
 		dequeue_task(rq, tsk, 0);
 	if (unlikely(running))
-		tsk->sched_class->put_prev_task(rq, tsk);
-
+		tsk->sched_class->put_prev_task(rq, tsk);//cfs的
+    //进程所属的struct task_group，这是进程新绑定的那个struct cgroup吧
 	tg = container_of(task_subsys_state_check(tsk, cpu_cgroup_subsys_id,
 				lockdep_is_held(&tsk->sighand->siglock)),
 			  struct task_group, css);
 	tg = autogroup_task_group(tsk, tg);
-	tsk->sched_task_group = tg;
+	tsk->sched_task_group = tg;//进程所属进程组
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	if (tsk->sched_class->task_move_group)
 		tsk->sched_class->task_move_group(tsk, on_rq);
 	else
 #endif
+        //进程所属的se的cfs运行队列、se的parent赋值
 		set_task_rq(tsk, task_cpu(tsk));
 
 	if (unlikely(running))
 		tsk->sched_class->set_curr_task(rq);
 	if (on_rq)
-		enqueue_task(rq, tsk, 0);
+		enqueue_task(rq, tsk, 0);//进程换了进程组，这是要在新的进程组入队吧
 
 	task_rq_unlock(rq, tsk, &flags);
 }
@@ -7680,12 +7682,15 @@ int sched_rt_handler(struct ctl_table *table, int write,
 #ifdef CONFIG_CGROUP_SCHED
 
 /* return corresponding task_group object of a cgroup */
+//通过struct cgroup的struct cgroup_subsys_state *subsys[cpu_cgroup_subsys_id]成员，得到cpu cgroup对应的
+//struct cgroup_subsys_state结构，再由struct cgroup_subsys_state的container_of操作，得到struct task_group
+//struct cgroup_subsys_state真的是连接struct cgroup、struct task_group的桥梁呀
 static inline struct task_group *cgroup_tg(struct cgroup *cgrp)
 {
 	return container_of(cgroup_subsys_state(cgrp, cpu_cgroup_subsys_id),
 			    struct task_group, css);
 }
-
+//创建cpu cgroup具体的控制单元task_group,像是cpu cgroup下每创建一个目录，都会创建一个task_group呀?????????
 static struct cgroup_subsys_state *cpu_cgroup_css_alloc(struct cgroup *cgrp)
 {
 	struct task_group *tg, *parent;
@@ -7749,12 +7754,12 @@ static int cpu_cgroup_can_attach(struct cgroup *cgrp,
 	}
 	return 0;
 }
-
+//sched_move_task
 static void cpu_cgroup_attach(struct cgroup *cgrp,
 			      struct cgroup_taskset *tset)
 {
 	struct task_struct *task;
-
+//进程绑定了新的cpu cgroup，要从之前cpu cgroup清理干净，然后设置进程在新的进程组的关系,cgroup_taskset_for_each是什么意思??????????
 	cgroup_taskset_for_each(task, cgrp, tset)
 		sched_move_task(task);
 }
@@ -7834,6 +7839,7 @@ static int tg_set_cfs_bandwidth(struct task_group *tg, u64 period, u64 quota)
 	if (runtime_enabled && !runtime_was_enabled)
 		cfs_bandwidth_usage_inc();
 	raw_spin_lock_irq(&cfs_b->lock);
+    //进程组的运行周期和时间配额设置到进程组的struct task_group的cfs_bandwidth
 	cfs_b->period = ns_to_ktime(period);
 	cfs_b->quota = quota;
 
@@ -7865,11 +7871,11 @@ out_unlock:
 
 	return ret;
 }
-
+//设置进程组struct task_group的运行时间配额，这是整个调度组里所有调度实体的运行时间总额吧????????
 int tg_set_cfs_quota(struct task_group *tg, long cfs_quota_us)
 {
 	u64 quota, period;
-
+    //进程组的运行时间
 	period = ktime_to_ns(tg->cfs_bandwidth.period);
 	if (cfs_quota_us < 0)
 		quota = RUNTIME_INF;
@@ -8054,19 +8060,19 @@ static u64 cpu_rt_period_read_uint(struct cgroup *cgrp, struct cftype *cft)
 static struct cftype cpu_files[] = {
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	{
-		.name = "shares",
+		.name = "shares",//进程权重
 		.read_u64 = cpu_shares_read_u64,
 		.write_u64 = cpu_shares_write_u64,
 	},
 #endif
 #ifdef CONFIG_CFS_BANDWIDTH
 	{
-		.name = "cfs_quota_us",
+		.name = "cfs_quota_us",//cfs进程配额
 		.read_s64 = cpu_cfs_quota_read_s64,
 		.write_s64 = cpu_cfs_quota_write_s64,
 	},
 	{
-		.name = "cfs_period_us",
+		.name = "cfs_period_us",//cfs进程运行周期
 		.read_u64 = cpu_cfs_period_read_u64,
 		.write_u64 = cpu_cfs_period_write_u64,
 	},
@@ -8092,15 +8098,15 @@ static struct cftype cpu_files[] = {
 
 struct cgroup_subsys cpu_cgroup_subsys = {
 	.name		= "cpu",
-	.css_alloc	= cpu_cgroup_css_alloc,
+	.css_alloc	= cpu_cgroup_css_alloc,//创建cpu cgroup具体的控制单元task_group
 	.css_free	= cpu_cgroup_css_free,
 	.css_online	= cpu_cgroup_css_online,
 	.css_offline	= cpu_cgroup_css_offline,
 	.can_attach	= cpu_cgroup_can_attach,
 	.attach		= cpu_cgroup_attach,
 	.exit		= cpu_cgroup_exit,
-	.subsys_id	= cpu_cgroup_subsys_id,
-	.base_cftypes	= cpu_files,
+	.subsys_id	= cpu_cgroup_subsys_id,//原来cpu cgroup子系统的id是cpu_cgroup_subsys_id
+	.base_cftypes	= cpu_files,//cpu cgroup子系统的控制文件操作函数
 	.early_init	= 1,
 };
 

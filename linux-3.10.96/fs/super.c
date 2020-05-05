@@ -434,6 +434,7 @@ struct super_block *sget(struct file_system_type *type,
 
 retry:
 	spin_lock(&sb_lock);
+    //这应该是是检测是否已经分配过super_block了
 	if (test) {
 		hlist_for_each_entry(old, &type->fs_supers, s_instances) {
 			if (!test(old, data))
@@ -448,6 +449,7 @@ retry:
 			return old;
 		}
 	}
+    //分配超级块
 	if (!s) {
 		spin_unlock(&sb_lock);
 		s = alloc_super(type, flags);
@@ -465,6 +467,7 @@ retry:
 	}
 	s->s_type = type;
 	strlcpy(s->s_id, type->name, sizeof(s->s_id));
+    //加入超级快链表
 	list_add_tail(&s->s_list, &super_blocks);
 	hlist_add_head(&s->s_instances, &type->fs_supers);
 	spin_unlock(&sb_lock);

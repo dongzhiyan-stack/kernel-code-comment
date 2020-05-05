@@ -27,6 +27,7 @@
 #include <linux/reciprocal_div.h>
 
 struct flex_array_part {
+    //PAGE_SIZE即4096大小
 	char elements[FLEX_ARRAY_PART_SIZE];
 };
 
@@ -94,6 +95,7 @@ struct flex_array *flex_array_alloc(int element_size, unsigned int total,
 	int max_size = 0;
 
 	if (element_size) {
+        //即4096/element_size
 		elems_per_part = FLEX_ARRAY_ELEMENTS_PER_PART(element_size);
 		reciprocal_elems = reciprocal_value(elems_per_part);
 		max_size = FLEX_ARRAY_NR_BASE_PTRS * elems_per_part;
@@ -102,6 +104,7 @@ struct flex_array *flex_array_alloc(int element_size, unsigned int total,
 	/* max_size will end up 0 if element_size > PAGE_SIZE */
 	if (total > max_size)
 		return NULL;
+    //只是分配struct flex_array结构
 	ret = kzalloc(sizeof(struct flex_array), flags);
 	if (!ret)
 		return NULL;
@@ -109,6 +112,7 @@ struct flex_array *flex_array_alloc(int element_size, unsigned int total,
 	ret->total_nr_elements = total;
 	ret->elems_per_part = elems_per_part;
 	ret->reciprocal_elems = reciprocal_elems;
+    //ret->parts[0]才是真正的内存
 	if (elements_fit_in_base(ret) && !(flags & __GFP_ZERO))
 		memset(&ret->parts[0], FLEX_ARRAY_FREE,
 						FLEX_ARRAY_BASE_BYTES_LEFT);
@@ -307,6 +311,7 @@ EXPORT_SYMBOL(flex_array_prealloc);
  *
  * Locking must be provided by the caller.
  */
+//就是从struct flex_array *fa数组根据element_nr编号取出对应下标的数据吧
 void *flex_array_get(struct flex_array *fa, unsigned int element_nr)
 {
 	int part_nr = 0;

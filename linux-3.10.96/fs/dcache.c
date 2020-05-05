@@ -1490,7 +1490,7 @@ struct dentry *d_instantiate_unique(struct dentry *entry, struct inode *inode)
 }
 
 EXPORT_SYMBOL(d_instantiate_unique);
-
+//·ÖÅä¸ùÄ¿Â¼dentry
 struct dentry *d_make_root(struct inode *root_inode)
 {
 	struct dentry *res = NULL;

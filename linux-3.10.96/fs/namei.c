@@ -2174,6 +2174,7 @@ static struct dentry *lookup_hash(struct nameidata *nd)
  * nameidata argument is passed to the filesystem methods and a filesystem
  * using this helper needs to be prepared for that.
  */
+//在父目录base下，查找或者也创建name命令的文件dentry
 struct dentry *lookup_one_len(const char *name, struct dentry *base, int len)
 {
 	struct qstr this;
@@ -2211,7 +2212,7 @@ struct dentry *lookup_one_len(const char *name, struct dentry *base, int len)
 	err = inode_permission(base->d_inode, MAY_EXEC);
 	if (err)
 		return ERR_PTR(err);
-
+    //查找或者创建name文件，base是父目录dentry
 	return __lookup_hash(&this, base, 0);
 }
 

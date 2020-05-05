@@ -125,6 +125,8 @@ struct dentry {
 	const struct dentry_operations *d_op;
 	struct super_block *d_sb;	/* The root of the dentry tree */
 	unsigned long d_time;		/* used by d_revalidate */
+    //cgroup情况，当dentry代表目录时，指向该目录对应的struct cgroup结构，当dentry代表控制文件，指向控制文件对应的struct cfent结构
+    //
 	void *d_fsdata;			/* fs-specific data */
 
 	struct list_head d_lru;		/* LRU list */

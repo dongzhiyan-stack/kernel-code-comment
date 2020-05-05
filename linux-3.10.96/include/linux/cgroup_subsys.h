@@ -20,7 +20,7 @@ SUBSYS(debug)
 /* */
 
 #if IS_SUBSYS_ENABLED(CONFIG_CGROUP_SCHED)
-SUBSYS(cpu_cgroup)
+SUBSYS(cpu_cgroup)//限制CPU
 #endif
 
 /* */
@@ -32,7 +32,7 @@ SUBSYS(cpuacct)
 /* */
 
 #if IS_SUBSYS_ENABLED(CONFIG_MEMCG)
-SUBSYS(mem_cgroup)
+SUBSYS(mem_cgroup)//限制mem
 #endif
 
 /* */
