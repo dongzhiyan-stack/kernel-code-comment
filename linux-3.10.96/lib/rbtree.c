@@ -440,7 +440,7 @@ struct rb_node *rb_last(const struct rb_root *root)
 	return n;
 }
 EXPORT_SYMBOL(rb_last);
-
+//取出树结构上node节点的下一个节点
 struct rb_node *rb_next(const struct rb_node *node)
 {
 	struct rb_node *parent;
@@ -467,6 +467,9 @@ struct rb_node *rb_next(const struct rb_node *node)
 	 * parent, keep going up. First time it's a left-hand child of its
 	 * parent, said parent is our 'next' node.
 	 */
+	/*
+     如果node没有右节点，取出node的父节点，再node == parent->rb_right取出父节点的右节点
+     */
 	while ((parent = rb_parent(node)) && node == parent->rb_right)
 		node = parent;
 

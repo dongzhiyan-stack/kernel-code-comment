@@ -984,8 +984,9 @@ struct sched_entity {
 	struct rb_node		run_node;
     //所在进程组
 	struct list_head	group_node;
-    //是否处于红黑树运行队列上
-	unsigned int		on_rq;
+    //是否处于红黑树运行队列上，on_rq清0，对应进程要休眠了，移除调度队列。dequeue_task->dequeue_task_fair->dequeue_entity 出队时清0
+    //进程入队时nqueue_task->enqueue_task_fair->enqueue_entity 置1，此时只是进程入队呀，并不代表进程在运行呀，有点奇怪????????????
+    unsigned int		on_rq;
 
 	u64			exec_start;//开始运行时间
 	u64			sum_exec_runtime;//总的运行时间
@@ -1339,7 +1340,9 @@ struct task_struct {
 	/* Control Group info protected by css_set_lock */
     //进程绑定struct cgroup后，会把绑定的struct cgroup对应的struct cg_cgroup_link添加到task_struct的struct css_set  *cgroups的cg_links链表
     //进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应。find_css_set()函数详细讲解他们的关系
-	struct css_set __rcu *cgroups;//进程task_struct结构通过此struct css_set *cgroups添加到cgroup系统，通过它就能找到进程绑定的struct css_set
+    //然后每个struct cgroup又与task_cgroup或者mem_cgroup控制单元一一对应，这样通过每个进程的task_struct
+    //结构就能找到这个进程绑定的task_cgroup或者mem_cgroup控制单元
+    struct css_set __rcu *cgroups;//进程task_struct结构通过此struct css_set *cgroups添加到cgroup系统，通过它就能找到进程绑定的struct css_set
 
     /* cg_list protected by css_set_lock and tsk->alloc_lock */
     //进程绑定cgroup时，cgroup_attach_task->cgroup_task_migrate函数中，把task_struct结构的cg_list添加到struct css_set的tasks链表
@@ -1436,7 +1439,7 @@ struct task_struct {
 	} memcg_batch;
 	unsigned int memcg_kmem_skip_account;
 	struct memcg_oom_info {
-		struct mem_cgroup *memcg;
+		struct mem_cgroup *memcg;//当前进程处于memcg OOM，应该指向这个memcg
 		gfp_t gfp_mask;
 		int order;
 		unsigned int may_oom:1;

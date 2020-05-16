@@ -766,14 +766,14 @@ static void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	update_rq_clock(rq);
 	sched_info_queued(p);
-	p->sched_class->enqueue_task(rq, p, flags);
+	p->sched_class->enqueue_task(rq, p, flags);//enqueue_task_fair
 }
 
 static void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	update_rq_clock(rq);
 	sched_info_dequeued(p);
-	p->sched_class->dequeue_task(rq, p, flags);
+	p->sched_class->dequeue_task(rq, p, flags);//dequeue_task_fair
 }
 
 void activate_task(struct rq *rq, struct task_struct *p, int flags)
@@ -2888,7 +2888,7 @@ static void put_prev_task(struct rq *rq, struct task_struct *prev)
 {
 	if (prev->on_rq || rq->skip_clock_update < 0)
 		update_rq_clock(rq);
-	prev->sched_class->put_prev_task(rq, prev);
+	prev->sched_class->put_prev_task(rq, prev);//put_prev_task_fair
 }
 
 /*
@@ -2987,11 +2987,15 @@ need_resched:
 	raw_spin_lock_irq(&rq->lock);
 
 	switch_count = &prev->nivcsw;
+    //如果进程时主动休眠，没有资源抢占
 	if (prev->state && !(preempt_count() & PREEMPT_ACTIVE)) {
+        //如果进程有信号要处理，进程状态设置成RUNNING，并且不会被踢出运行队列
 		if (unlikely(signal_pending_state(prev->state, prev))) {
 			prev->state = TASK_RUNNING;
 		} else {
-			deactivate_task(rq, prev, DEQUEUE_SLEEP);
+		//否则，把prev进程移除运行队列0
+			deactivate_task(rq, prev, DEQUEUE_SLEEP);//入队的函数是 enqueue_task
+            //prev->on_rq清0表示该进程不在运行队列中了
 			prev->on_rq = 0;
 
 			/*
@@ -3016,9 +3020,12 @@ need_resched:
 	if (unlikely(!rq->nr_running))
 		idle_balance(cpu, rq);
 
-    //put_prev_task_fair  把prev放到运行队列尾部
+    //put_prev_task_fair  把prev放到运行队列尾部。更关键的是，se=se->parent把每一层运行队列 cfs_rq->curr=NULL，也就是说
+    //从prev向上依次找到每一层运行队列，都cfs_rq->curr=NULL，表示该队列上没有运行的调度实体，紧接着在pick_next_task()
+    //会重新设置cfs_rq->curr指向新的调度实体
 	put_prev_task(rq, prev);
-	next = pick_next_task(rq);//选择下一个调度进程 pick_next_task_fair
+    //选择下一个调度进程,并且设置该进程所在运行队列树种，每一层调度队列 cfs_rq->curr=se 指向选中要运行的调度实体
+	next = pick_next_task(rq);// pick_next_task_fair
 	clear_tsk_need_resched(prev);//清除需要调度标志位
 	rq->skip_clock_update = 0;
     //新选出的进程next与老的进程prev不是同一个才会调度

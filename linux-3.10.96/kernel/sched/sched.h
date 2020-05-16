@@ -264,8 +264,13 @@ struct cfs_bandwidth { };
 struct cfs_rq {
     //cfs运行队列中所有进程/进程组的总负载
 	struct load_weight load;
-    //nr_running队列中调度实体的个数，h_nr_running只对进程组有效，其下所有进程组的cfs_rq
-    //的nr_running之和
+    //nr_running只是该队列中调度实体的个数。而h_nr_running其下所有进程组的cfs_rq的nr_running之和。
+
+    //dequeue_task->dequeue_task_fair 进程出队时，cfs_rq->h_nr_running--，se所在进程树，每一层运行队列都减1.
+    //入队时enqueue_task->enqueue_task_fair se所在进程树，每一层运行队列都cfs_rq->h_nr_running++。
+
+    //dequeue_task->dequeue_task_fair->dequeue_entity->account_entity_dequeue() nr_running--
+    //enqueue_task->enqueue_task_fair->enqueue_entity->account_entity_enqueue() nr_running++
 	unsigned int nr_running, h_nr_running;
     //cfs_rq的active 时间
 	u64 exec_clock;
@@ -285,12 +290,16 @@ struct cfs_rq {
 	 */
 	 
 	/*
-     * curr: 当前正在运行的sched_entity（对于组虽然它不会在cpu上运行，但是当它的下层有一个task在cpu上运行，那么它所在的cfs_rq就把它当做是该cfs_rq上当
-前正在运行的sched_entity）
-     * next: 表示有些进程急需运行，即使不遵从CFS调度也必须运行它，调度时会检查是
+     * curr: 当前正在运行的sched_entity，如果se代表调度组，那它代表的调度队列有必然有个se正在运行。也就是说，curr指向的se，
+      要么它代表的进程正在当前进程上运行，或者它是进程组，这个进程组上，有个子se正在运行 pick_next_task_fair->set_next_entity()中设置
+    */
+    
+  /*    
+     * next: 表示有些进程急需运行，即使不遵从CFS调度也必须运行它，调度时会检查是  set_next_buddy()中设置
 否next需要调度，有就调度next
 */
-//skip,放弃执行的进程放到队列的skip标志位，感觉像是主动sleep的进程行为，看yield_task_fair
+//skip,放弃执行的进程放到队列的skip标志位，感觉像是主动sleep的进程行为，看yield_task_fair，set_skip_buddy()中设置
+//curr:put_prev_entity()中cfs_rq->curr = NULL    pick_next_task_fair->set_next_entity 设置curr指向选中的马上要运行的se
 	struct sched_entity *curr, *next, *last, *skip;
 
 #ifdef	CONFIG_SCHED_DEBUG
@@ -442,6 +451,9 @@ struct rq {
 	 * remote CPUs use both these fields when doing load calculation.
 	 */
 	/*这个rq里面存在多少个running task，包括RT，fair，DL sched class的task*/
+    //dequeue_task->dequeue_task_fair进程出队时，nr_running--，这表示当前cpu所在队列中正在运行的进程数减1
+    //enqueue_task->enqueue_task_fair进程入队时，nr_running++，这表示当前cpu所在队列中正在运行的进程数加1，有点奇怪了，入队并不
+    //代表该进程马上要运行呀，这顶多算是cfs队列多了一个待运行的进程
 	unsigned int nr_running;
 	#define CPU_LOAD_IDX_MAX 5
 	unsigned long cpu_load[CPU_LOAD_IDX_MAX];
@@ -462,7 +474,7 @@ struct rq {
 	unsigned long nr_load_updates;
     /*进程发生上下文切换的次数，只有proc 文件系统里面会导出这个统计数值*/ 
 	u64 nr_switches;
-    /*每个cpu上的rq，都包含了cfs_rq,rt_rq和dl_rq调度队列，包含红黑树的根*/
+    /*每个cpu上的rq，都包含了cfs_rq,rt_rq和dl_rq调度队列，包含红黑树的根，这个调度队列是顶层的cfs调度队列*/
 	struct cfs_rq cfs;
 	struct rt_rq rt;
 

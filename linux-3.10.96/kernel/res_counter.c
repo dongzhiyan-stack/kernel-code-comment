@@ -26,14 +26,14 @@ int res_counter_charge_locked(struct res_counter *counter, unsigned long val,
 			      bool force)
 {
 	int ret = 0;
-
+    //如果memcg已经使用的内存加上本次增加的大于限制，就返回NOMEM
 	if (counter->usage + val > counter->limit) {
 		counter->failcnt++;
 		ret = -ENOMEM;
 		if (!force)
 			return ret;
 	}
-
+    //memcg内存使用量增加val
 	counter->usage += val;
 	if (counter->usage > counter->max_usage)
 		counter->max_usage = counter->usage;
@@ -50,6 +50,7 @@ static int __res_counter_charge(struct res_counter *counter, unsigned long val,
 	r = ret = 0;
 	*limit_fail_at = NULL;
 	local_irq_save(flags);
+    //memcg内存使用数量变更过程，从当前层级的memcg，一直统计到顶层的memcg
 	for (c = counter; c != NULL; c = c->parent) {
 		spin_lock(&c->lock);
 		r = res_counter_charge_locked(c, val, force);

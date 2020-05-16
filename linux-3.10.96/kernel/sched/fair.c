@@ -484,6 +484,7 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 /*
  * Enqueue an entity into the rb-tree:
  */
+//将se插入到cfs运行队列
 static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
     //cfs调度队列的红黑树的root节点
@@ -532,37 +533,37 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	rb_link_node(&se->run_node, parent, link);
 	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);
 }
-//从cfs运行队列红黑树取出调度实体se的下一个se，
-//放入rb_leftmost，下次就运行它，并从剔除老的se
+//从cfs运行队列红黑树取出调度实体se的下一个se放入rb_leftmost，下次就运行它，并从剔除老的se
 static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+    //如果se是cfs_rq->rb_leftmost指向的，从红黑树中取出下一个se赋予cfs_rq->rb_leftmost，下次调度就选择它
 	if (cfs_rq->rb_leftmost == &se->run_node) {
 		struct rb_node *next_node;
 
 		next_node = rb_next(&se->run_node);
 		cfs_rq->rb_leftmost = next_node;
 	}
-
+    //把该se从红黑树中剔除吧
 	rb_erase(&se->run_node, &cfs_rq->tasks_timeline);
 }
-
+//返回cfs_rq->rb_leftmost对应的调度实体
 struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
 {
 	struct rb_node *left = cfs_rq->rb_leftmost;
 
 	if (!left)
 		return NULL;
-
+    //通过struct rb_node *left树节点得到其代表的调度实体se
 	return rb_entry(left, struct sched_entity, run_node);
 }
-
+//从调度队列上取出se的下一个色
 static struct sched_entity *__pick_next_entity(struct sched_entity *se)
 {
 	struct rb_node *next = rb_next(&se->run_node);
 
 	if (!next)
 		return NULL;
-
+    //通过struct rb_node *next树节点得到其代表的调度实体se
 	return rb_entry(next, struct sched_entity, run_node);
 }
 
@@ -1743,7 +1744,7 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 */
 	update_curr(cfs_rq);
 	enqueue_entity_load_avg(cfs_rq, se, flags & ENQUEUE_WAKEUP);
-	account_entity_enqueue(cfs_rq, se);
+	account_entity_enqueue(cfs_rq, se);//这里cfs_rq->nr_running++
 	update_cfs_shares(cfs_rq);
 
 	if (flags & ENQUEUE_WAKEUP) {
@@ -1753,7 +1754,7 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 
 	update_stats_enqueue(cfs_rq, se);
 	check_spread(cfs_rq, se);
-    //se插入cfs队列红黑树
+    //se插入cfs队列红黑树,
 	if (se != cfs_rq->curr)
 		__enqueue_entity(cfs_rq, se);
     //se插入运行队列，on_rq置1
@@ -1798,7 +1799,7 @@ static void __clear_buddies_skip(struct sched_entity *se)
 			break;
 	}
 }
-
+//如果进程se是cfs调度队列last、next、skip指定的se匹配，要清除调度队列对应标识
 static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	if (cfs_rq->last == se)
@@ -1812,7 +1813,7 @@ static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 }
 
 static __always_inline void return_cfs_rq_runtime(struct cfs_rq *cfs_rq);
-
+//se->on_rq清0表示当前se要休眠了，如果不是cfs_rq->curr指向的正在运行的se，还要把该se从红黑树中剔除
 static void
 dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
@@ -1835,11 +1836,14 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 		}
 #endif
 	}
-
+    //如果进程se是cfs调度队列last、next、skip指定的se匹配，要清除调度队列对应标识
 	clear_buddies(cfs_rq, se);
 
+    //如果se不是当前cfs_rq->curr指向的正在运行的调度实体，则执行__dequeue_entity()把该se从红黑树中剔除，那se是当前cfs_rq->curr指向的
+    //，不做处理，因为在pick_next_task_fair->set_next_entity->__dequeue_entity选择该进程运行时，已经把当前的选中要运行的se从红黑树中剔除了
 	if (se != cfs_rq->curr)
 		__dequeue_entity(cfs_rq, se);
+    //调度实体的on_rq清0，因为对应进程要休眠了，移除调度队列
 	se->on_rq = 0;
 	account_entity_dequeue(cfs_rq, se);
 
@@ -1910,12 +1914,12 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		 */
 		update_stats_wait_end(cfs_rq, se);
         //从cfs运行队列红黑树取出调度实体se的下一个se，放入rb_leftmost，
-        //下次就运行它，并从剔除老的se
+        //下次调度就运行它，并剔除本次的se，因为本se要被选中运行了，就从红黑树中剔除
 		__dequeue_entity(cfs_rq, se);
 	}
 
 	update_stats_curr_start(cfs_rq, se);
-    //更新当前调度实体
+    //cfs_rq->curr指向当前选中的se
 	cfs_rq->curr = se;
 #ifdef CONFIG_SCHEDSTATS
 	/*
@@ -1942,8 +1946,10 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se);
  * 3) pick the "last" process, for cache locality
  * 4) do not run the "skip" process, if something else is available
  */
+//选择下一个调度实体
 static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 {
+    //返回cfs_rq->rb_leftmost对应的调度实体
 	struct sched_entity *se = __pick_first_entity(cfs_rq);
 	struct sched_entity *left = se;
 
@@ -1978,6 +1984,7 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 
 static void check_cfs_rq_runtime(struct cfs_rq *cfs_rq);
 
+//如果调度实体还在运行队列上则把它移动运行队列尾部，并且cfs_rq->curr
 static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 {
 	/*
@@ -1991,6 +1998,8 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 	check_cfs_rq_runtime(cfs_rq);
 
 	check_spread(cfs_rq, prev);
+    //如果在运行队列上，才会把prev放到进程运行队列的尾部，这种情况，我猜测应该是进程被抢占，并不是主动休眠
+    //主动休眠的话，dequeue_task->dequeue_task_fair->dequeue_entity()已经on_rq清0
 	if (prev->on_rq) {
 		update_stats_wait_start(cfs_rq, prev);
 		/* Put 'current' back into the tree. */
@@ -2867,10 +2876,12 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
 
+    //se=se->parent遍历se所在的进程树
 	for_each_sched_entity(se) {
-		if (se->on_rq)
+		if (se->on_rq)//要入队，on_rq应该不成立吧?????????????
 			break;
 		cfs_rq = cfs_rq_of(se);
+        //se->on_rq置1，并且把se插入到cfs运行队列
 		enqueue_entity(cfs_rq, se, flags);
 
 		/*
@@ -2879,13 +2890,15 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		 * note: in the case of encountering a throttled cfs_rq we will
 		 * post the final h_nr_running increment below.
 		*/
+		//如果没有这个带宽控制，这里会一直遍历到最顶层的运行队列
 		if (cfs_rq_throttled(cfs_rq))
 			break;
+        //遍历每一层的运行队列，h_nr_running++
 		cfs_rq->h_nr_running++;
 
 		flags = ENQUEUE_WAKEUP;
 	}
-
+    //如果没有带宽控制，这里循环应该不会执行到
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		cfs_rq->h_nr_running++;
@@ -2896,10 +2909,10 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(cfs_rq);
 		update_entity_load_avg(se, 1);
 	}
-
+    //这里se为NULL，说明到顶层的运行队列了
 	if (!se) {
 		update_rq_runnable_avg(rq, rq->nr_running);
-		inc_nr_running(rq);
+		inc_nr_running(rq);//rq->nr_running++
 	}
 	hrtick_update(rq);
 }
@@ -2911,14 +2924,18 @@ static void set_next_buddy(struct sched_entity *se);
  * decreased. We remove the task from the rbtree and
  * update the fair scheduling stats:
  */
+//进程p出队列，shedcule休眠时传入的flags是1
 static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 {
 	struct cfs_rq *cfs_rq;
+    //取出进程所属调度实体se，实际调度时针对的调度实体，不是进程task_struct结构
 	struct sched_entity *se = &p->se;
 	int task_sleep = flags & DEQUEUE_SLEEP;
-
+    //依次向上遍历调度实体树，第一次是当前se，第二次是se=se->parent，循环，每次根据se->parent取出当前调度实体的父se
 	for_each_sched_entity(se) {
+	    //调度实体所在运行队列
 		cfs_rq = cfs_rq_of(se);
+        //se->on_rq清0表示当前se要休眠了，如果不是cfs_rq->curr指向的正在运行的se，还要把该se从红黑树中剔除
 		dequeue_entity(cfs_rq, se, flags);
 
 		/*
@@ -2928,28 +2945,32 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		 * post the final h_nr_running decrement below.
 		*/
 		if (cfs_rq_throttled(cfs_rq))
-			break;
-		cfs_rq->h_nr_running--;
+			break; 
+		cfs_rq->h_nr_running--;//cfs_rq->h_nr_running--，因为该队列上的se要出队了吧，所以减1
 
 		/* Don't dequeue parent if it has other entities besides us */
+        //不要把se的parent从红黑树中剔除，因为parent可能还有其他子se要运行，这个cfs_rq->load.weight队列负载一般都成立吧?????
+        //所以这个循环只会执行一次吧
 		if (cfs_rq->load.weight) {
 			/*
 			 * Bias pick_next to pick a task from this cfs_rq, as
 			 * p is sleeping when it is within its sched_slice.
 			 */
+			//如果当前进程要休眠并且se不是顶层se
 			if (task_sleep && parent_entity(se))
-				set_next_buddy(parent_entity(se));
+				set_next_buddy(parent_entity(se));//从该se向高层se依次遍历，设置每一次的调度队列cfs_rq->next = se
 
 			/* avoid re-evaluating load for this entity */
+            //即se = se->parent，返回父se
 			se = parent_entity(se);
 			break;
 		}
 		flags |= DEQUEUE_SLEEP;
 	}
-
+    //接着上一个循环开始，此时se是传入的se的父亲，这个循环一直持续，直到最顶层的se
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
-		cfs_rq->h_nr_running--;
+		cfs_rq->h_nr_running--;//cfs_rq->h_nr_running--，因为该队列上的se要出队了吧，所以减1，这是传入的se的父se所在队列
 
 		if (cfs_rq_throttled(cfs_rq))
 			break;
@@ -2957,7 +2978,7 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		update_cfs_shares(cfs_rq);
 		update_entity_load_avg(se, 1);
 	}
-
+    //到对顶层的se，rq->nr_running--才执行
 	if (!se) {
 		dec_nr_running(rq);
 		update_rq_runnable_avg(rq, 1);
@@ -3555,12 +3576,14 @@ static void set_last_buddy(struct sched_entity *se)
 	for_each_sched_entity(se)
 		cfs_rq_of(se)->last = se;
 }
-
+//从该se向高层se依次遍历，设置每一次的调度队列cfs_rq->next = se
 static void set_next_buddy(struct sched_entity *se)
 {
+    //如果se代表进程，并把调度策略是IDLE，那就是IDLE进程吧
 	if (entity_is_task(se) && unlikely(task_of(se)->policy == SCHED_IDLE))
 		return;
-
+    //从该se向高层se依次遍历，设置每一次的调度队列cfs_rq->next = se，这样设置完了，等下一次pick_next_task时，有可能取出cfs_rq->next
+    //的这个se再运行的呀，明明这个进程刚休眠  dequeue_task_fair->set_next_buddy
 	for_each_sched_entity(se)
 		cfs_rq_of(se)->next = se;
 }
@@ -3662,6 +3685,7 @@ preempt:
 static struct task_struct *pick_next_task_fair(struct rq *rq)
 {
 	struct task_struct *p;
+    //取出顶层的调度队列
 	struct cfs_rq *cfs_rq = &rq->cfs;
 	struct sched_entity *se;
 
@@ -3671,9 +3695,9 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 	do {
         //选择调度队列的下一个调度实体
 		se = pick_next_entity(cfs_rq);
-        //设置cfs_rq的下一个next se到cfs_rq->rb_leftmost,下一次调度就选next se
+        //设置cfs_rq的下一个next se到cfs_rq->rb_leftmost,下一次调度就选这个next se
 		set_next_entity(cfs_rq, se);
-        //se是进程返回NULL，是调度组，返回调度组的cfs队列
+        //se是进程返回NULL，它就是本次选择的调度实体。如果是调度组，返回调度组的cfs队列,继续选择下一级的运行队列的调度实体
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
 
@@ -3691,9 +3715,10 @@ static void put_prev_task_fair(struct rq *rq, struct task_struct *prev)
 {
 	struct sched_entity *se = &prev->se;
 	struct cfs_rq *cfs_rq;
-
+    //从当前进程se向上依次遍历进程树，这样还会找到每一层运行队列的父se
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
+        //如果调度实体还在运行队列上则把它移动运行队列尾部，并且cfs_rq->curr
 		put_prev_entity(cfs_rq, se);
 	}
 }

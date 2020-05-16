@@ -328,6 +328,8 @@ static void check_for_release(struct cgroup *cgrp);
 
 /* Link structure for associating css_set objects with cgroups */
 //进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应，find_css_set()函数详细讲解他们的关系
+//然后每个struct cgroup又与task_cgroup或者mem_cgroup控制单元一一对应，这样通过每个进程的task_struct
+//结构就能找到这个进程绑定的task_cgroup或者mem_cgroup控制单元
 struct cg_cgroup_link {
 	/*
 	 * List running through cg_cgroup_links associated with a
@@ -2169,7 +2171,7 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	 * step 4: do subsystem attach callbacks.
 	 */
 	for_each_subsys(root, ss) {
-		if (ss->attach)//调用该cgroup子系统struct cgroup_subsys的atach函数，cpu 子系统时是cpu_cgroup_attach()
+		if (ss->attach)//调用该cgroup子系统struct cgroup_subsys的atach函数，cpu 子系统时是cpu_cgroup_attach()内存是mem_cgroup_move_task()
 			ss->attach(cgrp, &tset);//进程绑定了新的cpu cgroup，要从之前cpu cgroup清理干净，然后设置进程在新的进程组的关系
 	}
 
@@ -2271,7 +2273,7 @@ retry_find_task:
 			goto retry_find_task;
 		}
 	}
-
+    //绑定的核心操作
 	ret = cgroup_attach_task(cgrp, tsk, threadgroup);
 
 	threadgroup_unlock(tsk);
@@ -4081,7 +4083,7 @@ static struct cftype files[] = {
 	{
 		.name = "tasks",
 		.open = cgroup_tasks_open,
-		.write_u64 = cgroup_tasks_write,
+		.write_u64 = cgroup_tasks_write,//绑定每个进程到控制系统
 		.release = cgroup_pidlist_release,
 		.mode = S_IRUGO | S_IWUSR,
 	},

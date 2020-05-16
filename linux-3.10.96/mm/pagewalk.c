@@ -46,7 +46,7 @@ again:
 		 * This implies that each ->pmd_entry() handler
 		 * needs to know about pmd_trans_huge() pmds
 		 */
-		if (walk->pmd_entry)
+		if (walk->pmd_entry)//mem_cgroup_move_charge_pte_range
 			err = walk->pmd_entry(pmd, addr, next, walk);
 		if (err)
 			break;
@@ -178,7 +178,7 @@ int walk_page_range(unsigned long addr, unsigned long end,
 		return -EINVAL;
 
 	VM_BUG_ON(!rwsem_is_locked(&walk->mm->mmap_sem));
-
+    //这是获取页表页目录
 	pgd = pgd_offset(walk->mm, addr);
 	do {
 		struct vm_area_struct *vma = NULL;
@@ -191,7 +191,7 @@ int walk_page_range(unsigned long addr, unsigned long end,
 		 * - hugetlb vma's
 		 * - VM_PFNMAP vma's
 		 */
-		vma = find_vma(walk->mm, addr);
+		vma = find_vma(walk->mm, addr);//进程的用户空间vma
 		if (vma) {
 			/*
 			 * There are no page structures backing a VM_PFNMAP

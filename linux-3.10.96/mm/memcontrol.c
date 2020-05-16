@@ -169,6 +169,7 @@ struct mem_cgroup_reclaim_iter {
 /*
  * per-zone information in memory controller.
  */
+//在 struct mem_cgroup_per_node结构中，alloc_mem_cgroup_per_zone_info 中分配初始化
 struct mem_cgroup_per_zone {
 	struct lruvec		lruvec;
 	unsigned long		lru_size[NR_LRU_LISTS];
@@ -179,15 +180,17 @@ struct mem_cgroup_per_zone {
 	unsigned long long	usage_in_excess;/* Set to the value by which */
 						/* the soft limit is exceeded*/
 	bool			on_tree;
+    //指向对应的struct mem_cgroup
 	struct mem_cgroup	*memcg;		/* Back pointer, we cannot */
 						/* use container_of	   */
 };
-
+//mem_cgroup_css_alloc->alloc_mem_cgroup_per_zone_info 中分配
 struct mem_cgroup_per_node {
-	struct mem_cgroup_per_zone zoneinfo[MAX_NR_ZONES];
+	struct mem_cgroup_per_zone zoneinfo[MAX_NR_ZONES];//内存节点的各个zone
 };
 
 struct mem_cgroup_lru_info {
+    //指向node的struct mem_cgroup_per_node，alloc_mem_cgroup_per_zone_info中赋值
 	struct mem_cgroup_per_node *nodeinfo[0];
 };
 
@@ -258,10 +261,14 @@ static void mem_cgroup_oom_notify(struct mem_cgroup *memcg);
  * a feature that will be implemented much later in the future.
  */
 struct mem_cgroup {
+    //每一层的struct cgroup结构，通过其中的struct cgroup_subsys_state *subsys[mem数组下标]得到该层mem cgroup的css，
+    //在 container_of(cgroup_subsys_state)，就找到了对应的的struct mem_cgroup结构体。我还是觉得，不管是cpu cgroup还是
+    //mem cgroup，每一个目录，都有唯一一个struct cgroup、struct task_group或者struct mem_cgroup结构，二者通过cgroup_subsys_state查找
 	struct cgroup_subsys_state css;
 	/*
 	 * the counter to account for memory usage
 	 */
+	//内存使用计数
 	struct res_counter res;
 
 	/* vmpressure notifications */
@@ -271,7 +278,7 @@ struct mem_cgroup {
 		/*
 		 * the counter to account for mem+swap usage.
 		 */
-		struct res_counter memsw;
+		struct res_counter memsw;//mem+swap内存综合
 
 		/*
 		 * rcu_freeing is used only when freeing struct mem_cgroup,
@@ -301,14 +308,14 @@ struct mem_cgroup {
 	unsigned long kmem_account_flags; /* See KMEM_ACCOUNTED_*, below */
 
 	bool		oom_lock;
-	atomic_t	under_oom;
+	atomic_t	under_oom;//该mem cgroup已经触发了OOM
 	atomic_t	oom_wakeups;
 
 	atomic_t	refcnt;
 
 	int	swappiness;
 	/* OOM-Killer disable */
-	int		oom_kill_disable;
+	int		oom_kill_disable;//为1，当mem cgroup内存使用超出上限，不会触发oom
 
 	/* set when res.limit == memsw.limit */
 	bool		memsw_is_minimum;
@@ -1064,12 +1071,15 @@ static void memcg_check_events(struct mem_cgroup *memcg, struct page *page)
 		preempt_enable();
 }
 
+//通过struct cgroup结构找到struct mem_cgroup，二者一一对应的
 struct mem_cgroup *mem_cgroup_from_cont(struct cgroup *cont)
 {
+    //先通过struct cgroup的struct cgroup_subsys_state *subsys[]找到cgroup_subsys_state
+    //container_of(s, struct mem_cgroup, cgroup_subsys_state)找到struct mem_cgroup，与cpu cgroup一样的套路
 	return mem_cgroup_from_css(
 		cgroup_subsys_state(cont, mem_cgroup_subsys_id));
 }
-
+//由当前进程task_struct结构找到绑定的struct mem_cgroup
 struct mem_cgroup *mem_cgroup_from_task(struct task_struct *p)
 {
 	/*
@@ -1079,7 +1089,8 @@ struct mem_cgroup *mem_cgroup_from_task(struct task_struct *p)
 	 */
 	if (unlikely(!p))
 		return NULL;
-
+    //根据进程task_struct和subsys_id，返回绑定的cgroup subsys系统的struct cgroup_subsys_state
+    //有了struct cgroup_subsys_state，就能contained_of(cgroup_subsys_state)获取具体的task_group或者mem_cgroup结构
 	return mem_cgroup_from_css(task_subsys_state(p, mem_cgroup_subsys_id));
 }
 
@@ -1745,6 +1756,7 @@ done:
  * This function returns the number of memcg under hierarchy tree. Returns
  * 1(self count) if no children.
  */
+//该memcg目录包含的所有子memcg数
 static int mem_cgroup_count_children(struct mem_cgroup *memcg)
 {
 	int num = 0;
@@ -2187,6 +2199,7 @@ static void memcg_wakeup_oom(struct mem_cgroup *memcg)
 
 static void memcg_oom_recover(struct mem_cgroup *memcg)
 {
+    //memcg处于oom杀进程中，唤醒在memcg_oom_waitq等待队列休眠的进程，这个进程应该是，发现内存不够，然后触发kmem oom，然后休眠吧??????
 	if (memcg && atomic_read(&memcg->under_oom))
 		memcg_wakeup_oom(memcg);
 }
@@ -2605,21 +2618,23 @@ static int mem_cgroup_do_charge(struct mem_cgroup *memcg, gfp_t gfp_mask,
 	struct res_counter *fail_res;
 	unsigned long flags = 0;
 	int ret;
-
+    //传入memcg->res完成具体的memcg内存使用数变更，csize是本次变更内存大小，如果内存超出上限返回-NOMEM，成功返回0
 	ret = res_counter_charge(&memcg->res, csize, &fail_res);
 
 	if (likely(!ret)) {
 		if (!do_swap_account)
 			return CHARGE_OK;
+        //变更memcg->memsw内存使用统计
 		ret = res_counter_charge(&memcg->memsw, csize, &fail_res);
 		if (likely(!ret))
 			return CHARGE_OK;
-
+        //到这里说明，变更memcg->memsw内存失败了，那要减去memcg->res的csize，恢复增加之前的
 		res_counter_uncharge(&memcg->res, csize);
 		mem_over_limit = mem_cgroup_from_res_counter(fail_res, memsw);
 		flags |= MEM_CGROUP_RECLAIM_NOSWAP;
 	} else
 		mem_over_limit = mem_cgroup_from_res_counter(fail_res, res);
+    //到这里说明内存使用超出memcg上限了
 	/*
 	 * Never reclaim on behalf of optional batching, retry with a
 	 * single page instead.
@@ -2632,7 +2647,7 @@ static int mem_cgroup_do_charge(struct mem_cgroup *memcg, gfp_t gfp_mask,
 
 	if (gfp_mask & __GFP_NORETRY)
 		return CHARGE_NOMEM;
-
+    //内存超出上限，对memcg 内存回收
 	ret = mem_cgroup_reclaim(mem_over_limit, gfp_mask, flags);
 	if (mem_cgroup_margin(mem_over_limit) >= nr_pages)
 		return CHARGE_RETRY;
@@ -2655,6 +2670,7 @@ static int mem_cgroup_do_charge(struct mem_cgroup *memcg, gfp_t gfp_mask,
 	if (mem_cgroup_wait_acct_move(mem_over_limit))
 		return CHARGE_RETRY;
 
+    //标记当前进程要memcg OOM了
 	if (invoke_oom)
 		mem_cgroup_oom(mem_over_limit, gfp_mask, get_order(csize));
 
@@ -2701,7 +2717,7 @@ static int __mem_cgroup_try_charge(struct mm_struct *mm,
 	if (unlikely(test_thread_flag(TIF_MEMDIE)
 		     || fatal_signal_pending(current)))
 		goto bypass;
-
+    //当前进程处于oom状态，直接返回
 	if (unlikely(task_in_memcg_oom(current)))
 		goto bypass;
 
@@ -2722,9 +2738,11 @@ again:
 			goto done;
 		css_get(&memcg->css);
 	} else {
+	    //寻找当前进程绑定的memcg
 		struct task_struct *p;
 
 		rcu_read_lock();
+        //不就是根据struct mm_struct找到所属的进程struct task_struct
 		p = rcu_dereference(mm->owner);
 		/*
 		 * Because we don't have task_lock(), "p" can exit.
@@ -2736,6 +2754,7 @@ again:
 		 * (*) swapoff at el will charge against mm-struct not against
 		 * task-struct. So, mm->owner can be NULL.
 		 */
+		//由当前进程task_struct结构找到绑定的struct mem_cgroup
 		memcg = mem_cgroup_from_task(p);
 		if (!memcg)
 			memcg = root_mem_cgroup;
@@ -2771,7 +2790,7 @@ again:
 			css_put(&memcg->css);
 			goto bypass;
 		}
-
+        //这里完成mem使用的内存数量的变更
 		ret = mem_cgroup_do_charge(memcg, gfp_mask, batch,
 					   nr_pages, invoke_oom);
 		switch (ret) {
@@ -3921,7 +3940,7 @@ static int mem_cgroup_charge_common(struct page *page, struct mm_struct *mm,
 		oom = false;
 	}
 
-	ret = __mem_cgroup_try_charge(mm, gfp_mask, nr_pages, &memcg, oom);
+	ret = __mem_cgroup_try_charge(mm, gfp_mask, nr_pages, &memcg, oom);//这里
 	if (ret == -ENOMEM)
 		return ret;
 	__mem_cgroup_commit_charge(memcg, page, nr_pages, ctype, false);
@@ -4044,7 +4063,7 @@ void mem_cgroup_commit_charge_swapin(struct page *page,
 	__mem_cgroup_commit_charge_swapin(page, memcg,
 					  MEM_CGROUP_CHARGE_TYPE_ANON);
 }
-
+//mem cgroup内存增加或减少时执行的函数
 int mem_cgroup_cache_charge(struct page *page, struct mm_struct *mm,
 				gfp_t gfp_mask)
 {
@@ -4058,7 +4077,7 @@ int mem_cgroup_cache_charge(struct page *page, struct mm_struct *mm,
 		return 0;
 
 	if (!PageSwapCache(page))
-		ret = mem_cgroup_charge_common(page, mm, gfp_mask, type);
+		ret = mem_cgroup_charge_common(page, mm, gfp_mask, type);//这里
 	else { /* page is swapcache/shmem */
 		ret = __mem_cgroup_try_charge_swapin(mm, page,
 						     gfp_mask, &memcg);
@@ -4613,6 +4632,7 @@ static int mem_cgroup_resize_limit(struct mem_cgroup *memcg,
 	int retry_count;
 	u64 memswlimit, memlimit;
 	int ret = 0;
+    //该memcg目录包含的所有子memcg数
 	int children = mem_cgroup_count_children(memcg);
 	u64 curusage, oldusage;
 	int enlarge;
@@ -4623,7 +4643,7 @@ static int mem_cgroup_resize_limit(struct mem_cgroup *memcg,
 	 * of # of children which we should visit in this loop.
 	 */
 	retry_count = MEM_CGROUP_RECLAIM_RETRIES * children;
-
+    //现在的内存使用计数
 	oldusage = res_counter_read_u64(&memcg->res, RES_USAGE);
 
 	enlarge = 0;
@@ -4644,11 +4664,11 @@ static int mem_cgroup_resize_limit(struct mem_cgroup *memcg,
 			mutex_unlock(&set_limit_mutex);
 			break;
 		}
-
+        //如果老的内存上限小于新的上限，enlarge = 1，下边会执行memcg_oom_recover()
 		memlimit = res_counter_read_u64(&memcg->res, RES_LIMIT);
 		if (memlimit < val)
 			enlarge = 1;
-
+        //设置新的mem cgroup内存上限，设置成功返回0，只有当前mem使用计数小于设置的内存上限才会成功
 		ret = res_counter_set_limit(&memcg->res, val);
 		if (!ret) {
 			if (memswlimit == val)
@@ -4657,20 +4677,22 @@ static int mem_cgroup_resize_limit(struct mem_cgroup *memcg,
 				memcg->memsw_is_minimum = false;
 		}
 		mutex_unlock(&set_limit_mutex);
-
+        //设置成功才会退出循环，不然就内存回收，到mem使用计数小于设置的内存上限
 		if (!ret)
 			break;
-
+        //触发mem cgroup内存回收，这样内存使用会减少
 		mem_cgroup_reclaim(memcg, GFP_KERNEL,
 				   MEM_CGROUP_RECLAIM_SHRINK);
+        //读取内存回收后的内存使用计数
 		curusage = res_counter_read_u64(&memcg->res, RES_USAGE);
 		/* Usage is reduced ? */
   		if (curusage >= oldusage)
-			retry_count--;
-		else
+			retry_count--;//回收不成功减少使用计数
+		else//回收成功更新oldusage
 			oldusage = curusage;
 	}
-	if (!ret && enlarge)
+
+    if (!ret && enlarge)
 		memcg_oom_recover(memcg);
 
 	return ret;
@@ -5231,30 +5253,35 @@ out:
 static int mem_cgroup_write(struct cgroup *cont, struct cftype *cft,
 			    const char *buffer)
 {
+    //通过struct cgroup结构找到struct mem_cgroup
 	struct mem_cgroup *memcg = mem_cgroup_from_cont(cont);
 	enum res_type type;
 	int name;
 	unsigned long long val;
 	int ret;
-
+    //struct cftype *cft指向当前write文件对应的struct cftype结构
 	type = MEMFILE_TYPE(cft->private);
 	name = MEMFILE_ATTR(cft->private);
 
+    //name应该代表了当前write的操作行为
 	switch (name) {
-	case RES_LIMIT:
+	case RES_LIMIT://设置内存上限
+	    //不能设置mem 跟目录cgroup的内存limit，怪不得我设置后返回错误
 		if (mem_cgroup_is_root(memcg)) { /* Can't set limit on root */
 			ret = -EINVAL;
 			break;
 		}
+        //
 		/* This function does all necessary parse...reuse it */
 		ret = res_counter_memparse_write_strategy(buffer, &val);
 		if (ret)
 			break;
-		if (type == _MEM)
+        
+		if (type == _MEM)//mem cgroup总的内存使用上限?????
 			ret = mem_cgroup_resize_limit(memcg, val);
-		else if (type == _MEMSWAP)
+		else if (type == _MEMSWAP)//包含swap分区的内存?????????
 			ret = mem_cgroup_resize_memsw_limit(memcg, val);
-		else if (type == _KMEM)
+		else if (type == _KMEM)//只有内核部门的内存使用上限???????/
 			ret = memcg_update_kmem_limit(cont, val);
 		else
 			return -EINVAL;
@@ -5946,7 +5973,7 @@ static struct cftype mem_cgroup_files[] = {
 		.read = mem_cgroup_read,
 	},
 	{
-		.name = "limit_in_bytes",
+		.name = "limit_in_bytes",//设置进程内存使用
 		.private = MEMFILE_PRIVATE(_MEM, RES_LIMIT),
 		.write_string = mem_cgroup_write,
 		.read = mem_cgroup_read,
@@ -6007,6 +6034,8 @@ static struct cftype mem_cgroup_files[] = {
 	},
 #endif
 #ifdef CONFIG_MEMCG_KMEM
+    //???????????????? 这是kmem.limit_in_bytes ，这与上边的limit_in_bytes有什么区别
+    //难道一个代表内核数据结构的内存上限????????????一个代表包含应用层使用的总的内存?????
 	{
 		.name = "kmem.limit_in_bytes",
 		.private = MEMFILE_PRIVATE(_KMEM, RES_LIMIT),
@@ -6085,12 +6114,15 @@ static int alloc_mem_cgroup_per_zone_info(struct mem_cgroup *memcg, int node)
 	 */
 	if (!node_state(node, N_NORMAL_MEMORY))
 		tmp = -1;
+    //应该是为内存node分配struct mem_cgroup_per_node结构
 	pn = kzalloc_node(sizeof(*pn), GFP_KERNEL, tmp);
 	if (!pn)
 		return 1;
-
+    //依次初始化该node中各个zone对应的struct mem_cgroup_per_zone
 	for (zone = 0; zone < MAX_NR_ZONES; zone++) {
+        //即struct mem_cgroup_per_zone
 		mz = &pn->zoneinfo[zone];
+        //zone lru链表初始化
 		lruvec_init(&mz->lruvec);
 		mz->usage_in_excess = 0;
 		mz->on_tree = false;
@@ -6251,7 +6283,7 @@ static void __init mem_cgroup_soft_limit_tree_init(void)
 		}
 	}
 }
-
+//创建mem cgroup子系统控制结构struct mem_cgroup，并返回其中的css控制结构struct cgroup_subsys_state
 static struct cgroup_subsys_state * __ref
 mem_cgroup_css_alloc(struct cgroup *cont)
 {
@@ -6262,12 +6294,12 @@ mem_cgroup_css_alloc(struct cgroup *cont)
 	memcg = mem_cgroup_alloc();
 	if (!memcg)
 		return ERR_PTR(error);
-
+    //根据每个内存节点分配struct mem_cgroup_per_node即node下各个zone
 	for_each_node(node)
 		if (alloc_mem_cgroup_per_zone_info(memcg, node))
 			goto free_out;
 
-	/* root ? */
+	/* root ? *///root memcg则初始化各个struct res_counter
 	if (cont->parent == NULL) {
 		root_mem_cgroup = memcg;
 		res_counter_init(&memcg->res, NULL);
@@ -6604,11 +6636,12 @@ static enum mc_target_type get_mctgt_type_thp(struct vm_area_struct *vma,
 	struct page *page = NULL;
 	struct page_cgroup *pc;
 	enum mc_target_type ret = MC_TARGET_NONE;
-
+   //这是从页目录项中获取数据，即页表的物理首地址所在的那个page吧????????????????????????
 	page = pmd_page(pmd);
 	VM_BUG_ON(!page || !PageHead(page));
 	if (!move_anon())
 		return ret;
+    //page所在的cgroup????
 	pc = lookup_page_cgroup(page);
 	if (PageCgroupUsed(pc) && pc->mem_cgroup == mc.from) {
 		ret = MC_TARGET_PAGE;
@@ -6903,7 +6936,7 @@ put:			/* get_mctgt_type() gets the page */
 
 	return ret;
 }
-
+//这好像是获取进程用户空间虚拟地址vma下，页表页目录占用的物理地址，然后做针对新的memcg的统计吧????????????????
 static void mem_cgroup_move_charge(struct mm_struct *mm)
 {
 	struct vm_area_struct *vma;
@@ -6926,7 +6959,7 @@ retry:
 		int ret;
 		struct mm_walk mem_cgroup_move_charge_walk = {
 			.pmd_entry = mem_cgroup_move_charge_pte_range,
-			.mm = mm,
+			.mm = mm,//进程的struct mm_struct结构
 			.private = vma,
 		};
 		if (is_vm_hugetlb_page(vma))
@@ -6991,7 +7024,7 @@ static void mem_cgroup_bind(struct cgroup *root)
 struct cgroup_subsys mem_cgroup_subsys = {
 	.name = "memory",
 	.subsys_id = mem_cgroup_subsys_id,
-	.css_alloc = mem_cgroup_css_alloc,
+	.css_alloc = mem_cgroup_css_alloc,//分配
 	.css_online = mem_cgroup_css_online,
 	.css_offline = mem_cgroup_css_offline,
 	.css_free = mem_cgroup_css_free,
@@ -6999,7 +7032,7 @@ struct cgroup_subsys mem_cgroup_subsys = {
 	.cancel_attach = mem_cgroup_cancel_attach,
 	.attach = mem_cgroup_move_task,
 	.bind = mem_cgroup_bind,
-	.base_cftypes = mem_cgroup_files,
+	.base_cftypes = mem_cgroup_files,//memcg 独有的控制文件
 	.early_init = 0,
 	.use_id = 1,
 };

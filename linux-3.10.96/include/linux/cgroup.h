@@ -65,6 +65,7 @@ enum cgroup_subsys_id {
 #undef SUBSYS
 
 /* Per-subsystem/per-cgroup state maintained by the system. */
+//分配是在每个子系统struct cgroup_subsys的css_alloc函数，mem的是，mem_cgroup_css_alloc，cpu的是cpu_cgroup_css_alloc
 
 //通过struct cgroup的struct cgroup_subsys_state *subsys[cpu_cgroup_subsys_id]成员，得到cpu cgroup对应的
 //struct cgroup_subsys_state结构，再由struct cgroup_subsys_state的container_of操作，得到struct task_group
@@ -172,7 +173,7 @@ struct cgroup_name {
 	char name[];
 };
 //以cpu cgroup为例，顶层的控制目录cpu，就对应一个struct cgroup吧?????????然后在这个目录mkdir test目录，应该又会创建一个struct cgroup
-//最顶层的cgroup结构包含在struct cgroupfs_root里
+//最顶层的cgroup结构包含在struct cgroupfs_root里，一个目录一个struct cgroup，记住很关键
 struct cgroup {
 	unsigned long flags;		/* "unsigned long" so bitops work */
 
@@ -226,6 +227,8 @@ struct cgroup {
 	//struct cg_cgroup_link靠其成员struct list_head cgrp_link_list添加到struct cgroup的css_sets链表，
     //这样struct cg_cgroup_link与struct cgroup建立的联系。find_css_set()函数详细讲解他们的关系。
     //进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应
+    //然后每个struct cgroup又与task_cgroup或者mem_cgroup控制单元一一对应，这样通过每个进程的task_struct
+    //结构就能找到这个进程绑定的task_cgroup或者mem_cgroup控制单元
 	struct list_head css_sets;
 
 	struct list_head allcg_node;	/* cgroupfs_root->allcg_list */
@@ -384,6 +387,8 @@ struct css_set {
  //struct cg_cgroup_link靠其成员struct list_head cg_link_list添加到struct css_set的cg_links，这样struct cg_cgroup_link
  //和struct css_set建立了联系。进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应
 // find_css_set()函数详细讲解他们的关系
+ //然后每个struct cgroup又与task_cgroup或者mem_cgroup控制单元一一对应，这样通过每个进程的task_struct
+ //结构就能找到这个进程绑定的task_cgroup或者mem_cgroup控制单元
 
    struct list_head cg_links;
 
@@ -393,6 +398,8 @@ struct css_set {
 	 * during subsystem registration (at boot time) and modular subsystem
 	 * loading/unloading.
 	 */
+	//进程绑定的cpu、mem等cgroup的struct cgroup_subsys_state，通过subsys[cgroup subsys id]二者，可以找到对应的
+	//cgroup子系统的struct cgroup_subsys_state，再container_of(cgroup_subsys_state)就能找到对应的task_group或者mem_cgroup结构
 	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
 
 	/* For RCU-protected deletion */
@@ -425,7 +432,9 @@ struct cgroup_map_cb {
 #define MAX_CFTYPE_NAME		64
 //代表cgroup下的一个文件，比如cpu cgroup每个目录的基本文件"tasks"，控制进程运行时间的cfs_quota_us和cpu_cfs_period文件
 //struct cftype包含了该文件的读写控制函数，如echo设置进程运行时间要调用的write函数
-//cpu cgroup特有的控制文件包含在struct cftype cpu_files[]，每个cgroup子系统base控制文件是struct cftype files[]
+//cpu cgroup特有的控制文件包含在struct cftype cpu_files[]，内存的是struct cftype mem_cgroup_files[]
+//每个cgroup子系统base控制文件是struct cftype files[]。上层读写cgroup文件，先调用vfs层的cgroup_file_write/cgroup_file_read
+//然后再调用struct cftype注册具体每个cgroup文件的读写函数，
 struct cftype {
 	/*
 	 * By convention, the name should begin with the name of the
@@ -433,6 +442,7 @@ struct cftype {
 	 * end of cftype array.
 	 */
 	char name[MAX_CFTYPE_NAME];
+    //mem cgroup时，代表了设置mem参数的行为，看mem_cgroup_write函数
 	int private;
 	/*
 	 * If not 0, file mode is set to this value, otherwise it will
@@ -602,6 +612,7 @@ int cgroup_taskset_size(struct cgroup_taskset *tset);
 //struct cgroup_subsys *subsys[]每个数组成员代表一个cgroup系统，比如subsys[2]就是cpu cgroup的struct cgroup_subsys
 //该结构与cgroup建立联系是在mount过程的rebind_subsystems()
 //cpu cgroup的是struct cgroup_subsys cpu_cgroup_subsys，这个结构包含了该子系统的基本操作函数、ID、控制文件信息
+//mem cgroup的是struct cgroup_subsys mem_cgroup_subsys
 struct cgroup_subsys {
     //cgroup_create()中创建cgroup目录分配，调用cpu cgroup的struct cgroup_subsys结构的cpu_cgroup_css_alloc()函数
     //分配cpu cgroup控制结构task_group,看着像是cpu cgroup下每创建一个目录，都会创建一个task_group呀
@@ -712,6 +723,10 @@ extern struct mutex cgroup_mutex;
  * Return the cgroup_subsys_state for the (@task, @subsys_id) pair.  The
  * synchronization rules are the same as task_css_set_check().
  */
+//根据task和subsys_id返回绑定的cpu、mem对应的cgroup的cgroup_subsys_state
+//注意task_css_set_check((task), (__c))是一个整体，就是返回进程task_struct的struct css_set __rcu *cgroups成员
+//然后再通过这个struct css_set的struct cgroup_subsys_state *subsys[subsys_id]获取绑定的
+//cgroup subsys的struct cgroup_subsys_state，再contained_of(cgroup_subsys_state)得到对应的task_group或者mem_cgroup结构
 #define task_subsys_state_check(task, subsys_id, __c)			\
 	task_css_set_check((task), (__c))->subsys[(subsys_id)]
 
@@ -733,6 +748,8 @@ static inline struct css_set *task_css_set(struct task_struct *task)
  *
  * See task_subsys_state_check().
  */
+//根据进程task_struct和subsys_id，返回绑定的cgroup subsys系统的struct cgroup_subsys_state
+//有了struct cgroup_subsys_state，就能contained_of(cgroup_subsys_state)获取具体的task_group或者mem_cgroup结构
 static inline struct cgroup_subsys_state *
 task_subsys_state(struct task_struct *task, int subsys_id)
 {

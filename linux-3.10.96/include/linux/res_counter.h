@@ -21,12 +21,12 @@
  * resource may include this counter into its structures and use
  * the helpers described beyond
  */
-
+//mem cgroup内存使用计数，每一层的mem cgroup一个，每一层目录的mem cgroup通过struct res_counter *parent构成联系
 struct res_counter {
 	/*
 	 * the current resource consumption level
 	 */
-	unsigned long long usage;
+	unsigned long long usage;//内存分配数
 	/*
 	 * the maximal value of the usage from the counter creation
 	 */
@@ -34,7 +34,7 @@ struct res_counter {
 	/*
 	 * the limit that usage cannot exceed
 	 */
-	unsigned long long limit;
+	unsigned long long limit;//内存上限
 	/*
 	 * the limit that usage can be exceed
 	 */
@@ -42,7 +42,7 @@ struct res_counter {
 	/*
 	 * the number of unsuccessful attempts to consume the resource
 	 */
-	unsigned long long failcnt;
+	unsigned long long failcnt;//分配失败计数
 	/*
 	 * the lock to protect all of the above.
 	 * the routines below consider this to be IRQ-safe
@@ -51,7 +51,7 @@ struct res_counter {
 	/*
 	 * Parent counter, used for hierarchial resource accounting
 	 */
-	struct res_counter *parent;
+	struct res_counter *parent;//指向其父cgroup目录那一级的struct res_counter
 };
 
 #define RESOURCE_MAX (unsigned long long)LLONG_MAX
@@ -204,6 +204,7 @@ static inline int res_counter_set_limit(struct res_counter *cnt,
 	int ret = -EBUSY;
 
 	spin_lock_irqsave(&cnt->lock, flags);
+    //设置时要求原来的内存使用不大于新的上限呀
 	if (cnt->usage <= limit) {
 		cnt->limit = limit;
 		ret = 0;
