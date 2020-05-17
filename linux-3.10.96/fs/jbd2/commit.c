@@ -221,7 +221,9 @@ static int journal_submit_data_buffers(journal_t *journal,
 	struct address_space *mapping;
 
 	spin_lock(&journal->j_list_lock);
+    //一次取出transaction->t_inode_list链表上的struct jbd2_inode
 	list_for_each_entry(jinode, &commit_transaction->t_inode_list, i_list) {
+        //struct jbd2_inode上的struct inode的struct address_space
 		mapping = jinode->i_vfs_inode->i_mapping;
 		set_bit(__JI_COMMIT_RUNNING, &jinode->i_flags);
 		spin_unlock(&journal->j_list_lock);
@@ -423,6 +425,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	J_ASSERT(journal->j_running_transaction != NULL);
 	J_ASSERT(journal->j_committing_transaction == NULL);
 
+    //获取journal上的transaction
 	commit_transaction = journal->j_running_transaction;
 	J_ASSERT(commit_transaction->t_state == T_RUNNING);
 
@@ -431,6 +434,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 			commit_transaction->t_tid);
 
 	write_lock(&journal->j_state_lock);
+    //transaction->t_state设置为T_LOCKED
 	commit_transaction->t_state = T_LOCKED;
 
 	trace_jbd2_commit_locking(journal, commit_transaction);
@@ -445,6 +449,10 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 					      stats.run.rs_locked);
 
 	spin_lock(&commit_transaction->t_handle_lock);
+    //如果transaction->t_updates不为0，说明提交journal的transaction的那个进程，jbd提交过程还没走完，只执行了
+    //jbd2_journal_start令transaction->t_updates加1，没有执行jbd2_journal_stop()最后的代码，令transaction->t_updates减1，
+    //所以这个jbd commit进程要先在这里journal->j_wait_updates上休眠，等待刚才那个进程执行jbd2_journal_stop()，
+    //transaction->t_updates减1，并且wake_up在journal->j_wait_updates上休眠的jbd commit进程
 	while (atomic_read(&commit_transaction->t_updates)) {
 		DEFINE_WAIT(wait);
 
@@ -524,12 +532,16 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	stats.run.rs_flushing = jiffies;
 	stats.run.rs_locked = jbd2_time_diff(stats.run.rs_locked,
 					     stats.run.rs_flushing);
-
+    //transaction->t_state设置成为T_FLUSH
 	commit_transaction->t_state = T_FLUSH;
+    //j_committing_transaction指向刚才那个commit_transaction
 	journal->j_committing_transaction = commit_transaction;
+    //journal->j_running_transaction设为NULL，
 	journal->j_running_transaction = NULL;
 	start_time = ktime_get();
 	commit_transaction->t_log_start = journal->j_head;
+    //唤醒journal->j_wait_transaction_locked上休眠的ext4 jbd进程，这些进程在执行jbd2_journal_start()时，因为
+    //journal->j_running_transaction在jbd2_journal_commit_transaction()中设置为T_LOCKED而休眠
 	wake_up(&journal->j_wait_transaction_locked);
 	write_unlock(&journal->j_state_lock);
 
@@ -539,6 +551,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	 * Now start flushing things to disk, in the order they appear
 	 * on the transaction lists.  Data blocks go first.
 	 */
+	//这里貌似完成是的ext4 数据块?????????
 	err = journal_submit_data_buffers(journal, commit_transaction);
 	if (err)
 		jbd2_journal_abort(journal, err);
@@ -577,7 +590,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	while (commit_transaction->t_buffers) {
 
 		/* Find the next buffer to be journaled... */
-
+        //从transaction->t_buffers上取出之前ext4 jbd发起时挂着的文件inode jbd
 		jh = commit_transaction->t_buffers;
 
 		/* If we're in abort mode, we just un-journal the buffer and
@@ -615,7 +628,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 				jbd2_journal_abort(journal, -EIO);
 				continue;
 			}
-
+            //这应该是inode对应的bh          
 			bh = jh2bh(descriptor);
 			jbd_debug(4, "JBD2: got buffer %llu (%p)\n",
 				(unsigned long long)bh->b_blocknr, bh->b_data);
@@ -629,6 +642,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 			first_tag = 1;
 			set_buffer_jwrite(bh);
 			set_buffer_dirty(bh);
+            //wbuf[]填充bh
 			wbuf[bufs++] = bh;
 
 			/* Record it so that we can wait for IO
@@ -738,6 +752,7 @@ start_journal_io:
 				clear_buffer_dirty(bh);
 				set_buffer_uptodate(bh);
 				bh->b_end_io = journal_end_buffer_io_sync;
+                //看这样在这里发起实际的bh数据传输
 				submit_bh(WRITE_SYNC, bh);
 			}
 			cond_resched();

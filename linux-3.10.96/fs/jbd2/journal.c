@@ -2465,7 +2465,7 @@ struct journal_head *jbd2_journal_grab_journal_head(struct buffer_head *bh)
 
 	jbd_lock_bh_journal_head(bh);
 	if (buffer_jbd(bh)) {
-		jh = bh2jh(bh);
+		jh = bh2jh(bh);//¾ÍÊÇ·µ»Øbh->b_private
 		jh->b_jcount++;
 	}
 	jbd_unlock_bh_journal_head(bh);

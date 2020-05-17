@@ -5112,10 +5112,11 @@ int ext4_mark_inode_dirty(handle_t *handle, struct inode *inode)
  * so would cause a commit on atime updates, which we don't bother doing.
  * We handle synchronous inodes at the highest possible level.
  */
+//inode元数据被修改，调用该函数发起jbd写，将来会把该元数据先保存到jbd分区，防止掉电丢失ext4元数据
 void ext4_dirty_inode(struct inode *inode, int flags)
 {
 	handle_t *handle;
-
+    //发起一次ext4 jbd
 	handle = ext4_journal_start(inode, EXT4_HT_INODE, 2);
 	if (IS_ERR(handle))
 		goto out;

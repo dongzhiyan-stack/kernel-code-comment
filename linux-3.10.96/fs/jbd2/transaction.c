@@ -88,6 +88,7 @@ jbd2_get_transaction(journal_t *journal, transaction_t *transaction)
 	transaction->t_tid = journal->j_transaction_sequence++;
 	transaction->t_expires = jiffies + journal->j_commit_interval;
 	spin_lock_init(&transaction->t_handle_lock);
+    //transaction->t_updates 清0
 	atomic_set(&transaction->t_updates, 0);
 	atomic_set(&transaction->t_outstanding_credits, 0);
 	atomic_set(&transaction->t_handle_count, 0);
@@ -99,6 +100,7 @@ jbd2_get_transaction(journal_t *journal, transaction_t *transaction)
 	add_timer(&journal->j_commit_timer);
 
 	J_ASSERT(journal->j_running_transaction == NULL);
+    //指向当前的transaction
 	journal->j_running_transaction = transaction;
 	transaction->t_max_wait = 0;
 	transaction->t_start = jiffies;
@@ -162,8 +164,13 @@ static int start_this_handle(journal_t *journal, handle_t *handle,
 		       journal->j_max_transaction_buffers);
 		return -ENOSPC;
 	}
-
+/*
+  handle、journal、transaction 三这个的关系是什么呢?每一个进程更新文件时，文件写时间更新，inode数据会被修改，此时必然
+  触发inode jbd更新，此时就是用inode 的journal，所有进程写文件发起jbd都是用这一个journal，而transaction，应该是每次发起ext4 jbd,
+  都会生成一个transaction吧，而handle，貌似只是返回给上层，通过handle找到journal吧???????/
+*/
 alloc_transaction:
+    //如果journal没有指向的transaction则分配新的
 	if (!journal->j_running_transaction) {
 		new_transaction = kmem_cache_zalloc(transaction_cache,
 						    gfp_mask);
@@ -214,19 +221,23 @@ repeat:
 		write_lock(&journal->j_state_lock);
 		if (!journal->j_running_transaction &&
 		    !journal->j_barrier_count) {
+		    //对新分配transaction_t赋初值,有journal->j_running_transaction = new_transaction;
 			jbd2_get_transaction(journal, new_transaction);
 			new_transaction = NULL;
 		}
 		write_unlock(&journal->j_state_lock);
 		goto repeat;
 	}
-
+    
 	transaction = journal->j_running_transaction;
 
 	/*
 	 * If the current transaction is locked down for commit, wait for the
 	 * lock to be released.
 	 */
+	//transaction_t的状态是T_LOCKED，要休眠等待，此时应该jbd2_journal_commit_transaction()函数正在jbd commit
+	//如果有一个inode类的journal的j_running_transaction因为T_LOCKED在这里锁住而休眠，那后续所有inode jbd进程更新脏数据
+	//执行start_this_handle()到这里，也会长时间休眠，就会遇到那个经典的ext4 jbd2卡主问题
 	if (transaction->t_state == T_LOCKED) {
 		DEFINE_WAIT(wait);
 
@@ -246,6 +257,7 @@ repeat:
 	needed = atomic_add_return(nblocks,
 				   &transaction->t_outstanding_credits);
 
+    //如果journal上提交了太多的transaction，则执行jbd2_log_start_commit()强制发起jbd commit
 	if (needed > journal->j_max_transaction_buffers) {
 		/*
 		 * If the current transaction is already too large, then start
@@ -262,7 +274,7 @@ repeat:
 		need_to_start = !tid_geq(journal->j_commit_request, tid);
 		read_unlock(&journal->j_state_lock);
 		if (need_to_start)
-			jbd2_log_start_commit(journal, tid);
+			jbd2_log_start_commit(journal, tid);//之前
 		schedule();
 		finish_wait(&journal->j_wait_transaction_locked, &wait);
 		goto repeat;
@@ -308,10 +320,13 @@ repeat:
 	 * use and add the handle to the running transaction. 
 	 */
 	update_t_max_wait(transaction, ts);
+    //指向当前的transaction
 	handle->h_transaction = transaction;
 	handle->h_requested_credits = nblocks;
 	handle->h_start_jiffies = jiffies;
+    //transaction->t_updates加1
 	atomic_inc(&transaction->t_updates);
+    //transaction->t_handle_count加1
 	atomic_inc(&transaction->t_handle_count);
 	jbd_debug(4, "Handle %p given %d credits (total %d, free %d)\n",
 		  handle, nblocks,
@@ -320,6 +335,7 @@ repeat:
 	read_unlock(&journal->j_state_lock);
 
 	lock_map_acquire(&handle->h_lockdep_map);
+    //这里要释放new_transaction，这是为什么呀????????????
 	jbd2_journal_free_transaction(new_transaction);
 	return 0;
 }
@@ -359,24 +375,26 @@ static handle_t *new_handle(int nblocks)
 handle_t *jbd2__journal_start(journal_t *journal, int nblocks, gfp_t gfp_mask,
 			      unsigned int type, unsigned int line_no)
 {
+    //即current->journal_info，这样看来每个进程第一次发起jbd journal，current->journal_info都是NULL，都要创建新的handle
 	handle_t *handle = journal_current_handle();
 	int err;
 
 	if (!journal)
 		return ERR_PTR(-EROFS);
-
+    //如果journal handle已经存在直接返回
 	if (handle) {
 		J_ASSERT(handle->h_transaction->t_journal == journal);
+        //引用计数加1
 		handle->h_ref++;
 		return handle;
 	}
-
+    //ext4 journal handle类型有EXT4_HT_INODE、EXT4_HT_DIR等多种类型，这是创建新的
 	handle = new_handle(nblocks);
 	if (!handle)
 		return ERR_PTR(-ENOMEM);
-
+    //这里才会对current->journal_info赋值
 	current->journal_info = handle;
-
+    //
 	err = start_this_handle(journal, handle, gfp_mask);
 	if (err < 0) {
 		jbd2_free_handle(handle);
@@ -422,7 +440,9 @@ EXPORT_SYMBOL(jbd2_journal_start);
  */
 int jbd2_journal_extend(handle_t *handle, int nblocks)
 {
+    //handle上的transaction
 	transaction_t *transaction = handle->h_transaction;
+    //所属的journal
 	journal_t *journal = transaction->t_journal;
 	int result;
 	int wanted;
@@ -1134,6 +1154,7 @@ int jbd2_journal_dirty_metadata(handle_t *handle, struct buffer_head *bh)
 
 	if (is_handle_aborted(handle))
 		goto out;
+    //jh来自inode有关的bh
 	jh = jbd2_journal_grab_journal_head(bh);
 	if (!jh) {
 		ret = -EUCLEAN;
@@ -1384,6 +1405,7 @@ drop:
  * return -EIO if a jbd2_journal_abort has been executed since the
  * transaction began.
  */
+//结束本次的journal jbd
 int jbd2_journal_stop(handle_t *handle)
 {
 	transaction_t *transaction = handle->h_transaction;
@@ -1512,7 +1534,9 @@ int jbd2_journal_stop(handle_t *handle)
 	 * pointer again.
 	 */
 	tid = transaction->t_tid;
+    //如果transaction->t_updates不为0，说明有transaction已经发起了，还有jbd commit进程在j_wait_updates休眠
 	if (atomic_dec_and_test(&transaction->t_updates)) {
+        //唤醒在j_wait_updates休眠的jbd commit的
 		wake_up(&journal->j_wait_updates);
 		if (journal->j_barrier_count)
 			wake_up(&journal->j_wait_transaction_locked);
@@ -2092,6 +2116,7 @@ int jbd2_journal_invalidatepage(journal_t *journal,
 /*
  * File a buffer on the given transaction list.
  */
+//jh来自inode有关的bh,transaction来自本次的jbd
 void __jbd2_journal_file_buffer(struct journal_head *jh,
 			transaction_t *transaction, int jlist)
 {
@@ -2136,8 +2161,9 @@ void __jbd2_journal_file_buffer(struct journal_head *jh,
 		J_ASSERT_JH(jh, !jh->b_committed_data);
 		J_ASSERT_JH(jh, !jh->b_frozen_data);
 		return;
-	case BJ_Metadata:
+	case BJ_Metadata://make_inode_dirty貌似是BJ_Metadata
 		transaction->t_nr_buffers++;
+        //list指向transaction的t_buffers
 		list = &transaction->t_buffers;
 		break;
 	case BJ_Forget:
@@ -2156,7 +2182,7 @@ void __jbd2_journal_file_buffer(struct journal_head *jh,
 		list = &transaction->t_reserved_list;
 		break;
 	}
-
+    //貌似把list添加到jh链表，jh来自inode有关的bh,list指向本次jbd的transaction
 	__blist_add_buffer(list, jh);
 	jh->b_jlist = jlist;
 

@@ -1216,6 +1216,7 @@ struct ext4_sb_info {
 	struct super_block *s_sb;
 
 	/* Journaling */
+    //ext4 journal控制结构，ext4_fill_super->ext4_load_journal()中mount初始化时赋值，一个块设备文件系统应该只有一个吧
 	struct journal_s *s_journal;
 	struct list_head s_orphan;
 	struct mutex s_orphan_lock;

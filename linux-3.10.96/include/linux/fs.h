@@ -1326,8 +1326,8 @@ struct super_block {
 
 	char s_id[32];				/* Informational name */
 	u8 s_uuid[16];				/* UUID */
-
-	void 			*s_fs_info;	/* Filesystem private info *///cpu cgroup里指向struct cgroupfs_root
+    //cgroup里指向struct cgroupfs_root，
+	void 			*s_fs_info;	/* Filesystem private info */
 	unsigned int		s_max_links;
 	fmode_t			s_mode;
 

@@ -383,9 +383,11 @@ struct jbd2_revoke_table_s;
 struct jbd2_journal_handle
 {
 	/* Which compound transaction is this update a part of? */
+    //handle指向的当前提交的transaction，start_this_handle()中赋值
 	transaction_t		*h_transaction;
 
 	/* Number of remaining buffers we are allowed to dirty: */
+    //看着像是这个handle上已经提交的jbd个数
 	int			h_buffer_credits;
 
 	/* Reference count on this handle */
@@ -402,6 +404,7 @@ struct jbd2_journal_handle
 	unsigned int	h_type:		8;	/* for handle statistics */
 	unsigned int	h_line_no:	16;	/* for handle statistics */
 
+    //start_this_handle()中提交transaction时，指向当前的系统时间jiffies
 	unsigned long		h_start_jiffies;
 	unsigned int		h_requested_credits;
 
@@ -473,6 +476,7 @@ struct transaction_s
 	 * FIXME: needs barriers
 	 * KLUDGE: [use j_state_lock]
 	 */
+	//jbd2_get_transaction->jbd2_get_transaction，中设置T_RUNNING
 	enum {
 		T_RUNNING,
 		T_LOCKED,
@@ -502,6 +506,7 @@ struct transaction_s
 	 * Doubly-linked circular list of all metadata buffers owned by this
 	 * transaction [j_list_lock]
 	 */
+	//__jbd2_journal_file_buffer()中，list指向transaction的t_buffers
 	struct journal_head	*t_buffers;
 
 	/*
@@ -577,6 +582,7 @@ struct transaction_s
 	 * Number of outstanding updates running on this transaction
 	 * [t_handle_lock]
 	 */
+	//start_this_handle()中，提交一个transaction,加1
 	atomic_t		t_updates;
 
 	/*
@@ -605,6 +611,7 @@ struct transaction_s
 	/*
 	 * How many handles used this transaction? [t_handle_lock]
 	 */
+	//start_this_handle()中，提交一个transaction,加1
 	atomic_t		t_handle_count;
 
 	/*
@@ -722,7 +729,7 @@ jbd2_time_diff(unsigned long start, unsigned long end)
  * @j_stats: Overall statistics
  * @j_private: An opaque pointer to fs-private information.
  */
-
+//ext4_dirty_inode()完成一次inode jbd发送
 struct journal_s
 {
 	/* General journaling state flags [j_state_lock] */
@@ -758,13 +765,15 @@ struct journal_s
 	 * Transactions: The current running transaction...
 	 * [j_state_lock] [caller holding open handle]
 	 */
+	//当前正在运行的一个jbd transaction,start_this_handle()中分配，start_this_handle->jbd2_get_transaction中有赋值
+	////jbd2_journal_commit_transaction()最后设置为刚发送完的jbd  transaction后，设置为NULL
 	transaction_t		*j_running_transaction;
 
 	/*
 	 * the transaction we are pushing to disk
 	 * [j_state_lock] [caller holding open handle]
 	 */
-	transaction_t		*j_committing_transaction;
+	transaction_t		*j_committing_transaction;//jbd2_journal_commit_transaction()最后设置为刚发送完的jbd  transaction
 
 	/*
 	 * ... and a linked circular list of all transactions waiting for
@@ -776,6 +785,8 @@ struct journal_s
 	 * Wait queue for waiting for a locked transaction to start committing,
 	 * or for a barrier lock to be released
 	 */
+	//start_this_handle(),当transaction_t的状态是T_LOCKED状态，要休眠等待，此时jbd2_journal_commit_transaction()函数正在jbd commit，所以先设置了
+	//T_LOCKED锁定，等commit完成，wake_up(&journal->j_wait_transaction_locked);
 	wait_queue_head_t	j_wait_transaction_locked;
 
 	/* Wait queue for waiting for checkpointing to complete */
