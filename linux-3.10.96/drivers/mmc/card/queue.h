@@ -30,7 +30,7 @@ struct mmc_packed {
 	u8			retries;
 	s16			idx_failure;
 };
-
+//mmc_init_queue()中赋值
 struct mmc_queue_req {
 	struct request		*req;
 	struct mmc_blk_request	brq;
@@ -45,6 +45,7 @@ struct mmc_queue_req {
 
 struct mmc_queue {
 	struct mmc_card		*card;
+    //在 mmc_init_queue()中分配了mmc命令操作内核线程"mmcqd/***"，mmc命令读写靠这个，线程函数是mmc_queue_thread
 	struct task_struct	*thread;
 	struct semaphore	thread_sem;
 	unsigned int		flags;
@@ -53,7 +54,7 @@ struct mmc_queue {
 
 	int			(*issue_fn)(struct mmc_queue *, struct request *);
 	void			*data;
-	struct request_queue	*queue;
+	struct request_queue	*queue;//mmc队列，mmc_init_queue()中赋值
 	struct mmc_queue_req	mqrq[2];
 	struct mmc_queue_req	*mqrq_cur;
 	struct mmc_queue_req	*mqrq_prev;

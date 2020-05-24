@@ -249,6 +249,7 @@ repeat_alloc:
 	 * FIXME: this should be io_schedule().  The timeout is there as a
 	 * workaround for some DM problems in 2.6.18.
 	 */
+	//ÕâÀïÓÐÐÝÃß
 	io_schedule_timeout(5*HZ);
 
 	finish_wait(&pool->wait, &wait);

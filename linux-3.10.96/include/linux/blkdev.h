@@ -106,11 +106,12 @@ struct request {
 	int cpu;
 
 	/* the following two fields are internal, NEVER access directly */
+    //应该是该rq里所有的bio读写的磁盘范围的总长度
 	unsigned int __data_len;	/* total data len */
 	sector_t __sector;		/* sector cursor */
 
-	struct bio *bio;
-	struct bio *biotail;
+	struct bio *bio;//貌似指向rq里新加入的bio
+	struct bio *biotail;//在把bio合并到rq时，也是执行新假如的bio，奇怪，看ll_back_merge_fn()
 
 	struct hlist_node hash;	/* merge hash */
 	/*
@@ -153,7 +154,7 @@ struct request {
 	/* Number of scatter-gather DMA addr+len pairs after
 	 * physical address coalescing is performed.
 	 */
-	unsigned short nr_phys_segments;
+	unsigned short nr_phys_segments;//应该就是对应的磁盘扇区总个数吧，或者内存page个数???????????????
 #if defined(CONFIG_BLK_DEV_INTEGRITY)
 	unsigned short nr_integrity_segments;
 #endif
@@ -163,7 +164,7 @@ struct request {
 	int ref_count;
 
 	void *special;		/* opaque pointer available for LLD use */
-	char *buffer;		/* kaddr of the current segment if available */
+	char *buffer;		/* kaddr of the current segment if available *///该bio对应的bh的内存page地址,还考虑了页内offset
 
 	int tag;
 	int errors;
@@ -284,13 +285,13 @@ struct queue_limits {
 	unsigned char		cluster;
 	unsigned char		discard_zeroes_data;
 };
-
+//貌似在blk_alloc_queue_node()分配struct request_queue
 struct request_queue {
 	/*
 	 * Together with queue_head for cacheline sharing
 	 */
 	struct list_head	queue_head;
-	struct request		*last_merge;
+	struct request		*last_merge;//上一次合并过的rq?????
 	struct elevator_queue	*elevator;
 	int			nr_rqs[2];	/* # allocated [a]sync rqs */
 	int			nr_rqs_elvpriv;	/* # allocated rqs w/ elvpriv */
@@ -302,10 +303,12 @@ struct request_queue {
 	 * determined using bio_request_list().
 	 */
 	struct request_list	root_rl;
-
-	request_fn_proc		*request_fn;
+    //mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue() 
+	request_fn_proc		*request_fn;//mmc_request_fn()
+	//mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue()->blk_queue_make_request()
+	//中赋值为blk_queue_bio()
 	make_request_fn		*make_request_fn;
-	prep_rq_fn		*prep_rq_fn;
+	prep_rq_fn		*prep_rq_fn;//mmc_init_queue()中赋值为mmc_prep_request
 	unprep_rq_fn		*unprep_rq_fn;
 	merge_bvec_fn		*merge_bvec_fn;
 	softirq_done_fn		*softirq_done_fn;
@@ -322,7 +325,7 @@ struct request_queue {
 	/*
 	 * Delayed queue handling
 	 */
-	struct delayed_work	delay_work;
+	struct delayed_work	delay_work;//mmc的是work函数是blk_delay_work，blk_alloc_queue_node()中赋值
 
 	struct backing_dev_info	backing_dev_info;
 
@@ -330,7 +333,7 @@ struct request_queue {
 	 * The queue owner gets to use this for whatever they like.
 	 * ll_rw_blk doesn't touch it.
 	 */
-	void			*queuedata;
+	void			*queuedata;//mmc的在mmc_init_queue()指向struct mmc_queue
 
 	/*
 	 * various queue flags, see QUEUE_* below
@@ -370,6 +373,7 @@ struct request_queue {
 	/*
 	 * queue settings
 	 */
+	//最多的rq请求数,不是当前的rq数
 	unsigned long		nr_requests;	/* Max # of requests */
 	unsigned int		nr_congestion_on;
 	unsigned int		nr_congestion_off;
@@ -393,7 +397,7 @@ struct request_queue {
 	unsigned int		request_fn_active;
 
 	unsigned int		rq_timeout;
-	struct timer_list	timeout;
+	struct timer_list	timeout;//mmc的定时器函数是blk_rq_timed_out_timer(),blk_alloc_queue_node中赋值
 	struct list_head	timeout_list;
 
 	struct list_head	icq_list;
@@ -636,7 +640,7 @@ static inline bool blk_check_merge_flags(unsigned int flags1,
 
 	return true;
 }
-
+//貌似是比较两个bio对应的bh的实际内存page是否一样????????
 static inline bool blk_write_same_mergeable(struct bio *a, struct bio *b)
 {
 	if (bio_data(a) == bio_data(b))
@@ -1507,7 +1511,7 @@ static inline bool blk_integrity_is_initialized(struct gendisk *g)
 }
 
 #endif /* CONFIG_BLK_DEV_INTEGRITY */
-
+//mmc的是mmc_bdops
 struct block_device_operations {
 	int (*open) (struct block_device *, fmode_t);
 	void (*release) (struct gendisk *, fmode_t);

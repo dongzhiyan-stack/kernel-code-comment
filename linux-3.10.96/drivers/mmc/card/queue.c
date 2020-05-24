@@ -67,7 +67,7 @@ static int mmc_queue_thread(void *d)
 		if (req || mq->mqrq_prev->req) {
 			set_current_state(TASK_RUNNING);
 			cmd_flags = req ? req->cmd_flags : 0;
-			mq->issue_fn(mq, req);
+			mq->issue_fn(mq, req);//mmc_blk_issue_rq() mmc读写事务发送
 			if (mq->flags & MMC_QUEUE_NEW_REQUEST) {
 				mq->flags &= ~MMC_QUEUE_NEW_REQUEST;
 				continue; /* fetch again */
@@ -109,6 +109,7 @@ static int mmc_queue_thread(void *d)
  * on any queue on this host, and attempt to issue it.  This may
  * not be the queue we were asked to process.
  */
+//唤醒emmc读写操作内核线程吧??????????????
 static void mmc_request_fn(struct request_queue *q)
 {
 	struct mmc_queue *mq = q->queuedata;
@@ -138,7 +139,7 @@ static void mmc_request_fn(struct request_queue *q)
 		}
 		spin_unlock_irqrestore(&cntx->lock, flags);
 	} else if (!mq->mqrq_cur->req && !mq->mqrq_prev->req)
-		wake_up_process(mq->thread);
+		wake_up_process(mq->thread);//mmc读写操作内核线程，线程函数是mmc_queue_thread()
 }
 
 static struct scatterlist *mmc_alloc_sg(int sg_len, int *err)
@@ -199,14 +200,15 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 		limit = *mmc_dev(host)->dma_mask;
 
 	mq->card = card;
+    //分配struct request_queue初始化并返回struct request_queue
 	mq->queue = blk_init_queue(mmc_request_fn, lock);
 	if (!mq->queue)
 		return -ENOMEM;
-
+    //struct mmc_queue_req赋值
 	mq->mqrq_cur = mqrq_cur;
 	mq->mqrq_prev = mqrq_prev;
 	mq->queue->queuedata = mq;
-
+    //mq->queue的prep_rq_fn赋值为mmc_prep_request
 	blk_queue_prep_rq(mq->queue, mmc_prep_request);
 	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, mq->queue);
 	if (mmc_can_erase(card))
@@ -247,20 +249,20 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 			blk_queue_max_hw_sectors(mq->queue, bouncesz / 512);
 			blk_queue_max_segments(mq->queue, bouncesz / 512);
 			blk_queue_max_segment_size(mq->queue, bouncesz);
-
+            //分配struct scatterlist
 			mqrq_cur->sg = mmc_alloc_sg(1, &ret);
 			if (ret)
 				goto cleanup_queue;
-
+            //分配struct scatterlist
 			mqrq_cur->bounce_sg =
 				mmc_alloc_sg(bouncesz / 512, &ret);
 			if (ret)
 				goto cleanup_queue;
-
+            //分配struct scatterlist
 			mqrq_prev->sg = mmc_alloc_sg(1, &ret);
 			if (ret)
 				goto cleanup_queue;
-
+            //分配struct scatterlist
 			mqrq_prev->bounce_sg =
 				mmc_alloc_sg(bouncesz / 512, &ret);
 			if (ret)
@@ -275,7 +277,7 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 			min(host->max_blk_count, host->max_req_size / 512));
 		blk_queue_max_segments(mq->queue, host->max_segs);
 		blk_queue_max_segment_size(mq->queue, host->max_seg_size);
-
+        //分配struct scatterlist
 		mqrq_cur->sg = mmc_alloc_sg(host->max_segs, &ret);
 		if (ret)
 			goto cleanup_queue;
@@ -287,7 +289,7 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 	}
 
 	sema_init(&mq->thread_sem, 1);
-
+    //创建"mmcqd/***"内核线程,就是在这个线程里休眠的
 	mq->thread = kthread_run(mmc_queue_thread, mq, "mmcqd/%d%s",
 		host->index, subname ? subname : "");
 

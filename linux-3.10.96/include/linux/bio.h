@@ -63,8 +63,8 @@
  */
 #define bio_iovec_idx(bio, idx)	(&((bio)->bi_io_vec[(idx)]))
 #define bio_iovec(bio)		bio_iovec_idx((bio), (bio)->bi_idx)
-#define bio_page(bio)		bio_iovec((bio))->bv_page
-#define bio_offset(bio)		bio_iovec((bio))->bv_offset
+#define bio_page(bio)		bio_iovec((bio))->bv_page//bio对应的bh的内存page
+#define bio_offset(bio)		bio_iovec((bio))->bv_offset//应该bio对应的bh的内存page的页内偏移吧
 #define bio_segments(bio)	((bio)->bi_vcnt - (bio)->bi_idx)
 #define bio_sectors(bio)	((bio)->bi_size >> 9)
 #define bio_end_sector(bio)	((bio)->bi_sector + bio_sectors((bio)))
@@ -76,7 +76,7 @@ static inline unsigned int bio_cur_bytes(struct bio *bio)
 	else /* dataless requests such as discard */
 		return bio->bi_size;
 }
-
+//该bio对应的bh的内存page地址，考虑了offset
 static inline void *bio_data(struct bio *bio)
 {
 	if (bio->bi_vcnt)
@@ -404,6 +404,7 @@ static inline bool bio_mergeable(struct bio *bio)
  * member of the bio.  The bio_list also caches the last list member to allow
  * fast access to the tail.
  */
+//这个bio_list的两个成员都是struct bio
 struct bio_list {
 	struct bio *head;
 	struct bio *tail;
@@ -432,16 +433,19 @@ static inline unsigned bio_list_size(const struct bio_list *bl)
 
 	return sz;
 }
-
+//??????????????????暂时搞不清楚bio add的逻辑
 static inline void bio_list_add(struct bio_list *bl, struct bio *bio)
 {
+    //新的bio->bi_next为NULL，看来这是作为尾部的bio
 	bio->bi_next = NULL;
 
+    //添加第一个bio时，bl->tail和bl->head应该都是NULL.第二次添加，bl->tail指向第一次的bio，
 	if (bl->tail)
-		bl->tail->bi_next = bio;
+		bl->tail->bi_next = bio;//新的bio依次添加到bl->tail链表的尾部
 	else
-		bl->head = bio;
+		bl->head = bio;//head指向新的bio，取出bio时就是从bl->head取出
 
+    //bl->tail永远指向最新添加的指向bio
 	bl->tail = bio;
 }
 
@@ -486,12 +490,14 @@ static inline struct bio *bio_list_peek(struct bio_list *bl)
 {
 	return bl->head;
 }
-
+//从bl链表上取出一个bio
 static inline struct bio *bio_list_pop(struct bio_list *bl)
 {
+    //bl->head指向的bio就是马上要使用的bio
 	struct bio *bio = bl->head;
 
 	if (bio) {
+        //bl->head指向下一个bio
 		bl->head = bl->head->bi_next;
 		if (!bl->head)
 			bl->tail = NULL;

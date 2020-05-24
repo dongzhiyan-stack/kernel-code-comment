@@ -198,7 +198,7 @@ struct gendisk {
 	struct hd_struct part0;
     //mmc的fops在alloc_disk后，在mmc_blk_alloc_req中赋值，是mmc_bdops
 	const struct block_device_operations *fops;
-    //mmc的fops在alloc_disk后，在mmc_blk_alloc_req中赋值
+    //mmc的fops在alloc_disk后，mmc_blk_probe->mmc_blk_alloc->mmc_blk_alloc_req赋值
 	struct request_queue *queue;
 	void *private_data;
 

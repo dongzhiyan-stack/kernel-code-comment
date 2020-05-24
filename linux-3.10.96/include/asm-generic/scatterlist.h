@@ -2,7 +2,7 @@
 #define __ASM_GENERIC_SCATTERLIST_H
 
 #include <linux/types.h>
-
+//mmc_init_queue()ÖÐ·ÖÅä
 struct scatterlist {
 #ifdef CONFIG_DEBUG_SG
 	unsigned long	sg_magic;

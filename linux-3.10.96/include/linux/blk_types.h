@@ -33,11 +33,15 @@ struct bio_vec {
  * stacking drivers)
  */
 struct bio {
+    //应该是本次bio请求的起始扇区号
 	sector_t		bi_sector;	/* device address in 512 byte
 						   sectors */
+    //貌似bi_next指向下一个bio
 	struct bio		*bi_next;	/* request queue link */
+    //本次要操作的块设备bdev，其中有struct request_queue            
 	struct block_device	*bi_bdev;
 	unsigned long		bi_flags;	/* status, command, etc */
+    //读、写、SYNC等 REQ_WRITE REQ_SYNC
 	unsigned long		bi_rw;		/* bottom bits READ/WRITE,
 						 * top bits priority
 						 */
@@ -59,7 +63,7 @@ struct bio {
 	unsigned int		bi_seg_front_size;
 	unsigned int		bi_seg_back_size;
 
-	bio_end_io_t		*bi_end_io;
+	bio_end_io_t		*bi_end_io;//bio回调函数,有end_swap_bio_read , ext4_end_bio ,end_bio_bh_io_sync
 
 	void			*bi_private;
 #ifdef CONFIG_BLK_CGROUP

@@ -252,6 +252,7 @@ static inline int ll_new_hw_segment(struct request_queue *q,
 {
 	int nr_phys_segs = bio_phys_segments(q, bio);
 
+   //应该req是合并bio的nr_phys_segs后的物理段数是否超过rq队列的阈值??????，应该就是对应的磁盘扇区个数吧，或者内存page个数
 	if (req->nr_phys_segments + nr_phys_segs > queue_max_segments(q))
 		goto no_merge;
 
@@ -262,6 +263,7 @@ static inline int ll_new_hw_segment(struct request_queue *q,
 	 * This will form the start of a new hw segment.  Bump both
 	 * counters.
 	 */
+	//req->nr_phys_segments增加新的bio的物理段数
 	req->nr_phys_segments += nr_phys_segs;
 	return 1;
 
@@ -271,10 +273,11 @@ no_merge:
 		q->last_merge = NULL;
 	return 0;
 }
-
+//合并本次的bio到rq
 int ll_back_merge_fn(struct request_queue *q, struct request *req,
 		     struct bio *bio)
 {
+    //rq和bio操作的磁盘地址范围，合并后是否超出磁盘最大空间
 	if (blk_rq_sectors(req) + bio_sectors(bio) >
 	    blk_rq_get_max_sectors(req)) {
 		req->cmd_flags |= REQ_NOMERGE;
@@ -282,8 +285,10 @@ int ll_back_merge_fn(struct request_queue *q, struct request *req,
 			q->last_merge = NULL;
 		return 0;
 	}
+    //对req->biotail的bi_phys_segments和bi_next设置新的值???????
 	if (!bio_flagged(req->biotail, BIO_SEG_VALID))
 		blk_recount_segments(q, req->biotail);
+    //对bio的bi_phys_segments和bi_next设置新的值???????
 	if (!bio_flagged(bio, BIO_SEG_VALID))
 		blk_recount_segments(q, bio);
 
@@ -501,20 +506,23 @@ int blk_attempt_req_merge(struct request_queue *q, struct request *rq,
 {
 	return attempt_merge(q, rq, next);
 }
-
+//对本次新的bio能否合并到rq链表已有的rq做各个前期检查，检查通过返回true
 bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 {
+    //rq和bio必须属于文件系统
 	if (!rq_mergeable(rq) || !bio_mergeable(bio))
 		return false;
-
+    //二者
 	if (!blk_check_merge_flags(rq->cmd_flags, bio->bi_rw))
 		return false;
 
 	/* different data direction or already started, don't merge */
+    //是否都是读或者写
 	if (bio_data_dir(bio) != rq_data_dir(rq))
 		return false;
 
 	/* must be same device and not a special request */
+    //是否属于同一个disk
 	if (rq->rq_disk != bio->bi_bdev->bd_disk || rq->special)
 		return false;
 
@@ -523,17 +531,20 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 		return false;
 
 	/* must be using the same buffer */
+    //如果rq有REQ_WRITE_SAME属性，则貌似是比较两个bio对应的bh的实际内存page是否一样????????
 	if (rq->cmd_flags & REQ_WRITE_SAME &&
 	    !blk_write_same_mergeable(rq->bio, bio))
 		return false;
 
 	return true;
 }
-
+//检查bio和rq代表的磁盘范围是否挨着，挨着则可以合并
 int blk_try_merge(struct request *rq, struct bio *bio)
 {
+    //rq的磁盘结束地址挨着bio的磁盘开始地址，rq向后合并本次的bio
 	if (blk_rq_pos(rq) + blk_rq_sectors(rq) == bio->bi_sector)
 		return ELEVATOR_BACK_MERGE;
+    //bio的磁盘结束地址挨着rq的磁盘开始地址，rq向前合并本次的bio
 	else if (blk_rq_pos(rq) - bio_sectors(bio) == bio->bi_sector)
 		return ELEVATOR_FRONT_MERGE;
 	return ELEVATOR_NO_MERGE;

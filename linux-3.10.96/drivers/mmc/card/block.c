@@ -2004,7 +2004,7 @@ static inline int mmc_blk_readonly(struct mmc_card *card)
 	return mmc_card_readonly(card) ||
 	       !(card->csd.cmdclass & CCC_BLOCK_WRITE);
 }
-
+//分配disk和mmc_blk_data初始化，创建request_queue并初始化,并对struct gendisk的struct request_queue赋值
 static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 					      struct device *parent,
 					      sector_t size,
@@ -2056,7 +2056,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 	spin_lock_init(&md->lock);
 	INIT_LIST_HEAD(&md->part);
 	md->usage = 1;
-
+    //创建request_queue并初始化
 	ret = mmc_init_queue(&md->queue, card, &md->lock, subname);
 	if (ret)
 		goto err_putdisk;
@@ -2068,6 +2068,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 	md->disk->first_minor = devidx * perdev_minors;
 	md->disk->fops = &mmc_bdops;//块设备操作函数
 	md->disk->private_data = md;
+    //对struct gendisk的struct request_queue赋值
 	md->disk->queue = md->queue.queue;
 	md->disk->driverfs_dev = parent;
 	set_disk_ro(md->disk, md->read_only || default_ro);
@@ -2148,7 +2149,7 @@ static struct mmc_blk_data *mmc_blk_alloc(struct mmc_card *card)
 		 */
 		size = card->csd.capacity << (card->csd.read_blkbits - 9);
 	}
-    //分配disk并初始化
+    //分配disk和mmc_blk_data初始化，创建request_queue并初始化,并对struct gendisk的struct request_queue赋值
 	md = mmc_blk_alloc_req(card, &card->dev, size, false, NULL,
 					MMC_BLK_DATA_AREA_MAIN);
 	return md;
@@ -2253,7 +2254,7 @@ static int mmc_add_disk(struct mmc_blk_data *md)
 	int ret;
 	struct mmc_card *card = md->queue.card;
 
-	add_disk(md->disk);
+	add_disk(md->disk);//这里
 	md->force_ro.show = force_ro_show;
 	md->force_ro.store = force_ro_store;
 	sysfs_attr_init(&md->force_ro.attr);
@@ -2369,6 +2370,7 @@ static int mmc_blk_probe(struct mmc_card *card)
 	if (!(card->csd.cmdclass & CCC_BLOCK_READ))
 		return -ENODEV;
     //分配struct gendisk disk并初始化，初始化主次设备号、块设备操作函数mmc_bdops
+    //分配mmc_blk_data初始化，创建request_queue并初始化,并对struct gendisk的struct request_queue赋值
 	md = mmc_blk_alloc(card);
 	if (IS_ERR(md))
 		return PTR_ERR(md);

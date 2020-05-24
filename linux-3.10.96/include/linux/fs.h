@@ -465,8 +465,9 @@ struct block_device {
 	unsigned		bd_part_count;
     //主分区register_disk中设置1，之后才会扫描块设备的主要分区
 	int			bd_invalidated;
-    //__blkdev_get()赋值为当前分区对应的disk
+    //__blkdev_get()赋值为当前分区对应的disk，里边有struct request_queue
 	struct gendisk *	bd_disk;
+    //bio 队列????????，可是struct gendisk也有request_queue，bdev和disk的request_queue有什么区别??????
 	struct request_queue *  bd_queue;
     //bdget()函数中添加到all_bdevs全局链表
 	struct list_head	bd_list;

@@ -309,7 +309,7 @@ inline void __blk_run_queue_uncond(struct request_queue *q)
 	 * can wait until all these request_fn calls have finished.
 	 */
 	q->request_fn_active++;
-	q->request_fn(q);
+	q->request_fn(q);//mmc_request_fn
 	q->request_fn_active--;
 }
 
@@ -321,6 +321,7 @@ inline void __blk_run_queue_uncond(struct request_queue *q)
  *    See @blk_run_queue. This variant must be called with the queue lock
  *    held and interrupts disabled.
  */
+//唤醒emmc读写操作内核线程吧??????????????
 void __blk_run_queue(struct request_queue *q)
 {
 	if (unlikely(blk_queue_stopped(q)))
@@ -584,12 +585,12 @@ struct request_queue *blk_alloc_queue(gfp_t gfp_mask)
 	return blk_alloc_queue_node(gfp_mask, NUMA_NO_NODE);
 }
 EXPORT_SYMBOL(blk_alloc_queue);
-
+//分配struct request_queue并初始化
 struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 {
 	struct request_queue *q;
 	int err;
-
+    //cache中分配struct request_queue
 	q = kmem_cache_alloc_node(blk_requestq_cachep,
 				gfp_mask | __GFP_ZERO, node_id);
 	if (!q)
@@ -605,7 +606,7 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 	q->backing_dev_info.capabilities = BDI_CAP_MAP_COPY;
 	q->backing_dev_info.name = "block";
 	q->node = node_id;
-
+    //struct backing_dev_info bdi初始化
 	err = bdi_init(&q->backing_dev_info);
 	if (err)
 		goto fail_id;
@@ -698,15 +699,16 @@ struct request_queue *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 }
 EXPORT_SYMBOL(blk_init_queue);
 
+//分配struct request_queue初始化并返回struct request_queue
 struct request_queue *
 blk_init_queue_node(request_fn_proc *rfn, spinlock_t *lock, int node_id)
 {
 	struct request_queue *uninit_q, *q;
-
+    //分配struct request_queue并初始化
 	uninit_q = blk_alloc_queue_node(GFP_KERNEL, node_id);
 	if (!uninit_q)
 		return NULL;
-
+    //rfn是mmc_request_fn,就是返回uninit_q
 	q = blk_init_allocated_queue(uninit_q, rfn, lock);
 	if (!q)
 		blk_cleanup_queue(uninit_q);
@@ -984,6 +986,7 @@ static struct request *__get_request(struct request_list *rl, int rw_flags,
 	spin_unlock_irq(q->queue_lock);
 
 	/* allocate and init request */
+    //分配rq，里边有休眠
 	rq = mempool_alloc(rl->rq_pool, gfp_mask);
 	if (!rq)
 		goto fail_alloc;
@@ -1088,6 +1091,7 @@ static struct request *get_request(struct request_queue *q, int rw_flags,
 
 	rl = blk_get_rl(q, bio);	/* transferred to @rq on success */
 retry:
+    //分配rq
 	rq = __get_request(rl, rw_flags, bio, gfp_mask);
 	if (rq)
 		return rq;
@@ -1396,7 +1400,7 @@ static bool bio_attempt_front_merge(struct request_queue *q,
 	 * it didn't need a bounce buffer then it better
 	 * not touch req->buffer either...
 	 */
-	req->buffer = bio_data(bio);
+	req->buffer = bio_data(bio);//该bio对应的bh的内存page地址
 	req->__sector = bio->bi_sector;
 	req->__data_len += bio->bi_size;
 	req->ioprio = ioprio_best(req->ioprio, bio_prio(bio));
@@ -1422,6 +1426,7 @@ static bool bio_attempt_front_merge(struct request_queue *q,
  * reliable access to the elevator outside queue lock.  Only check basic
  * merging parameters without querying the elevator.
  */
+//依次取出进程plug->list链表上已有的rq,判断rq代表的磁盘范围是否挨着本次的bio的范围，是则把bio合并到rq
 static bool attempt_plug_merge(struct request_queue *q, struct bio *bio,
 			       unsigned int *request_count)
 {
@@ -1433,22 +1438,22 @@ static bool attempt_plug_merge(struct request_queue *q, struct bio *bio,
 	if (!plug)
 		goto out;
 	*request_count = 0;
-
+    //依次取出进程plug->list链表上已有的struct request rq，然后判断rq代表的磁盘范围是否挨着本次的bio的范围，是则把bio合并到rq
 	list_for_each_entry_reverse(rq, &plug->list, queuelist) {
 		int el_ret;
-
+        //比较rq队列是否同一个
 		if (rq->q == q)
 			(*request_count)++;
-
+         //只有二者属于同一个rq队列，并且通过合并检查才能执行下边的合并
 		if (rq->q != q || !blk_rq_merge_ok(rq, bio))
 			continue;
-
+        //检查bio和rq代表的磁盘范围是否挨着，挨着则可以合并
 		el_ret = blk_try_merge(rq, bio);
-		if (el_ret == ELEVATOR_BACK_MERGE) {
+		if (el_ret == ELEVATOR_BACK_MERGE) {//二者挨着，rq向后合并本次的bio
 			ret = bio_attempt_back_merge(q, rq, bio);
 			if (ret)
 				break;
-		} else if (el_ret == ELEVATOR_FRONT_MERGE) {
+		} else if (el_ret == ELEVATOR_FRONT_MERGE) {//二者挨着，rq向前合并本次的bio
 			ret = bio_attempt_front_merge(q, rq, bio);
 			if (ret)
 				break;
@@ -1491,7 +1496,7 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 		bio_endio(bio, -EIO);
 		return;
 	}
-
+    //如果bio带有REQ_FLUSH、REQ_FUA属性，跳转，分配新的 struct request
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
 		spin_lock_irq(q->queue_lock);
 		where = ELEVATOR_INSERT_FLUSH;
@@ -1502,20 +1507,21 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 * Check if we can merge with the plugged list before grabbing
 	 * any locks.
 	 */
+	//依次取出进程plug->list链表上已有的rq,判断rq代表的磁盘范围是否挨着本次的bio的范围，是则把bio合并到rq
 	if (attempt_plug_merge(q, bio, &request_count))
 		return;
 
 	spin_lock_irq(q->queue_lock);
 
-	el_ret = elv_merge(q, &req, bio);
-	if (el_ret == ELEVATOR_BACK_MERGE) {
+	el_ret = elv_merge(q, &req, bio);//开始尝试elv调度器查找是否有可以合并的rq
+	if (el_ret == ELEVATOR_BACK_MERGE) {//二者磁盘范围挨着，rq向后合并本次的bio
 		if (bio_attempt_back_merge(q, req, bio)) {
 			elv_bio_merged(q, req, bio);
 			if (!attempt_back_merge(q, req))
 				elv_merged_request(q, req, el_ret);
 			goto out_unlock;
 		}
-	} else if (el_ret == ELEVATOR_FRONT_MERGE) {
+	} else if (el_ret == ELEVATOR_FRONT_MERGE) {//二者磁盘范围挨着，rq向后合并本次的bio
 		if (bio_attempt_front_merge(q, req, bio)) {
 			elv_bio_merged(q, req, bio);
 			if (!attempt_front_merge(q, req))
@@ -1524,6 +1530,7 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 		}
 	}
 
+//走到这里，应该没有找到可以合并bio的rq，那就针对bio新分配一个rq
 get_rq:
 	/*
 	 * This sync check and mask will be re-done in init_request_from_bio(),
@@ -1538,6 +1545,7 @@ get_rq:
 	 * Grab a free request. This is might sleep but can not fail.
 	 * Returns with the queue unlocked.
 	 */
+	//得到一个新的rq，里边有休眠
 	req = get_request(q, rw_flags, bio, GFP_NOIO);
 	if (unlikely(!req)) {
 		bio_endio(bio, -ENODEV);	/* @q is dead */
@@ -1554,7 +1562,7 @@ get_rq:
 
 	if (test_bit(QUEUE_FLAG_SAME_COMP, &q->queue_flags))
 		req->cpu = raw_smp_processor_id();
-
+    //当前进程的plug链表
 	plug = current->plug;
 	if (plug) {
 		/*
@@ -1571,11 +1579,16 @@ get_rq:
 				trace_block_plug(q);
 			}
 		}
+        //新分配的rq添加到plug->list链表
 		list_add_tail(&req->queuelist, &plug->list);
 		drive_stat_acct(req, 1);
-	} else {
+	} 
+    else 
+	{
 		spin_lock_irq(q->queue_lock);
+        //新分配的rq添加到rq队列
 		add_acct_request(q, req, where);
+        //启动rq队列，通知底层驱动，新的bio来了
 		__blk_run_queue(q);
 out_unlock:
 		spin_unlock_irq(q->queue_lock);
@@ -1813,6 +1826,7 @@ void generic_make_request(struct bio *bio)
 	 * it is non-NULL, then a make_request is active, and new requests
 	 * should be added at the tail
 	 */
+	//如果不为NULL，说明该进程已经有提交过的bio，把这个bio放到bio_list链表，下边的while循环处理完上一个bio，就处理这个bio
 	if (current->bio_list) {
 		bio_list_add(current->bio_list, bio);
 		return;
@@ -1834,12 +1848,14 @@ void generic_make_request(struct bio *bio)
 	 */
 	BUG_ON(bio->bi_next);
 	bio_list_init(&bio_list_on_stack);
+    //current->bio_list 指向刚初始化好的bio_list_on_stack
 	current->bio_list = &bio_list_on_stack;
 	do {
+        //获取bdev的disk的request_queue，不是bdev的request_queue????????????????
 		struct request_queue *q = bdev_get_queue(bio->bi_bdev);
 
-		q->make_request_fn(q, bio);
-
+		q->make_request_fn(q, bio);//blk_queue_bio
+        //貌似是取出另一个bio
 		bio = bio_list_pop(current->bio_list);
 	} while (bio);
 	current->bio_list = NULL; /* deactivate */

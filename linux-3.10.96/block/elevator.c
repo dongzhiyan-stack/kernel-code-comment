@@ -69,6 +69,7 @@ static int elv_iosched_allow_merge(struct request *rq, struct bio *bio)
  */
 bool elv_rq_merge_ok(struct request *rq, struct bio *bio)
 {
+    //对本次新的bio能否合并到rq链表已有的rq做各个前期检查，检查通过返回true
 	if (!blk_rq_merge_ok(rq, bio))
 		return 0;
 
@@ -408,6 +409,7 @@ void elv_dispatch_add_tail(struct request_queue *q, struct request *rq)
 }
 EXPORT_SYMBOL(elv_dispatch_add_tail);
 
+//在elv调度器里查找是否有可以合并的rq
 int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 {
 	struct elevator_queue *e = q->elevator;
@@ -426,7 +428,9 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	/*
 	 * First try one-hit cache.
 	 */
+	//是否可以把bio合并到q->last_merge，上次rq队列合并的rq
 	if (q->last_merge && elv_rq_merge_ok(q->last_merge, bio)) {
+        //检查bio和rq代表的磁盘范围是否挨着，挨着则可以合并
 		ret = blk_try_merge(q->last_merge, bio);
 		if (ret != ELEVATOR_NO_MERGE) {
 			*req = q->last_merge;
@@ -440,6 +444,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	/*
 	 * See if our hash lookup can find a potential backmerge.
 	 */
+	 //在elv调度器里查找是否有可以合并的rq
 	__rq = elv_rqhash_find(q, bio->bi_sector);
 	if (__rq && elv_rq_merge_ok(__rq, bio)) {
 		*req = __rq;
