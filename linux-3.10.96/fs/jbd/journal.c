@@ -628,7 +628,7 @@ EXPORT_SYMBOL(journal_trans_will_send_data_barrier);
 /*
  * Log buffer allocation routines:
  */
-
+//从journal->j_head队列头取出物理块号block
 int journal_next_log_block(journal_t *journal, unsigned int *retp)
 {
 	unsigned int blocknr;

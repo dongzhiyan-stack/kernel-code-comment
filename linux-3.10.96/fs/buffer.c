@@ -593,7 +593,7 @@ void mark_buffer_dirty_inode(struct buffer_head *bh, struct inode *inode)
 {
 	struct address_space *mapping = inode->i_mapping;
 	struct address_space *buffer_mapping = bh->b_page->mapping;
-
+    //标记bh所在page脏
 	mark_buffer_dirty(bh);
 	if (!mapping->private_data) {
 		mapping->private_data = buffer_mapping;
@@ -630,6 +630,7 @@ static void __set_page_dirty(struct page *page,
 				page_index(page), PAGECACHE_TAG_DIRTY);
 	}
 	spin_unlock_irqrestore(&mapping->tree_lock, flags);
+    //标记page脏
 	__mark_inode_dirty(mapping->host, I_DIRTY_PAGES);
 }
 
@@ -1138,10 +1139,11 @@ void mark_buffer_dirty(struct buffer_head *bh)
 	}
 
 	if (!test_set_buffer_dirty(bh)) {
+        //bh所在的page
 		struct page *page = bh->b_page;
 		if (!TestSetPageDirty(page)) {
 			struct address_space *mapping = page_mapping(page);
-			if (mapping)
+			if (mapping)//标记page脏
 				__set_page_dirty(page, mapping, 0);
 		}
 	}
@@ -1342,6 +1344,7 @@ EXPORT_SYMBOL(__find_get_block);
  * __getblk() will lock up the machine if grow_dev_page's try_to_free_buffers()
  * attempt is failing.  FIXME, perhaps?
  */
+//通过物理块号blocknr得到bh
 struct buffer_head *
 __getblk(struct block_device *bdev, sector_t block, unsigned size)
 {

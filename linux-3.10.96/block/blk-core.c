@@ -3047,7 +3047,7 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 
 	local_irq_restore(flags);
 }
-
+//这个函数 blk_finish_plug->queue_unplugged->__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn 发送emmc命令给emmc控制器
 void blk_finish_plug(struct blk_plug *plug)
 {
 	blk_flush_plug_list(plug, false);

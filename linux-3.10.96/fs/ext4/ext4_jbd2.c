@@ -234,7 +234,7 @@ int __ext4_handle_dirty_metadata(const char *where, unsigned int line,
 					 handle->h_buffer_credits, err);
 		}
 	} else {
-		if (inode)
+		if (inode)//标记inode物理块元数据对应的bh脏
 			mark_buffer_dirty_inode(bh, inode);
 		else
 			mark_buffer_dirty(bh);

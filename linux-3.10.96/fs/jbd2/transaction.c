@@ -372,6 +372,8 @@ static handle_t *new_handle(int nblocks)
  * Return a pointer to a newly allocated handle, or an ERR_PTR() value
  * on failure.
  */
+//获取一个原子操作描述符handle_t，如果已经有了则返回，否则创建一个handle_t。handle_t还与当前运行的transaction_t相关联
+//如果journal没有指向的transaction则分配新的
 handle_t *jbd2__journal_start(journal_t *journal, int nblocks, gfp_t gfp_mask,
 			      unsigned int type, unsigned int line_no)
 {
@@ -394,7 +396,7 @@ handle_t *jbd2__journal_start(journal_t *journal, int nblocks, gfp_t gfp_mask,
 		return ERR_PTR(-ENOMEM);
     //这里才会对current->journal_info赋值
 	current->journal_info = handle;
-    //
+    //核心
 	err = start_this_handle(journal, handle, gfp_mask);
 	if (err < 0) {
 		jbd2_free_handle(handle);
@@ -663,7 +665,7 @@ do_get_write_access(handle_t *handle, struct journal_head *jh,
 
 	if (is_handle_aborted(handle))
 		return -EROFS;
-
+    //获取当前的transaction和journal
 	transaction = handle->h_transaction;
 	journal = transaction->t_journal;
 
@@ -671,6 +673,7 @@ do_get_write_access(handle_t *handle, struct journal_head *jh,
 
 	JBUFFER_TRACE(jh, "entry");
 repeat:
+    //jh与bh一一对应
 	bh = jh2bh(jh);
 
 	/* @@@ Need to check for errors here at some point. */
@@ -697,12 +700,13 @@ repeat:
 	 * dump(8) (which may leave the buffer scheduled for read ---
 	 * ie. locked but not dirty) or tune2fs (which may actually have
 	 * the buffer dirtied, ugh.)  */
-
+    //当修改了inode数据，它的bh应该就脏了吧
 	if (buffer_dirty(bh)) {
 		/*
 		 * First question: is this buffer already part of the current
 		 * transaction or the existing committing transaction?
 		 */
+		//bh已经是当前transaction正在传输的????
 		if (jh->b_transaction) {
 			J_ASSERT_JH(jh,
 				jh->b_transaction == transaction ||
@@ -719,7 +723,9 @@ repeat:
 		 * with running write-out.
 		 */
 		JBUFFER_TRACE(jh, "Journalling dirty buffer");
+        //清除bh脏状态
 		clear_buffer_dirty(bh);
+        //设置bh jh的dirty状态
 		set_buffer_jbddirty(bh);
 	}
 
@@ -736,6 +742,7 @@ repeat:
 	 * The buffer is already part of this transaction if b_transaction or
 	 * b_next_transaction points to it
 	 */
+	//jh->b_transaction或者b_next_transaction是当前正在运行的transaction，说明jh已经添加过了，直接返回，没有必要再添加了
 	if (jh->b_transaction == transaction ||
 	    jh->b_next_transaction == transaction)
 		goto done;
@@ -750,9 +757,11 @@ repeat:
 	 * If there is already a copy-out version of this buffer, then we don't
 	 * need to make another one
 	 */
+	//走到这里，说明jh没有添加到当前正在运行的transaction，
 	if (jh->b_frozen_data) {
 		JBUFFER_TRACE(jh, "has frozen data");
 		J_ASSERT_JH(jh, jh->b_next_transaction == NULL);
+        //令jh->b_next_transaction指向当前的transaction，应该是说，当前的transaction处理完正在处理的jh后，就处理这个jh
 		jh->b_next_transaction = transaction;
 		goto done;
 	}
@@ -840,11 +849,13 @@ repeat:
 	 * sure it doesn't get written to disk before the caller actually
 	 * commits the new data
 	 */
+	//把jh添加到transaction的链表
 	if (!jh->b_transaction) {
 		JBUFFER_TRACE(jh, "no transaction");
 		J_ASSERT_JH(jh, !jh->b_next_transaction);
 		JBUFFER_TRACE(jh, "file as BJ_Reserved");
 		spin_lock(&journal->j_list_lock);
+        //jh添加到transaction的t_reserved_list链表
 		__jbd2_journal_file_buffer(jh, transaction, BJ_Reserved);
 		spin_unlock(&journal->j_list_lock);
 	}
@@ -898,9 +909,10 @@ out:
  * In full data journalling mode the buffer may be of type BJ_AsyncData,
  * because we're write()ing a buffer which is also part of a shared mapping.
  */
-
+//handle是本次jbd 操作的原子handle，bh就是本次要更新的inode元数据在物理块的bh
 int jbd2_journal_get_write_access(handle_t *handle, struct buffer_head *bh)
 {
+    //bh与jh相互构成联系，能彼此找到，貌似一个bh对应一个唯一的bh
 	struct journal_head *jh = jbd2_journal_add_journal_head(bh);
 	int rc;
 
@@ -1405,7 +1417,7 @@ drop:
  * return -EIO if a jbd2_journal_abort has been executed since the
  * transaction began.
  */
-//结束本次的journal jbd
+//结束本次的journal jbd,还可能唤醒内核jbd commit线程kjournald
 int jbd2_journal_stop(handle_t *handle)
 {
 	transaction_t *transaction = handle->h_transaction;
@@ -1542,11 +1554,11 @@ int jbd2_journal_stop(handle_t *handle)
 			wake_up(&journal->j_wait_transaction_locked);
 	}
 
-	if (wait_for_commit)
+	if (wait_for_commit)//唤醒在j_wait_commit上休眠的进程
 		err = jbd2_log_wait_commit(journal, tid);
 
 	lock_map_release(&handle->h_lockdep_map);
-
+    //释放handle
 	jbd2_free_handle(handle);
 	return err;
 }
@@ -1589,7 +1601,7 @@ int jbd2_journal_force_commit(journal_t *journal)
  *
  * jbd_lock_bh_state(jh2bh(jh)) is held.
  */
-
+//把jh添加到transaction list
 static inline void
 __blist_add_buffer(struct journal_head **list, struct journal_head *jh)
 {
@@ -2116,7 +2128,8 @@ int jbd2_journal_invalidatepage(journal_t *journal,
 /*
  * File a buffer on the given transaction list.
  */
-//jh来自inode有关的bh,transaction来自本次的jbd
+//jh来自inode有关的bh,transaction来自本次handle->h_transaction的指向的正在运行的transaction
+//把jh添加到transaction链表
 void __jbd2_journal_file_buffer(struct journal_head *jh,
 			transaction_t *transaction, int jlist)
 {
@@ -2154,6 +2167,7 @@ void __jbd2_journal_file_buffer(struct journal_head *jh,
 		__jbd2_journal_temp_unlink_buffer(jh);
 	else
 		jbd2_journal_grab_journal_head(bh);
+    //jh->b_transaction正在运行的transaction
 	jh->b_transaction = transaction;
 
 	switch (jlist) {
@@ -2178,11 +2192,11 @@ void __jbd2_journal_file_buffer(struct journal_head *jh,
 	case BJ_LogCtl:
 		list = &transaction->t_log_list;
 		break;
-	case BJ_Reserved:
+	case BJ_Reserved://do_get_write_access()中，是BJ_Reserved，jh添加到transaction的t_reserved_list链表
 		list = &transaction->t_reserved_list;
 		break;
 	}
-    //貌似把list添加到jh链表，jh来自inode有关的bh,list指向本次jbd的transaction
+    //貌似把jh添加到transaction->t_buffers链表，jh来自inode有关的bh,list指向本次jbd的transaction
 	__blist_add_buffer(list, jh);
 	jh->b_jlist = jlist;
 
@@ -2211,6 +2225,7 @@ void jbd2_journal_file_buffer(struct journal_head *jh,
  *
  * jh and bh may be already free when this function returns
  */
+//移除jh
 void __jbd2_journal_refile_buffer(struct journal_head *jh)
 {
 	int was_dirty, jlist;

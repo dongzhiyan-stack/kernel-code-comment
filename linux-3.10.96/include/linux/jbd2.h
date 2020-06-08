@@ -500,6 +500,7 @@ struct transaction_s
 	 * Doubly-linked circular list of all buffers reserved but not yet
 	 * modified by this transaction [j_list_lock]
 	 */
+	//__jbd2_journal_file_buffer()中，把jh添加到该transaction的list链表
 	struct journal_head	*t_reserved_list;
 
 	/*
@@ -786,21 +787,24 @@ struct journal_s
 	 * or for a barrier lock to be released
 	 */
 	//start_this_handle(),当transaction_t的状态是T_LOCKED状态，要休眠等待，此时jbd2_journal_commit_transaction()函数正在jbd commit，所以先设置了
-	//T_LOCKED锁定，等commit完成，wake_up(&journal->j_wait_transaction_locked);
+	//T_LOCKED锁定，等commit完成，wake_up(&journal->j_wait_transaction_locked);   jbd2_journal_stop()最后也有唤醒
 	wait_queue_head_t	j_wait_transaction_locked;
 
 	/* Wait queue for waiting for checkpointing to complete */
 	wait_queue_head_t	j_wait_logspace;
 
+    //jbd2_log_wait_commit()中在j_wait_done_commit上休眠
 	/* Wait queue for waiting for commit to complete */
 	wait_queue_head_t	j_wait_done_commit;
 
 	/* Wait queue to trigger checkpointing */
 	wait_queue_head_t	j_wait_checkpoint;
 
+    //jbd2_log_wait_commit()函数唤醒在j_wait_commit休眠的进程
 	/* Wait queue to trigger commit */
 	wait_queue_head_t	j_wait_commit;
 
+    //jbd2_journal_stop()最后唤醒在j_wait_updates休眠的jbd commit进程.jbd2_journal_commit_transaction()函数在j_wait_updates上休眠
 	/* Wait queue to wait for updates to complete */
 	wait_queue_head_t	j_wait_updates;
 
@@ -819,7 +823,7 @@ struct journal_s
 	 * Journal head: identifies the first unused block in the journal.
 	 * [j_state_lock]
 	 */
-	unsigned long		j_head;
+	unsigned long		j_head;//jbd2_journal_next_log_block中从j_head物理块好
 
 	/*
 	 * Journal tail: identifies the oldest still-used block in the journal.

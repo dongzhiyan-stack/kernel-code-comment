@@ -692,8 +692,10 @@ int jbd2_log_wait_commit(journal_t *journal, tid_t tid)
 	while (tid_gt(tid, journal->j_commit_sequence)) {
 		jbd_debug(1, "JBD2: want %d, j_commit_sequence=%d\n",
 				  tid, journal->j_commit_sequence);
+        //唤醒在j_wait_commit上休眠的进程
 		wake_up(&journal->j_wait_commit);
 		read_unlock(&journal->j_state_lock);
+        //在j_wait_done_commit上休眠
 		wait_event(journal->j_wait_done_commit,
 				!tid_gt(tid, journal->j_commit_sequence));
 		read_lock(&journal->j_state_lock);
@@ -741,21 +743,21 @@ EXPORT_SYMBOL(jbd2_complete_transaction);
 /*
  * Log buffer allocation routines:
  */
-
+//从journal上得到物理块号block
 int jbd2_journal_next_log_block(journal_t *journal, unsigned long long *retp)
 {
 	unsigned long blocknr;
 
 	write_lock(&journal->j_state_lock);
 	J_ASSERT(journal->j_free > 1);
-
+    //从队列都取出blocknr物理块号
 	blocknr = journal->j_head;
 	journal->j_head++;
 	journal->j_free--;
 	if (journal->j_head == journal->j_last)
 		journal->j_head = journal->j_first;
 	write_unlock(&journal->j_state_lock);
-	return jbd2_journal_bmap(journal, blocknr, retp);
+	return jbd2_journal_bmap(journal, blocknr, retp);//貌似就是 *retp=blocknr
 }
 
 /*
@@ -798,25 +800,28 @@ int jbd2_journal_bmap(journal_t *journal, unsigned long blocknr,
  * But we don't bother doing that, so there will be coherency problems with
  * mmaps of blockdevs which hold live JBD-controlled filesystems.
  */
+//从journal->j_head上得到journal队列头保存的物理块号block，再得到对应bh，然后分配jh,bh与jh相互构成联系并返回jh
 struct journal_head *jbd2_journal_get_descriptor_buffer(journal_t *journal)
 {
 	struct buffer_head *bh;
 	unsigned long long blocknr;
 	int err;
-
+    //从journal->j_head上得到journal队列头保存的物理块号block
 	err = jbd2_journal_next_log_block(journal, &blocknr);
 
 	if (err)
 		return NULL;
-
+    //通过物理块号blocknr得到bh
 	bh = __getblk(journal->j_dev, blocknr, journal->j_blocksize);
 	if (!bh)
 		return NULL;
 	lock_buffer(bh);
+    //这里把bh对应内存的数据清0，这是为什么?????????????????
 	memset(bh->b_data, 0, journal->j_blocksize);
 	set_buffer_uptodate(bh);
 	unlock_buffer(bh);
 	BUFFER_TRACE(bh, "return this buffer");
+    //分配jh,bh与jh相互构成联系并返回jh
 	return jbd2_journal_add_journal_head(bh);
 }
 
@@ -2416,6 +2421,7 @@ static void journal_free_journal_head(struct journal_head *jh)
  *
  * May sleep.
  */
+//分配jh,bh与jh相互构成联系并返回jh，能彼此找到，貌似一个bh对应一个唯一的bh
 struct journal_head *jbd2_journal_add_journal_head(struct buffer_head *bh)
 {
 	struct journal_head *jh;
@@ -2423,7 +2429,7 @@ struct journal_head *jbd2_journal_add_journal_head(struct buffer_head *bh)
 
 repeat:
 	if (!buffer_jbd(bh)) {
-		new_jh = journal_alloc_journal_head();
+		new_jh = journal_alloc_journal_head();//分配jh
 		memset(new_jh, 0, sizeof(*new_jh));
 	}
 
@@ -2443,6 +2449,7 @@ repeat:
 		jh = new_jh;
 		new_jh = NULL;		/* We consumed it */
 		set_buffer_jbd(bh);
+        //bh和jh相互构成联系
 		bh->b_private = jh;
 		jh->b_bh = bh;
 		get_bh(bh);

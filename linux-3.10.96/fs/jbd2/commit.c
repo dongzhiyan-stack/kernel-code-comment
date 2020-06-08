@@ -111,6 +111,7 @@ static void jbd2_commit_block_csum_set(journal_t *j,
  *
  * Returns 1 if the journal needs to be aborted or 0 on success
  */
+//从journal->j_head上得到journal队列头保存的物理块号block，再得到对应bh，然后分配jh,bh与jh相互构成联系，并发送submit_bh发送bh
 static int journal_submit_commit_record(journal_t *journal,
 					transaction_t *commit_transaction,
 					struct buffer_head **cbh,
@@ -126,7 +127,7 @@ static int journal_submit_commit_record(journal_t *journal,
 
 	if (is_journal_aborted(journal))
 		return 0;
-
+    //从journal->j_head上得到journal队列头保存的物理块号block，再得到对应bh，然后分配jh,bh与jh相互构成联系并返回jh给descriptor
 	descriptor = jbd2_journal_get_descriptor_buffer(journal);
 	if (!descriptor)
 		return 1;
@@ -154,6 +155,7 @@ static int journal_submit_commit_record(journal_t *journal,
 	set_buffer_uptodate(bh);
 	bh->b_end_io = journal_end_buffer_io_sync;
 
+    //发送bh传输
 	if (journal->j_flags & JBD2_BARRIER &&
 	    !JBD2_HAS_INCOMPAT_FEATURE(journal,
 				       JBD2_FEATURE_INCOMPAT_ASYNC_COMMIT))
@@ -191,6 +193,7 @@ static int journal_wait_on_commit_record(journal_t *journal,
  * use writepages() because with dealyed allocation we may be doing
  * block allocation in writepages().
  */
+//这是把文件数据page cache 刷回磁盘
 static int journal_submit_inode_data_buffers(struct address_space *mapping)
 {
 	int ret;
@@ -200,7 +203,7 @@ static int journal_submit_inode_data_buffers(struct address_space *mapping)
 		.range_start = 0,
 		.range_end = i_size_read(mapping->host),
 	};
-
+    //cache page脏页刷回硬盘
 	ret = generic_writepages(mapping, &wbc);
 	return ret;
 }
@@ -213,6 +216,7 @@ static int journal_submit_inode_data_buffers(struct address_space *mapping)
  * our inode list. We use JI_COMMIT_RUNNING flag to protect inode we currently
  * operate on from being released while we write out pages.
  */
+//这是把文件数据page cache 刷回磁盘，奇怪，jbd也处理文件数据呀，不只是处理inode元数据
 static int journal_submit_data_buffers(journal_t *journal,
 		transaction_t *commit_transaction)
 {
@@ -234,6 +238,7 @@ static int journal_submit_data_buffers(journal_t *journal,
 		 * only allocated blocks here.
 		 */
 		trace_jbd2_submit_inode_data(jinode->i_vfs_inode);
+        //这是把文件数据page cache 刷回磁盘，奇怪，jbd也处理文件数据呀，不只是处理inode元数据
 		err = journal_submit_inode_data_buffers(mapping);
 		if (!ret)
 			ret = err;
@@ -263,7 +268,7 @@ static int journal_finish_inode_data_buffers(journal_t *journal,
 	list_for_each_entry(jinode, &commit_transaction->t_inode_list, i_list) {
 		set_bit(__JI_COMMIT_RUNNING, &jinode->i_flags);
 		spin_unlock(&journal->j_list_lock);
-		err = filemap_fdatawait(jinode->i_vfs_inode->i_mapping);
+		err = filemap_fdatawait(jinode->i_vfs_inode->i_mapping);//等待数据传输完成
 		if (err) {
 			/*
 			 * Because AS_EIO is cleared by
@@ -434,7 +439,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 			commit_transaction->t_tid);
 
 	write_lock(&journal->j_state_lock);
-    //transaction->t_state设置为T_LOCKED
+    //transaction->t_state设置为T_LOCKED，锁住后就不能再添加新的transaction???
 	commit_transaction->t_state = T_LOCKED;
 
 	trace_jbd2_commit_locking(journal, commit_transaction);
@@ -489,6 +494,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	 * buffer are perfectly permissible.
 	 */
 	while (commit_transaction->t_reserved_list) {
+        //t_reserved_list队列上的jh是transaction添加的但是没有标记脏的，
 		jh = commit_transaction->t_reserved_list;
 		JBUFFER_TRACE(jh, "reserved, unused: refile");
 		/*
@@ -503,6 +509,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 			jh->b_committed_data = NULL;
 			jbd_unlock_bh_state(bh);
 		}
+        //移除jh
 		jbd2_journal_refile_buffer(journal, jh);
 	}
 
@@ -552,6 +559,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	 * on the transaction lists.  Data blocks go first.
 	 */
 	//这里貌似完成是的ext4 数据块?????????
+	//这是把文件数据page cache 刷回磁盘，奇怪，jbd也处理文件数据呀，不只是处理inode元数据
 	err = journal_submit_data_buffers(journal, commit_transaction);
 	if (err)
 		jbd2_journal_abort(journal, err);
@@ -559,6 +567,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	blk_start_plug(&plug);
 	jbd2_journal_write_revoke_records(journal, commit_transaction,
 					  WRITE_SYNC);
+    //这里貌似会把本次的page cache提交到block层
 	blk_finish_plug(&plug);
 
 	jbd_debug(3, "JBD2: commit phase 2\n");
@@ -587,6 +596,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	descriptor = NULL;
 	bufs = 0;
 	blk_start_plug(&plug);
+    //现在开始发送元数据
 	while (commit_transaction->t_buffers) {
 
 		/* Find the next buffer to be journaled... */
@@ -642,18 +652,19 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 			first_tag = 1;
 			set_buffer_jwrite(bh);
 			set_buffer_dirty(bh);
-            //wbuf[]填充bh
+            //wbuf[]填充bh，wbuf[]保存的是inode这些元数据对应物理块的bh
 			wbuf[bufs++] = bh;
 
 			/* Record it so that we can wait for IO
                            completion later */
 			BUFFER_TRACE(bh, "ph3: file as descriptor");
+            //貌似是把descriptor这个jh移除掉
 			jbd2_journal_file_buffer(descriptor, commit_transaction,
 					BJ_LogCtl);
 		}
 
 		/* Where is the buffer to be written? */
-
+        //下一个要写的物理块块号????
 		err = jbd2_journal_next_log_block(journal, &blocknr);
 		/* If the block mapping failed, just abandon the buffer
 		   and repeat this loop: we'll fall into the
@@ -765,6 +776,7 @@ start_journal_io:
 		}
 	}
 
+    //等待数据传输完成
 	err = journal_finish_inode_data_buffers(journal, commit_transaction);
 	if (err) {
 		printk(KERN_WARNING
@@ -782,6 +794,7 @@ start_journal_io:
 	 * storage and we will be safe to update journal start in the
 	 * superblock with the numbers we get here.
 	 */
+	//这是得到扇区号block,下边根据扇区号得到bh
 	update_tail =
 		jbd2_journal_get_log_tail(journal, &first_tid, &first_block);
 
@@ -796,6 +809,7 @@ start_journal_io:
 			update_tail = 0;
 	}
 	J_ASSERT(commit_transaction->t_state == T_COMMIT);
+    //commit_transaction->t_state 状态设置成 T_COMMIT_DFLUSH
 	commit_transaction->t_state = T_COMMIT_DFLUSH;
 	write_unlock(&journal->j_state_lock);
 
@@ -812,12 +826,14 @@ start_journal_io:
 	/* Done it all: now write the commit record asynchronously. */
 	if (JBD2_HAS_INCOMPAT_FEATURE(journal,
 				      JBD2_FEATURE_INCOMPAT_ASYNC_COMMIT)) {
+		//从journal->j_head上得到journal队列头保存的物理块号block，再得到对应bh，
+		//然后分配jh,bh与jh相互构成联系，并发送submit_bh发送bh
 		err = journal_submit_commit_record(journal, commit_transaction,
 						 &cbh, crc32_sum);
 		if (err)
 			__jbd2_journal_abort_hard(journal);
 	}
-
+    //这个函数 最终调用 mmc_request_fn 发送emmc命令给emmc控制器，SAS磁盘也是这个流程
 	blk_finish_plug(&plug);
 
 	/* Lo and behold: we have just managed to send a transaction to
@@ -840,11 +856,11 @@ start_journal_io:
 wait_for_iobuf:
 	while (commit_transaction->t_iobuf_list != NULL) {
 		struct buffer_head *bh;
-
+        //从commit_transaction->t_iobuf_list->b_tprev链表取出bh
 		jh = commit_transaction->t_iobuf_list->b_tprev;
 		bh = jh2bh(jh);
 		if (buffer_locked(bh)) {
-			wait_on_buffer(bh);
+			wait_on_buffer(bh);//等待bh对应page数据传输完成
 			goto wait_for_iobuf;
 		}
 		if (cond_resched())
@@ -870,6 +886,7 @@ wait_for_iobuf:
 
 		/* We also have to unlock and free the corresponding
                    shadowed buffer */
+        //从commit_transaction->t_shadow_list->b_tprev 链表取出bh??????????
 		jh = commit_transaction->t_shadow_list->b_tprev;
 		bh = jh2bh(jh);
 		clear_bit(BH_JWrite, &bh->b_state);

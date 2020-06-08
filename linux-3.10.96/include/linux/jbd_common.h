@@ -34,7 +34,7 @@ static inline struct buffer_head *jh2bh(struct journal_head *jh)
 
 static inline struct journal_head *bh2jh(struct buffer_head *bh)
 {
-	return bh->b_private;
+	return bh->b_private;//jh
 }
 
 static inline void jbd_lock_bh_state(struct buffer_head *bh)

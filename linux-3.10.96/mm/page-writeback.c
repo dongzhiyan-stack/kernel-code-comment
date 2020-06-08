@@ -1721,6 +1721,7 @@ EXPORT_SYMBOL(tag_pages_for_writeback);
  * tag we set). The rule we follow is that TOWRITE tag can be cleared only
  * by the process clearing the DIRTY tag (and submitting the page for IO).
  */
+//cache page脏页刷回硬盘，sync系统调用最后也会调用到这个函数
 int write_cache_pages(struct address_space *mapping,
 		      struct writeback_control *wbc, writepage_t writepage,
 		      void *data)
@@ -1763,14 +1764,14 @@ retry:
 	done_index = index;
 	while (!done && (index <= end)) {
 		int i;
-
+        //取出cache page保存到pvec.pages[]
 		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
 			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 		if (nr_pages == 0)
 			break;
 
 		for (i = 0; i < nr_pages; i++) {
-			struct page *page = pvec.pages[i];
+			struct page *page = pvec.pages[i];//取出cache page
 
 			/*
 			 * At this point, the page may be truncated or
@@ -1823,7 +1824,7 @@ continue_unlock:
 				goto continue_unlock;
 
 			trace_wbc_writepage(wbc, mapping->backing_dev_info);
-			ret = (*writepage)(page, wbc, data);
+			ret = (*writepage)(page, wbc, data);//__writepage() 实际写page cache到硬盘
 			if (unlikely(ret)) {
 				if (ret == AOP_WRITEPAGE_ACTIVATE) {
 					unlock_page(page);

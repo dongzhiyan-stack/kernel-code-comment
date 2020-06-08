@@ -65,10 +65,12 @@ struct buffer_head {
 
 	sector_t b_blocknr;		/* start block number */
 	size_t b_size;			/* size of mapping */
+    //bh对应物理块数据保存在b_data指定的内存
 	char *b_data;			/* pointer to data within the page */
 
 	struct block_device *b_bdev;
 	bh_end_io_t *b_end_io;		/* I/O completion */
+    //jbd场景，指向jh
  	void *b_private;		/* reserved for b_end_io */
 	struct list_head b_assoc_buffers; /* associated with another mapping */
 	struct address_space *b_assoc_map;	/* mapping this buffer is
@@ -299,7 +301,7 @@ sb_breadahead(struct super_block *sb, sector_t block)
 {
 	__breadahead(sb->s_bdev, block, sb->s_blocksize);
 }
-
+//根据扇区号得到对应的bh
 static inline struct buffer_head *
 sb_getblk(struct super_block *sb, sector_t block)
 {

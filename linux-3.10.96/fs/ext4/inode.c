@@ -3952,8 +3952,9 @@ static int __ext4_get_inode_loc(struct inode *inode,
 	iloc->bh = NULL;
 	if (!ext4_valid_inum(sb, inode->i_ino))
 		return -EIO;
-
+    //inode的物理块号除以每块组inode个数，计算出该inode在第几个块组，每个块组容纳的最大inode个数是一致的
 	iloc->block_group = (inode->i_ino - 1) / EXT4_INODES_PER_GROUP(sb);
+    //根据块组号得到该inode的块组描述符
 	gdp = ext4_get_group_desc(sb, iloc->block_group, NULL);
 	if (!gdp)
 		return -EIO;
@@ -3961,12 +3962,15 @@ static int __ext4_get_inode_loc(struct inode *inode,
 	/*
 	 * Figure out the offset within the block group inode table
 	 */
+	//每个物理块inode个数
 	inodes_per_block = EXT4_SB(sb)->s_inodes_per_block;
+    //该inode在块组内的偏移
 	inode_offset = ((inode->i_ino - 1) %
 			EXT4_INODES_PER_GROUP(sb));
+    //貌似是求出inode的物理块号?奇怪inode->i_ino不就是物理块号?哎，该复习ext4代码了
 	block = ext4_inode_table(sb, gdp) + (inode_offset / inodes_per_block);
 	iloc->offset = (inode_offset % inodes_per_block) * EXT4_INODE_SIZE(sb);
-
+    //这应该是得到inode元数据所在的物理块对应的bh吧，注意，这不是inode对应的文件的数据所在的物理块的bh
 	bh = sb_getblk(sb, block);
 	if (unlikely(!bh))
 		return -ENOMEM;
@@ -4073,6 +4077,7 @@ make_io:
 		}
 	}
 has_buffer:
+    //inode元数据所在的物理块的bh赋予iloc->bh
 	iloc->bh = bh;
 	return 0;
 }
@@ -4446,10 +4451,12 @@ static int ext4_inode_blocks_set(handle_t *handle,
  *
  * The caller must have write access to iloc->bh.
  */
+//在这里更新inode元数据，比如文件修改时间
 static int ext4_do_update_inode(handle_t *handle,
 				struct inode *inode,
 				struct ext4_iloc *iloc)
 {
+    //通过文件inode的bh，得到inode对应的元数据ext4_inode
 	struct ext4_inode *raw_inode = ext4_raw_inode(iloc);
 	struct ext4_inode_info *ei = EXT4_I(inode);
 	struct buffer_head *bh = iloc->bh;
@@ -4490,7 +4497,7 @@ static int ext4_do_update_inode(handle_t *handle,
 		raw_inode->i_gid_high = 0;
 	}
 	raw_inode->i_links_count = cpu_to_le16(inode->i_nlink);
-
+    //这应该是修改inode的修改时间吧，因为写文件时，就会触发ext4 jbd写
 	EXT4_INODE_SET_XTIME(i_ctime, inode, raw_inode);
 	EXT4_INODE_SET_XTIME(i_mtime, inode, raw_inode);
 	EXT4_INODE_SET_XTIME(i_atime, inode, raw_inode);
@@ -4557,6 +4564,7 @@ static int ext4_do_update_inode(handle_t *handle,
 	ext4_inode_csum_set(inode, raw_inode, ei);
 
 	BUFFER_TRACE(bh, "call ext4_handle_dirty_metadata");
+    //标记inode数据脏
 	rc = ext4_handle_dirty_metadata(handle, NULL, bh);
 	if (!err)
 		err = rc;
@@ -4978,7 +4986,8 @@ int ext4_mark_iloc_dirty(handle_t *handle,
 	get_bh(iloc->bh);
 
 	/* ext4_do_update_inode() does jbd2_journal_dirty_metadata */
-	err = ext4_do_update_inode(handle, inode, iloc);
+    //修改inode元数据，比如文件时间，实际是修改inode物理块元数据的bh所在的内存bh->b_data
+	err = ext4_do_update_inode(handle, inode, iloc);//里边调用了ext4_handle_dirty_metadata()
 	put_bh(iloc->bh);
 	return err;
 }
@@ -4987,16 +4996,17 @@ int ext4_mark_iloc_dirty(handle_t *handle,
  * On success, We end up with an outstanding reference count against
  * iloc->bh.  This _must_ be cleaned up later.
  */
-
+//建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction链表
 int
 ext4_reserve_inode_write(handle_t *handle, struct inode *inode,
 			 struct ext4_iloc *iloc)
 {
 	int err;
-
+    //应该是得到inode元数据所在物理块的bh,存于iloc->bh
 	err = ext4_get_inode_loc(inode, iloc);
 	if (!err) {
 		BUFFER_TRACE(iloc->bh, "get_write_access");
+        //建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction链表
 		err = ext4_journal_get_write_access(handle, iloc->bh);
 		if (err) {
 			brelse(iloc->bh);
@@ -5062,6 +5072,7 @@ int ext4_mark_inode_dirty(handle_t *handle, struct inode *inode)
 
 	might_sleep();
 	trace_ext4_mark_inode_dirty(inode, _RET_IP_);
+    //建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction链表
 	err = ext4_reserve_inode_write(handle, inode, &iloc);
 	if (ext4_handle_valid(handle) &&
 	    EXT4_I(inode)->i_extra_isize < sbi->s_want_extra_isize &&

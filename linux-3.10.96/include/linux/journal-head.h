@@ -20,13 +20,13 @@ struct journal_head {
 	/*
 	 * Points back to our buffer_head. [jbd_lock_bh_journal_head()]
 	 */
-	struct buffer_head *b_bh;
+	struct buffer_head *b_bh;//指向bh,jbd2_journal_add_journal_head()
 
 	/*
 	 * Reference count - see description in journal.c
 	 * [jbd_lock_bh_journal_head()]
 	 */
-	int b_jcount;
+	int b_jcount;//bh与jh构成联系后，加1
 
 	/*
 	 * Journalling list for this buffer [jbd_lock_bh_state()]
@@ -66,6 +66,7 @@ struct journal_head {
 	 * Either of these locks is enough for reading, both are needed for
 	 * changes.
 	 */
+	//do_get_write_access->__jbd2_journal_file_buffer,指向当前正在运行的transaction
 	transaction_t *b_transaction;
 
 	/*
@@ -74,6 +75,7 @@ struct journal_head {
 	 * committing it when the new transaction touched it.
 	 * [t_list_lock] [jbd_lock_bh_state()]
 	 */
+	//do_get_write_access(),jh->b_next_transaction指向当前的transaction，当前的transaction处理完正在处理的jh后，就处理这个jh
 	transaction_t *b_next_transaction;
 
 	/*

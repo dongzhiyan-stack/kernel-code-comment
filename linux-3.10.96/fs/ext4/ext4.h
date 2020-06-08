@@ -1758,15 +1758,16 @@ struct dx_hash_info
 /*
  * Describe an inode's exact location on disk and in memory
  */
-struct ext4_iloc
+struct ext4_iloc//赋值在__ext4_get_inode_loc
 {
-	struct buffer_head *bh;
+	struct buffer_head *bh;//inode元数据所在的物理块的bh
 	unsigned long offset;
 	ext4_group_t block_group;
 };
 
 static inline struct ext4_inode *ext4_raw_inode(struct ext4_iloc *iloc)
 {
+    //iloc->bh是文件inode元数据所在物理块对应的bh，iloc->bh->b_data是该物理块的数据保存到内存的首地址，
 	return (struct ext4_inode *) (iloc->bh->b_data + iloc->offset);
 }
 
