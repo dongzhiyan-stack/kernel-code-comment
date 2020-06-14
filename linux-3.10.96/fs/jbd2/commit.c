@@ -342,6 +342,7 @@ static void jbd2_descr_block_csum_set(journal_t *j,
 	tail->t_checksum = 0;
 	csum = jbd2_chksum(j, j->j_csum_seed, jh2bh(descriptor)->b_data,
 			   j->j_blocksize);
+    //计算checksum值
 	tail->t_checksum = cpu_to_be32(csum);
 }
 
@@ -455,9 +456,9 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 
 	spin_lock(&commit_transaction->t_handle_lock);
     //如果transaction->t_updates不为0，说明提交journal的transaction的那个进程，jbd提交过程还没走完，只执行了
-    //jbd2_journal_start令transaction->t_updates加1，没有执行jbd2_journal_stop()最后的代码，令transaction->t_updates减1，
+    //jbd2_journal_start令transaction->t_updates加1，没有执行jbd2_journal_stop()最后的代码令transaction->t_updates减1。
     //所以这个jbd commit进程要先在这里journal->j_wait_updates上休眠，等待刚才那个进程执行jbd2_journal_stop()，
-    //transaction->t_updates减1，并且wake_up在journal->j_wait_updates上休眠的jbd commit进程
+    //transaction->t_updates减1，然后wake_up在journal->j_wait_updates上休眠的jbd commit进程
 	while (atomic_read(&commit_transaction->t_updates)) {
 		DEFINE_WAIT(wait);
 
@@ -494,7 +495,12 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	 * buffer are perfectly permissible.
 	 */
 	while (commit_transaction->t_reserved_list) {
-        //t_reserved_list队列上的jh是transaction添加的但是没有标记脏的，
+        //t_reserved_list队列上的jh是transaction添加的但是没有标记脏的
+        //一个jh先执行jbd2_journal_get_write_access()被添加到transaction的BJ_Reserved即t_reserved_list链表
+        //然后会执行__ext4_handle_dirty_metadata()被添加到transaction的BJ_Metadata链表，这时表示这个jh对应的bh的元数据
+        //已经被修改了，是脏bh。但是如果这个时候transaction->t_reserved_list即BJ_Reserved链表上还有jh，就说明这个jh
+        //对应的元数据还没有被修改，那本次不用处理这个jh了,
+        //这种情况会发生吗????????????????????????????????????????????????????
 		jh = commit_transaction->t_reserved_list;
 		JBUFFER_TRACE(jh, "reserved, unused: refile");
 		/*
@@ -509,7 +515,8 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 			jh->b_committed_data = NULL;
 			jbd_unlock_bh_state(bh);
 		}
-        //移除jh
+        //jh->b_next_transaction为NILL，jh没用则释放掉
+        //否则要把jh再次添加到jh->b_next_transaction执行的BJ_Forget或BJ_Metadata或BJ_Reserved链表
 		jbd2_journal_refile_buffer(journal, jh);
 	}
 
@@ -519,6 +526,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	 * frees some memory
 	 */
 	spin_lock(&journal->j_list_lock);
+	//处理journal->j_checkpoint_transactions上的transaction????????????????????????????????????????????????????
 	__jbd2_journal_clean_checkpoint_list(journal);
 	spin_unlock(&journal->j_list_lock);
 
@@ -528,11 +536,13 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	 * Clear revoked flag to reflect there is no revoked buffers
 	 * in the next transaction which is going to be started.
 	 */
+	 //????????????????????????????????????????????????????
 	jbd2_clear_buffer_revoked_flags(journal);
 
 	/*
 	 * Switch to a new revoke table.
 	 */
+	 //????????????????????????????????????????????????????
 	jbd2_journal_switch_revoke_table(journal);
 
 	trace_jbd2_commit_flushing(journal, commit_transaction);
@@ -560,11 +570,13 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	 */
 	//这里貌似完成是的ext4 数据块?????????
 	//这是把文件数据page cache 刷回磁盘，奇怪，jbd也处理文件数据呀，不只是处理inode元数据
+	//原来是在order模式下，要先把jh-->bh有关的Data blocks刷回磁盘，????Data blocks是什么鬼????????????????????不理解????????
 	err = journal_submit_data_buffers(journal, commit_transaction);
 	if (err)
 		jbd2_journal_abort(journal, err);
 
 	blk_start_plug(&plug);
+    //????????????????????????????????????????????????????????????????????
 	jbd2_journal_write_revoke_records(journal, commit_transaction,
 					  WRITE_SYNC);
     //这里貌似会把本次的page cache提交到block层
@@ -578,6 +590,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	 * metadata.  Loop over the transaction's entire buffer list:
 	 */
 	write_lock(&journal->j_state_lock);
+    //transaction->t_state状态设置为T_COMMIT
 	commit_transaction->t_state = T_COMMIT;
 	write_unlock(&journal->j_state_lock);
 
@@ -600,7 +613,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 	while (commit_transaction->t_buffers) {
 
 		/* Find the next buffer to be journaled... */
-        //从transaction->t_buffers上取出之前ext4 jbd发起时挂着的文件inode jbd
+        //从transaction->t_buffers指向的元数据链表BJ_Metadata取出jh
 		jh = commit_transaction->t_buffers;
 
 		/* If we're in abort mode, we just un-journal the buffer and
@@ -632,39 +645,45 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 			J_ASSERT (bufs == 0);
 
 			jbd_debug(4, "JBD2: get descriptor\n");
-
+            //从ext4文件系统磁盘空间中取出的journal那部分空间文件的一个描述符块struct journal_head descriptor
 			descriptor = jbd2_journal_get_descriptor_buffer(journal);
 			if (!descriptor) {
 				jbd2_journal_abort(journal, -EIO);
 				continue;
 			}
-            //这应该是inode对应的bh          
+            //描述符块descriptor对应的bh，这个bh不是文件inode磁盘物理块对应的bh，是journal空间文件的一个bh
+            //就是备份文件inode数据的journal空间里的bh
 			bh = jh2bh(descriptor);
 			jbd_debug(4, "JBD2: got buffer %llu (%p)\n",
 				(unsigned long long)bh->b_blocknr, bh->b_data);
+            //header指向journal空间里的bh内存空间
 			header = (journal_header_t *)&bh->b_data[0];
+            //显然这是journal描述符块的开头部分，h_magic，h_blocktype
 			header->h_magic     = cpu_to_be32(JBD2_MAGIC_NUMBER);
 			header->h_blocktype = cpu_to_be32(JBD2_DESCRIPTOR_BLOCK);
+            //h_sequence记录了transaction->t_tid
 			header->h_sequence  = cpu_to_be32(commit_transaction->t_tid);
-
+            //tagp指向journal描述符块的bh内存首地址偏移journal_header_t大小后的空间
 			tagp = &bh->b_data[sizeof(journal_header_t)];
+            //space_left是bh代表的物理块大小减去journal_header_t大小后的
 			space_left = bh->b_size - sizeof(journal_header_t);
 			first_tag = 1;
 			set_buffer_jwrite(bh);
 			set_buffer_dirty(bh);
-            //wbuf[]填充bh，wbuf[]保存的是inode这些元数据对应物理块的bh
+            //wbuf[]填充bh，这个bh是journal空间里的bh,备份文件inode脏数据的，不是文件inode的bh
 			wbuf[bufs++] = bh;
 
 			/* Record it so that we can wait for IO
                            completion later */
 			BUFFER_TRACE(bh, "ph3: file as descriptor");
-            //貌似是把descriptor这个jh移除掉
+            //把journal日志描述符块对应的descriptor这个jh添加到commit_transaction的BJ_LogCtl链表
 			jbd2_journal_file_buffer(descriptor, commit_transaction,
 					BJ_LogCtl);
 		}
 
 		/* Where is the buffer to be written? */
-        //下一个要写的物理块块号????
+        //下一个要写的物理块块号?????????这一步很关键，这个blocknr应该是journal空间文件范围的一个物理块号
+        //下边分配new_jh和new_bh时，
 		err = jbd2_journal_next_log_block(journal, &blocknr);
 		/* If the block mapping failed, just abandon the buffer
 		   and repeat this loop: we'll fall into the
@@ -698,13 +717,18 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 		 * (which is of type BJ_IO)
 		 */
 		JBUFFER_TRACE(jh, "ph3: write metadata");
+        //jh是从transaction的BJ_Metadata取出jh。根据jh分配新的new_jh，二者对应的bh数据一样，new_jh的new_bh被写入磁盘
+        //jh被移动到commit_transaction的BJ_Shadow链表，new_jh被移动到commit_transaction的BJ_IO链表。
+        //new_bh内存指向的是文件inode元数据bh的内存，这就是文件inode元数据备份到journal空间的的核心呀
 		flags = jbd2_journal_write_metadata_buffer(commit_transaction,
 						      jh, &new_jh, blocknr);
 		if (flags < 0) {
 			jbd2_journal_abort(journal, flags);
 			continue;
 		}
+        //设置new_jh的bh的b_state是BH_JWrite，表示该bh将要被写入磁盘?????????????
 		set_bit(BH_JWrite, &jh2bh(new_jh)->b_state);
+        //wbuf[bufs++]记录new_bh，下边submit_bh把new_bh写入journal空间的blocknr物理块号位置，完成inode元数据的备份!!!!!!!!!!
 		wbuf[bufs++] = jh2bh(new_jh);
 
 		/* Record the new block's tag in the current descriptor
@@ -715,16 +739,21 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 			tag_flag |= JBD2_FLAG_ESCAPE;
 		if (!first_tag)
 			tag_flag |= JBD2_FLAG_SAME_UUID;
-
+        //tagp在上边指向journal描述符块的bh内存首地址偏移journal_header_t大小后的空间，journal_block_tag_t应该就是描述符块
+        //专有数据结构吧
 		tag = (journal_block_tag_t *) tagp;
+        //tag->t_blocknr记录jh的bh的物理块号
+        //注意，jh这是代表inode元数据的jh的，不是journal描述符块的bh，什么鬼，乱七八糟的!!!!!!!!!!!!!!!!!!
 		write_tag_block(tag_bytes, tag, jh2bh(jh)->b_blocknr);
 		tag->t_flags = cpu_to_be16(tag_flag);
 		jbd2_block_tag_csum_set(journal, tag, jh2bh(new_jh),
 					commit_transaction->t_tid);
+        //tagp继续向后偏移tag_bytes
 		tagp += tag_bytes;
 		space_left -= tag_bytes;
-
+        //inode元数据传输时的一个journal描述符块first_tag被置1
 		if (first_tag) {
+            //tagp指向的16字节内存空间置j_uuid
 			memcpy (tagp, journal->j_uuid, 16);
 			tagp += 16;
 			space_left -= 16;
@@ -733,7 +762,8 @@ void jbd2_journal_commit_transaction(journal_t *journal)
 
 		/* If there's no more to do, or if the descriptor is full,
 		   let the IO rip! */
-
+        //wbuf[bufs++]保存的要传输的的bh达到journal->j_wbufsize，或者transaction->t_buffers即BJ_Metadata链表空了
+        //或者描述符块对应的bh空间块满了，就开始启动submit_bh
 		if (bufs == journal->j_wbufsize ||
 		    commit_transaction->t_buffers == NULL ||
 		    space_left < tag_bytes + 16 + csum_size) {
@@ -745,7 +775,7 @@ void jbd2_journal_commit_transaction(journal_t *journal)
                            the last tag we set up. */
 
 			tag->t_flags |= cpu_to_be16(JBD2_FLAG_LAST_TAG);
-
+            //计算h2bh(descriptor)->b_data的checksum值
 			jbd2_descr_block_csum_set(journal, descriptor);
 start_journal_io:
 			for (i = 0; i < bufs; i++) {
@@ -824,6 +854,7 @@ start_journal_io:
 		blkdev_issue_flush(journal->j_fs_dev, GFP_NOFS, NULL);
 
 	/* Done it all: now write the commit record asynchronously. */
+    //同步写一个记录快
 	if (JBD2_HAS_INCOMPAT_FEATURE(journal,
 				      JBD2_FEATURE_INCOMPAT_ASYNC_COMMIT)) {
 		//从journal->j_head上得到journal队列头保存的物理块号block，再得到对应bh，
@@ -856,7 +887,7 @@ start_journal_io:
 wait_for_iobuf:
 	while (commit_transaction->t_iobuf_list != NULL) {
 		struct buffer_head *bh;
-        //从commit_transaction->t_iobuf_list->b_tprev链表取出bh
+        //从commit_transaction->t_iobuf_list即BJ_IO链表取出bh
 		jh = commit_transaction->t_iobuf_list->b_tprev;
 		bh = jh2bh(jh);
 		if (buffer_locked(bh)) {
@@ -872,6 +903,7 @@ wait_for_iobuf:
 		clear_buffer_jwrite(bh);
 
 		JBUFFER_TRACE(jh, "ph4: unfile after journal write");
+        //剔除jh
 		jbd2_journal_unfile_buffer(journal, jh);
 
 		/*
@@ -886,7 +918,7 @@ wait_for_iobuf:
 
 		/* We also have to unlock and free the corresponding
                    shadowed buffer */
-        //从commit_transaction->t_shadow_list->b_tprev 链表取出bh??????????
+        //从commit_transaction->t_shadow_list即BJ_Shadow链表取出bh
 		jh = commit_transaction->t_shadow_list->b_tprev;
 		bh = jh2bh(jh);
 		clear_bit(BH_JWrite, &bh->b_state);
@@ -897,6 +929,7 @@ wait_for_iobuf:
                    we finally commit, we can do any checkpointing
                    required. */
 		JBUFFER_TRACE(jh, "file as BJ_Forget");
+        //把从BJ_Shadow链表取出jh移动到BJ_Forget链表，
 		jbd2_journal_file_buffer(jh, commit_transaction, BJ_Forget);
 		/*
 		 * Wake up any transactions which were waiting for this IO to
@@ -949,7 +982,8 @@ wait_for_iobuf:
 	write_unlock(&journal->j_state_lock);
 
 	if (!JBD2_HAS_INCOMPAT_FEATURE(journal,
-				       JBD2_FEATURE_INCOMPAT_ASYNC_COMMIT)) {
+				       JBD2_FEATURE_INCOMPAT_ASYNC_COMMIT)) {	    
+        //从journal->j_head上得到journal队列头保存的物理块号block，再得到对应bh，然后分配jh,bh与jh相互构成联系，并发送submit_bh发送bh
 		err = journal_submit_commit_record(journal, commit_transaction,
 						&cbh, crc32_sum);
 		if (err)

@@ -706,7 +706,7 @@ repeat:
 		 * First question: is this buffer already part of the current
 		 * transaction or the existing committing transaction?
 		 */
-		//bh已经是当前transaction正在传输的????
+		//jh->b_transaction不为NULL，说明之前已经添加到b_transaction了
 		if (jh->b_transaction) {
 			J_ASSERT_JH(jh,
 				jh->b_transaction == transaction ||
@@ -757,17 +757,18 @@ repeat:
 	 * If there is already a copy-out version of this buffer, then we don't
 	 * need to make another one
 	 */
-	//走到这里，说明jh没有添加到当前正在运行的transaction，
+
+	//这是说明该jh转义,
 	if (jh->b_frozen_data) {
 		JBUFFER_TRACE(jh, "has frozen data");
 		J_ASSERT_JH(jh, jh->b_next_transaction == NULL);
-        //令jh->b_next_transaction指向当前的transaction，应该是说，当前的transaction处理完正在处理的jh后，就处理这个jh
+        //令jh->b_next_transaction指向当前的transaction，处理完后，就处理本次的jh
 		jh->b_next_transaction = transaction;
 		goto done;
 	}
 
 	/* Is there data here we need to preserve? */
-
+    //如果jh已经添加tracscction了，但不是当前正在运行的transation
 	if (jh->b_transaction && jh->b_transaction != transaction) {
 		JBUFFER_TRACE(jh, "owned by older transaction");
 		J_ASSERT_JH(jh, jh->b_next_transaction == NULL);
@@ -782,7 +783,7 @@ repeat:
 		 * extra copy, not the primary copy, which gets
 		 * journaled.  If the primary copy is already going to
 		 * disk then we cannot do copy-out here. */
-
+       //jh在BJ_Shadow队列，表示jh正在被写入,等待
 		if (jh->b_jlist == BJ_Shadow) {
 			DEFINE_WAIT_BIT(wait, &bh->b_state, BH_Unshadow);
 			wait_queue_head_t *wqh;
@@ -816,12 +817,14 @@ repeat:
 		 * the new value of the committed_data record after the
 		 * transaction, so we HAVE to force the frozen_data copy
 		 * in that case. */
-
+		//走到这里，说明jh肯定是在老的tracscation，不是当前的
+        //jh不在BJ_Forget队列，还有用，还在老的tracscation，并且上层传入的force_copy是1，就分配frozen_buffer保存
 		if (jh->b_jlist != BJ_Forget || force_copy) {
 			JBUFFER_TRACE(jh, "generate frozen data");
 			if (!frozen_buffer) {
 				JBUFFER_TRACE(jh, "allocate memory for buffer");
 				jbd_unlock_bh_state(bh);
+                //分配frozen_buffer
 				frozen_buffer =
 					jbd2_alloc(jh2bh(jh)->b_size,
 							 GFP_NOFS);
@@ -836,10 +839,13 @@ repeat:
 				}
 				goto repeat;
 			}
+            //jh->b_frozen_data指向
 			jh->b_frozen_data = frozen_buffer;
 			frozen_buffer = NULL;
 			need_copy = 1;
 		}
+        //因为jh已经有老的transaction了，不是当前journal正在运行的transaction，那老的transaction处理完该jh后，
+        //jh->b_next_transaction = transaction表示，正在运行的transaction接着处理这个jh
 		jh->b_next_transaction = transaction;
 	}
 
@@ -849,7 +855,7 @@ repeat:
 	 * sure it doesn't get written to disk before the caller actually
 	 * commits the new data
 	 */
-	//把jh添加到transaction的链表
+	//这个jh还没有被添加到transaton，把jh添加到transaction的BJ_Reserved链表
 	if (!jh->b_transaction) {
 		JBUFFER_TRACE(jh, "no transaction");
 		J_ASSERT_JH(jh, !jh->b_next_transaction);
@@ -861,6 +867,7 @@ repeat:
 	}
 
 done:
+    //需要一份bh数据保存到jh->b_frozen_data，冻起来??????????????
 	if (need_copy) {
 		struct page *page;
 		int offset;
@@ -868,12 +875,16 @@ done:
 
 		J_EXPECT_JH(jh, buffer_uptodate(jh2bh(jh)),
 			    "Possible IO failure.\n");
+        //bh对应的内存页
 		page = jh2bh(jh)->b_page;
+        //偏移到bh的位置
 		offset = offset_in_page(jh2bh(jh)->b_data);
+        //page页首内存地址
 		source = kmap_atomic(page);
 		/* Fire data frozen trigger just before we copy the data */
 		jbd2_buffer_frozen_trigger(jh, source + offset,
 					   jh->b_triggers);
+        //复制bh物理块数据到jh->b_frozen_data
 		memcpy(jh->b_frozen_data, source+offset, jh2bh(jh)->b_size);
 		kunmap_atomic(source);
 
@@ -909,7 +920,7 @@ out:
  * In full data journalling mode the buffer may be of type BJ_AsyncData,
  * because we're write()ing a buffer which is also part of a shared mapping.
  */
-//handle是本次jbd 操作的原子handle，bh就是本次要更新的inode元数据在物理块的bh
+//handle是本次jbd 操作的原子handle，bh就是本次要更新的inode元数据在物理块的bh，把bh对应的jh添加到transaction的BJ_Reserved链表
 int jbd2_journal_get_write_access(handle_t *handle, struct buffer_head *bh)
 {
     //bh与jh相互构成联系，能彼此找到，貌似一个bh对应一个唯一的bh
@@ -1157,6 +1168,7 @@ void jbd2_buffer_abort_trigger(struct journal_head *jh,
  * buffer: that only gets done when the old transaction finally
  * completes its commit.
  */
+//把jh添加到handle->h_transaction的BJ_Metadata链表
 int jbd2_journal_dirty_metadata(handle_t *handle, struct buffer_head *bh)
 {
 	transaction_t *transaction = handle->h_transaction;
@@ -1198,6 +1210,7 @@ int jbd2_journal_dirty_metadata(handle_t *handle, struct buffer_head *bh)
 	 * I _think_ we're OK here with SMP barriers - a mistaken decision will
 	 * result in this test being false, so we go in and take the locks.
 	 */
+	//jh已经添加到当前的transaction，并且是在BJ_Metadata元数据链表，直接退出
 	if (jh->b_transaction == transaction && jh->b_jlist == BJ_Metadata) {
 		JBUFFER_TRACE(jh, "fastpath");
 		if (unlikely(jh->b_transaction !=
@@ -1263,6 +1276,7 @@ int jbd2_journal_dirty_metadata(handle_t *handle, struct buffer_head *bh)
 
 	JBUFFER_TRACE(jh, "file as BJ_Metadata");
 	spin_lock(&journal->j_list_lock);
+    //把jh添加到handle->h_transaction的BJ_Metadata链表
 	__jbd2_journal_file_buffer(jh, handle->h_transaction, BJ_Metadata);
 	spin_unlock(&journal->j_list_lock);
 out_unlock_bh:
@@ -1601,7 +1615,7 @@ int jbd2_journal_force_commit(journal_t *journal)
  *
  * jbd_lock_bh_state(jh2bh(jh)) is held.
  */
-//把jh添加到transaction list
+//把jh添加到transaction链表，list来自transation，jh是本次要添加的
 static inline void
 __blist_add_buffer(struct journal_head **list, struct journal_head *jh)
 {
@@ -1610,9 +1624,12 @@ __blist_add_buffer(struct journal_head **list, struct journal_head *jh)
 		*list = jh;
 	} else {
 		/* Insert at the tail of the list to preserve order */
+        
 		struct journal_head *first = *list, *last = first->b_tprev;
+        //要传输的jh的b_tprev和b_tnext分别指向transation list链表
 		jh->b_tprev = last;
 		jh->b_tnext = first;
+        //transation list链表的b_tnext和b_tprev指向要传输的jh
 		last->b_tnext = first->b_tprev = jh;
 	}
 }
@@ -1649,6 +1666,7 @@ __blist_del_buffer(struct journal_head **list, struct journal_head *jh)
  *
  * Called under j_list_lock.
  */
+//如果jh已经添加过transaction的链表了，则从这个链表中移除
 static void __jbd2_journal_temp_unlink_buffer(struct journal_head *jh)
 {
 	struct journal_head **list = NULL;
@@ -1702,6 +1720,7 @@ static void __jbd2_journal_temp_unlink_buffer(struct journal_head *jh)
  *
  * jh and bh may be already freed when this function returns.
  */
+//释放jh有关占用的内存空间,这个jh没用了
 static void __jbd2_journal_unfile_buffer(struct journal_head *jh)
 {
 	__jbd2_journal_temp_unlink_buffer(jh);
@@ -2129,7 +2148,8 @@ int jbd2_journal_invalidatepage(journal_t *journal,
  * File a buffer on the given transaction list.
  */
 //jh来自inode有关的bh,transaction来自本次handle->h_transaction的指向的正在运行的transaction
-//把jh添加到transaction链表
+//把jh添加到transaction的jlist链表。注意，如果jh之前已经添加到别的transaction的jlist链表，则会先从这个transaction的jlist链表移除
+//然后添加的本次的transaction的jlist链表。简单来说就是把jh从移动到新的transaction的jlist链表
 void __jbd2_journal_file_buffer(struct journal_head *jh,
 			transaction_t *transaction, int jlist)
 {
@@ -2162,7 +2182,8 @@ void __jbd2_journal_file_buffer(struct journal_head *jh,
 		    test_clear_buffer_jbddirty(bh))
 			was_dirty = 1;
 	}
-
+    
+    //如果jh已经添加过transaction的链表了，则从这个链表中移除
 	if (jh->b_transaction)
 		__jbd2_journal_temp_unlink_buffer(jh);
 	else
@@ -2192,12 +2213,14 @@ void __jbd2_journal_file_buffer(struct journal_head *jh,
 	case BJ_LogCtl:
 		list = &transaction->t_log_list;
 		break;
-	case BJ_Reserved://do_get_write_access()中，是BJ_Reserved，jh添加到transaction的t_reserved_list链表
+	case BJ_Reserved:
 		list = &transaction->t_reserved_list;
 		break;
 	}
-    //貌似把jh添加到transaction->t_buffers链表，jh来自inode有关的bh,list指向本次jbd的transaction
+    
+    //貌似把jh添加到transaction的各类链表，jh来自inode有关的bh,list指向本次transaction的链表
 	__blist_add_buffer(list, jh);
+    //对jh添加的transation链表赋值
 	jh->b_jlist = jlist;
 
 	if (was_dirty)
@@ -2225,7 +2248,8 @@ void jbd2_journal_file_buffer(struct journal_head *jh,
  *
  * jh and bh may be already free when this function returns
  */
-//移除jh
+//jh->b_next_transaction为NILL，jh没用则释放掉
+//否则要把jh再次添加到jh->b_next_transaction执行的BJ_Forget或BJ_Metadata或BJ_Reserved链表
 void __jbd2_journal_refile_buffer(struct journal_head *jh)
 {
 	int was_dirty, jlist;
@@ -2236,7 +2260,9 @@ void __jbd2_journal_refile_buffer(struct journal_head *jh)
 		assert_spin_locked(&jh->b_transaction->t_journal->j_list_lock);
 
 	/* If the buffer is now unused, just drop it. */
+    //jh->b_next_transaction 为NULL，表示jh没用了，没有transaction要处理这个jh了
 	if (jh->b_next_transaction == NULL) {
+        //释放jh有关占用的内存空间,这个jh没用了
 		__jbd2_journal_unfile_buffer(jh);
 		return;
 	}
@@ -2253,11 +2279,14 @@ void __jbd2_journal_refile_buffer(struct journal_head *jh)
 	 * our jh reference and thus __jbd2_journal_file_buffer() must not
 	 * take a new one.
 	 */
+	//否则jh->b_transaction 指向jh->b_next_transaction，这表示这个jh被原来的transaction处理过了，接着被jh->b_next_transaction指向的
+	//transaction处理
 	jh->b_transaction = jh->b_next_transaction;
 	jh->b_next_transaction = NULL;
+    //bh是free状态?,jh添加到BJ_Forget链表，
 	if (buffer_freed(bh))
 		jlist = BJ_Forget;
-	else if (jh->b_modified)
+	else if (jh->b_modified)//如果jh对应的bh被修改了，那jh应该添加到jh->b_transaction的BJ_Metadata链表，否则是BJ_Reserved
 		jlist = BJ_Metadata;
 	else
 		jlist = BJ_Reserved;
@@ -2274,6 +2303,8 @@ void __jbd2_journal_refile_buffer(struct journal_head *jh)
  *
  * The jh and bh may be freed by this call.
  */
+//jh->b_next_transaction为NILL，jh没用则释放掉
+//否则要把jh再次添加到jh->b_next_transaction执行的BJ_Forget或BJ_Metadata或BJ_Reserved链表
 void jbd2_journal_refile_buffer(journal_t *journal, struct journal_head *jh)
 {
 	struct buffer_head *bh = jh2bh(jh);

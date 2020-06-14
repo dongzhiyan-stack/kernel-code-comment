@@ -134,10 +134,12 @@ typedef struct journal_s	journal_t;	/* Journal control structure */
 /*
  * Standard header for all descriptor blocks:
  */
+//jbd2_journal_commit_transaction()中分配赋值，journal描述符块，对应journal空间里的bh，就是用来备份文件inode的bh的
 typedef struct journal_header_s
 {
 	__be32		h_magic;
 	__be32		h_blocktype;
+    //h_sequence是transaction->t_tid
 	__be32		h_sequence;
 } journal_header_t;
 
@@ -466,6 +468,7 @@ struct transaction_s
 	journal_t		*t_journal;
 
 	/* Sequence number for this transaction [no locking] */
+    //transaction id
 	tid_t			t_tid;
 
 	/*
@@ -500,14 +503,14 @@ struct transaction_s
 	 * Doubly-linked circular list of all buffers reserved but not yet
 	 * modified by this transaction [j_list_lock]
 	 */
-	//__jbd2_journal_file_buffer()中，把jh添加到该transaction的list链表
+	//__jbd2_journal_file_buffer()中，把jh添加到该transaction的BJ_Reserved链表
 	struct journal_head	*t_reserved_list;
 
 	/*
 	 * Doubly-linked circular list of all metadata buffers owned by this
 	 * transaction [j_list_lock]
 	 */
-	//__jbd2_journal_file_buffer()中，list指向transaction的t_buffers
+	//__jbd2_journal_file_buffer()中，把jh添加到该transaction的BJ_Metadata链表
 	struct journal_head	*t_buffers;
 
 	/*
@@ -515,6 +518,7 @@ struct transaction_s
 	 * buffers which we can un-checkpoint once this transaction commits)
 	 * [j_list_lock]
 	 */
+    //__jbd2_journal_file_buffer()中，把jh添加到该transaction的BJ_Forget链表
 	struct journal_head	*t_forget;
 
 	/*
@@ -533,6 +537,7 @@ struct transaction_s
 	 * Doubly-linked circular list of temporary buffers currently undergoing
 	 * IO in the log [j_list_lock]
 	 */
+	//__jbd2_journal_file_buffer()中，把jh添加到该transaction的BJ_IO链表
 	struct journal_head	*t_iobuf_list;
 
 	/*
@@ -540,18 +545,21 @@ struct transaction_s
 	 * IO.  The IO buffers on the iobuf list and the shadow buffers on this
 	 * list match each other one for one at all times. [j_list_lock]
 	 */
+	//__jbd2_journal_file_buffer()中，把jh添加到该transaction的BJ_Shadow链表
 	struct journal_head	*t_shadow_list;
 
 	/*
 	 * Doubly-linked circular list of control buffers being written to the
 	 * log. [j_list_lock]
 	 */
+	//__jbd2_journal_file_buffer()中，把jh添加到该transaction的BJ_LogCtl链表
 	struct journal_head	*t_log_list;
 
 	/*
 	 * List of inodes whose data we've modified in data=ordered mode.
 	 * [j_list_lock]
 	 */
+	//ext4_write_end->ext4_jbd2_file_inode->jbd2_journal_file_inode()中把文件inode的jinode添加到t_inode_list链表
 	struct list_head	t_inode_list;
 
 	/*
@@ -767,14 +775,15 @@ struct journal_s
 	 * [j_state_lock] [caller holding open handle]
 	 */
 	//当前正在运行的一个jbd transaction,start_this_handle()中分配，start_this_handle->jbd2_get_transaction中有赋值
-	////jbd2_journal_commit_transaction()最后设置为刚发送完的jbd  transaction后，设置为NULL
+	//jbd2_journal_commit_transaction()最后设置为刚发送完的jbd  transaction后，设置为NULL
 	transaction_t		*j_running_transaction;
 
 	/*
 	 * the transaction we are pushing to disk
 	 * [j_state_lock] [caller holding open handle]
 	 */
-	transaction_t		*j_committing_transaction;//jbd2_journal_commit_transaction()最后设置为刚发送完的jbd  transaction
+	//当前正在传输的transaction，jbd2_journal_commit_transaction()中期设置为刚发送完的jbd  transaction
+	transaction_t		*j_committing_transaction;
 
 	/*
 	 * ... and a linked circular list of all transactions waiting for
@@ -1300,11 +1309,17 @@ static inline int jbd_space_needed(journal_t *journal)
 
 /* journaling buffer types */
 #define BJ_None		0	/* Not journaled */
+//jh在transaction的元数据BJ_Metadata队列,ext4_handle_dirty_metadata->__ext4_handle_dirty_metadata中添加
 #define BJ_Metadata	1	/* Normal journaled metadata */
+//jh在transaction的BJ_Metadata队列，已经传输过的jh，被作废了，__jbd2_journal_refile_buffer()把jh添加到BJ_Forget
 #define BJ_Forget	2	/* Buffer superseded by this transaction */
+//new_jh添加到transaction的BJ_IO链表，jbd2_journal_commit_transaction->jbd2_journal_write_metadata_buffer
 #define BJ_IO		3	/* Buffer is for temporary IO use */
+//jh在BJ_Shadow队列，表示jh正在被写入，jbd2_journal_commit_transaction->jbd2_journal_write_metadata_buffer
 #define BJ_Shadow	4	/* Buffer contents being shadowed to the log */
+//jbd2_journal_commit_transaction函数，把journal日志描述符块对应的descriptor这个jh添加到commit_transaction的BJ_LogCtl链表
 #define BJ_LogCtl	5	/* Buffer contains log descriptors */
+//貌似刚开始就是把jh添加到BJ_Reserved链表，看jbd2_journal_get_write_access()函数
 #define BJ_Reserved	6	/* Buffer is reserved for access by journal */
 #define BJ_Types	7
 

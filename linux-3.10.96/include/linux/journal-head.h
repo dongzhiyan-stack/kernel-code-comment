@@ -35,6 +35,7 @@ struct journal_head {
 	 * very unuseful) make 64-bit accesses to the bitfield and clobber
 	 * b_jcount if its update races with bitfield modification.
 	 */
+	//代表jh在tranction哪个链表上，常见的有BJ_Metadata、BJ_Forget、BJ_IO、BJ_Shadow、BJ_LogCtl、BJ_Reserved
 	unsigned b_jlist;
 
 	/*
@@ -42,12 +43,14 @@ struct journal_head {
 	 * the currently running transaction
 	 * [jbd_lock_bh_state()]
 	 */
+	//为1应该是jh对应的bh被修改了
 	unsigned b_modified;
 
 	/*
 	 * Copy of the buffer data frozen for writing to the log.
 	 * [jbd_lock_bh_state()]
 	 */
+	//网上说这是，jbd遇到转义，将bh的数据先保存在这里，写入log时用到。jbd2_journal_get_write_access()中指向分配的frozen_data
 	char *b_frozen_data;
 
 	/*
@@ -75,13 +78,18 @@ struct journal_head {
 	 * committing it when the new transaction touched it.
 	 * [t_list_lock] [jbd_lock_bh_state()]
 	 */
-	//do_get_write_access(),jh->b_next_transaction指向当前的transaction，当前的transaction处理完正在处理的jh后，就处理这个jh
+	//do_get_write_access(),jh->b_next_transaction指向当前正运行的transaction，
+	//jh原来在的jh处理完这个jh后，接着轮到正在运行的transaction处理这个jh.
+	//jbd2_journal_refile_buffer->__jbd2_journal_refile_buffer()取出b_next_transaction指向的transaction，把jh添加到这个transaction的链表
 	transaction_t *b_next_transaction;
 
 	/*
 	 * Doubly-linked list of buffers on a transaction's data, metadata or
 	 * forget queue. [t_list_lock] [jbd_lock_bh_state()]
 	 */
+	 //__jbd2_journal_file_buffer->__blist_add_buffer，把jh添加到transaction的list链表时，这个list链表也是一个struct journal_head结构
+	//要传输的jh的b_tprev和b_tnext分别指向transation list链表struct journal_head结构的成员
+	//transation list链表的b_tnext和b_tprev指向要传输的jh的struct journal_head结构，什么破乱七八糟的关系
 	struct journal_head *b_tnext, *b_tprev;
 
 	/*

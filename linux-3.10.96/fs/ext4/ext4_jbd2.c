@@ -109,7 +109,7 @@ void ext4_journal_abort_handle(const char *caller, unsigned int line,
 
 	jbd2_journal_abort_handle(handle);
 }
-
+//把bh对应的jh添加到transaction的BJ_Reserved链表
 int __ext4_journal_get_write_access(const char *where, unsigned int line,
 				    handle_t *handle, struct buffer_head *bh)
 {
@@ -206,7 +206,7 @@ int __ext4_journal_get_create_access(const char *where, unsigned int line,
 	}
 	return err;
 }
-
+//把jh添加到handle->h_transaction的BJ_Metadata链表,标记inode物理块元数据对应的bh脏
 int __ext4_handle_dirty_metadata(const char *where, unsigned int line,
 				 handle_t *handle, struct inode *inode,
 				 struct buffer_head *bh)
@@ -218,6 +218,7 @@ int __ext4_handle_dirty_metadata(const char *where, unsigned int line,
 	set_buffer_meta(bh);
 	set_buffer_prio(bh);
 	if (ext4_handle_valid(handle)) {
+        //把jh添加到handle->h_transaction的BJ_Metadata链表
 		err = jbd2_journal_dirty_metadata(handle, bh);
 		/* Errors can only happen if there is a bug */
 		if (WARN_ON_ONCE(err)) {

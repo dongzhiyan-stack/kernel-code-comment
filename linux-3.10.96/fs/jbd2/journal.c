@@ -329,8 +329,8 @@ static void journal_kill_thread(journal_t *journal)
  */
 
 int jbd2_journal_write_metadata_buffer(transaction_t *transaction,
-				  struct journal_head  *jh_in,
-				  struct journal_head **jh_out,
+				  struct journal_head  *jh_in,//jh_in表示本次要写入的文件inode元数据的jh
+				  struct journal_head **jh_out,//jh_out下边指向new_jh
 				  unsigned long long blocknr)
 {
 	int need_copy_out = 0;
@@ -356,6 +356,7 @@ int jbd2_journal_write_metadata_buffer(transaction_t *transaction,
 	J_ASSERT_BH(bh_in, buffer_jbddirty(bh_in));
 
 retry_alloc:
+    //分配一个新的bh结构
 	new_bh = alloc_buffer_head(GFP_NOFS);
 	if (!new_bh) {
 		/*
@@ -368,6 +369,7 @@ retry_alloc:
 
 	/* keep subsequent assertions sane */
 	atomic_set(&new_bh->b_count, 1);
+    //分配new_jh，与new_bh一一对应
 	new_jh = jbd2_journal_add_journal_head(new_bh);	/* This sleeps */
 
 	/*
@@ -376,11 +378,13 @@ retry_alloc:
 	 */
 	jbd_lock_bh_state(bh_in);
 repeat:
+    //jh有frozen数据要写，一般不会有吧
 	if (jh_in->b_frozen_data) {
 		done_copy_out = 1;
 		new_page = virt_to_page(jh_in->b_frozen_data);
 		new_offset = offset_in_page(jh_in->b_frozen_data);
 	} else {
+	    //否则就是jh的bh对应的内存地址
 		new_page = jh2bh(jh_in)->b_page;
 		new_offset = offset_in_page(jh2bh(jh_in)->b_data);
 	}
@@ -450,15 +454,18 @@ repeat:
 		*((unsigned int *)(mapped_data + new_offset)) = 0;
 		kunmap_atomic(mapped_data);
 	}
-
+    //设置new_bh对应的内存首地址，这片内存是jh_in的，new_jh和jh_in数据是一样的吧
 	set_bh_page(new_bh, new_page, new_offset);
 	new_jh->b_transaction = NULL;
 	new_bh->b_size = jh2bh(jh_in)->b_size;
 	new_bh->b_bdev = transaction->t_journal->j_dev;
+    //new_bh的物理块号，这个blocknr很关键，来自jbd2_journal_commit_transaction->jbd2_journal_next_log_block
+    //来自journal空间文件的磁盘的一个物理块号，将来靠这个吧new_bh的数据写入journal空间文件的物理块
+    //new_bh内存指向的又是文件inode元数据bh的内存。这就是文件inode元数据备份的核心呀
 	new_bh->b_blocknr = blocknr;
 	set_buffer_mapped(new_bh);
 	set_buffer_dirty(new_bh);
-
+    //jh_out指向new_jh
 	*jh_out = new_jh;
 
 	/*
@@ -468,11 +475,13 @@ repeat:
 	 */
 	JBUFFER_TRACE(jh_in, "file as BJ_Shadow");
 	spin_lock(&journal->j_list_lock);
+    //把jh_in移动到transaction的BJ_Shadow链表
 	__jbd2_journal_file_buffer(jh_in, transaction, BJ_Shadow);
 	spin_unlock(&journal->j_list_lock);
 	jbd_unlock_bh_state(bh_in);
 
 	JBUFFER_TRACE(new_jh, "file as BJ_IO");
+    //把new_jh移动到transaction的BJ_IO链表
 	jbd2_journal_file_buffer(new_jh, transaction, BJ_IO);
 
 	return do_escape | (done_copy_out << 1);
@@ -750,7 +759,7 @@ int jbd2_journal_next_log_block(journal_t *journal, unsigned long long *retp)
 
 	write_lock(&journal->j_state_lock);
 	J_ASSERT(journal->j_free > 1);
-    //从队列都取出blocknr物理块号
+    //从journal->j_head队列取出blocknr物理块号
 	blocknr = journal->j_head;
 	journal->j_head++;
 	journal->j_free--;
@@ -801,6 +810,7 @@ int jbd2_journal_bmap(journal_t *journal, unsigned long blocknr,
  * mmaps of blockdevs which hold live JBD-controlled filesystems.
  */
 //从journal->j_head上得到journal队列头保存的物理块号block，再得到对应bh，然后分配jh,bh与jh相互构成联系并返回jh
+//这里的bh，jh是ext4文件系统里journal空间文件里，不是文件inode的bh和jh，是journal空间备份文件inode的bh和jh
 struct journal_head *jbd2_journal_get_descriptor_buffer(journal_t *journal)
 {
 	struct buffer_head *bh;
@@ -816,7 +826,7 @@ struct journal_head *jbd2_journal_get_descriptor_buffer(journal_t *journal)
 	if (!bh)
 		return NULL;
 	lock_buffer(bh);
-    //这里把bh对应内存的数据清0，这是为什么?????????????????
+    //这里把bh对应内存的数据清0，这是为什么?????????????????，因为这个bh不是文件inode的bh
 	memset(bh->b_data, 0, journal->j_blocksize);
 	set_buffer_uptodate(bh);
 	unlock_buffer(bh);
@@ -2478,7 +2488,7 @@ struct journal_head *jbd2_journal_grab_journal_head(struct buffer_head *bh)
 	jbd_unlock_bh_journal_head(bh);
 	return jh;
 }
-
+//释放jh有关占用的内存空间
 static void __journal_remove_journal_head(struct buffer_head *bh)
 {
 	struct journal_head *jh = bh2jh(bh);
@@ -2502,6 +2512,7 @@ static void __journal_remove_journal_head(struct buffer_head *bh)
 	bh->b_private = NULL;
 	jh->b_bh = NULL;	/* debug, really */
 	clear_buffer_jbd(bh);
+    //释放jh
 	journal_free_journal_head(jh);
 }
 
@@ -2509,6 +2520,7 @@ static void __journal_remove_journal_head(struct buffer_head *bh)
  * Drop a reference on the passed journal_head.  If it fell to zero then
  * release the journal_head from the buffer_head.
  */
+//释放jh有关占用的内存空间,这个jh没用了
 void jbd2_journal_put_journal_head(struct journal_head *jh)
 {
 	struct buffer_head *bh = jh2bh(jh);
@@ -2517,6 +2529,7 @@ void jbd2_journal_put_journal_head(struct journal_head *jh)
 	J_ASSERT_JH(jh, jh->b_jcount > 0);
 	--jh->b_jcount;
 	if (!jh->b_jcount) {
+        //释放jh有关占用的内存空间
 		__journal_remove_journal_head(bh);
 		jbd_unlock_bh_journal_head(bh);
 		__brelse(bh);

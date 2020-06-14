@@ -4451,7 +4451,8 @@ static int ext4_inode_blocks_set(handle_t *handle,
  *
  * The caller must have write access to iloc->bh.
  */
-//在这里更新inode元数据，比如文件修改时间
+//在这里更新inode元数据，比如文件修改时间,标记inode物理块元数据对应的bh脏
+//把jh添加到handle->h_transaction的BJ_Metadata链表
 static int ext4_do_update_inode(handle_t *handle,
 				struct inode *inode,
 				struct ext4_iloc *iloc)
@@ -4564,7 +4565,7 @@ static int ext4_do_update_inode(handle_t *handle,
 	ext4_inode_csum_set(inode, raw_inode, ei);
 
 	BUFFER_TRACE(bh, "call ext4_handle_dirty_metadata");
-    //标记inode数据脏
+    //把jh添加到handle->h_transaction的BJ_Metadata链表,标记inode物理块元数据对应的bh脏
 	rc = ext4_handle_dirty_metadata(handle, NULL, bh);
 	if (!err)
 		err = rc;
@@ -4987,6 +4988,8 @@ int ext4_mark_iloc_dirty(handle_t *handle,
 
 	/* ext4_do_update_inode() does jbd2_journal_dirty_metadata */
     //修改inode元数据，比如文件时间，实际是修改inode物理块元数据的bh所在的内存bh->b_data
+    //在这里更新inode元数据，比如文件修改时间,标记inode物理块元数据对应的bh脏
+    //把jh添加到handle->h_transaction的BJ_Metadata链表
 	err = ext4_do_update_inode(handle, inode, iloc);//里边调用了ext4_handle_dirty_metadata()
 	put_bh(iloc->bh);
 	return err;
@@ -4996,7 +4999,7 @@ int ext4_mark_iloc_dirty(handle_t *handle,
  * On success, We end up with an outstanding reference count against
  * iloc->bh.  This _must_ be cleaned up later.
  */
-//建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction链表
+//建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction的BJ_Reserved链表
 int
 ext4_reserve_inode_write(handle_t *handle, struct inode *inode,
 			 struct ext4_iloc *iloc)
@@ -5006,7 +5009,7 @@ ext4_reserve_inode_write(handle_t *handle, struct inode *inode,
 	err = ext4_get_inode_loc(inode, iloc);
 	if (!err) {
 		BUFFER_TRACE(iloc->bh, "get_write_access");
-        //建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction链表
+        //建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction的BJ_Reserved链表
 		err = ext4_journal_get_write_access(handle, iloc->bh);
 		if (err) {
 			brelse(iloc->bh);
@@ -5072,7 +5075,7 @@ int ext4_mark_inode_dirty(handle_t *handle, struct inode *inode)
 
 	might_sleep();
 	trace_ext4_mark_inode_dirty(inode, _RET_IP_);
-    //建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction链表
+    //建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction的BJ_Reserved链表
 	err = ext4_reserve_inode_write(handle, inode, &iloc);
 	if (ext4_handle_valid(handle) &&
 	    EXT4_I(inode)->i_extra_isize < sbi->s_want_extra_isize &&
@@ -5104,6 +5107,8 @@ int ext4_mark_inode_dirty(handle_t *handle, struct inode *inode)
 			}
 		}
 	}
+    //在这里更新inode元数据，比如文件修改时间,标记inode物理块元数据对应的bh脏
+    //把jh添加到handle->h_transaction的BJ_Metadata链表
 	if (!err)
 		err = ext4_mark_iloc_dirty(handle, inode, &iloc);
 	return err;
