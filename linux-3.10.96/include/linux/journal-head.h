@@ -26,7 +26,7 @@ struct journal_head {
 	 * Reference count - see description in journal.c
 	 * [jbd_lock_bh_journal_head()]
 	 */
-	int b_jcount;//bh与jh构成联系后，加1
+	int b_jcount;//jh引用计数，bh与jh构成联系后，加1，jh添加到check_pointd后加1
 
 	/*
 	 * Journalling list for this buffer [jbd_lock_bh_state()]
@@ -96,14 +96,17 @@ struct journal_head {
 	 * Pointer to the compound transaction against which this buffer
 	 * is checkpointed.  Only dirty buffers can be checkpointed.
 	 * [j_list_lock]
-	 */
+	 */    
+	//jbd2_journal_commit_transaction->__jbd2_journal_insert_checkpoint()中赋值,__jbd2_journal_insert_checkpoint()中有详细注释
+	//jh对应的inode元数据已经写入journal日志文件分区了，要把这个jh放到checkpoint_list，b_cp_transaction指向当初commit时jh所属的transaction
 	transaction_t *b_cp_transaction;
-
 	/*
 	 * Doubly-linked list of buffers still remaining to be flushed
 	 * before an old transaction can be checkpointed.
 	 * [j_list_lock]
 	 */
+	//jh对应的inode元数据已经写入journal日志文件分区后，要把jh添加到checkpoint_list链表，就是靠b_cpnext和b_cpprev这两个指针添加的
+	//见jbd2_journal_commit_transaction->__jbd2_journal_insert_checkpoint()
 	struct journal_head *b_cpnext, *b_cpprev;
 
 	/* Trigger type */

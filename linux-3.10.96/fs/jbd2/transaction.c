@@ -1720,14 +1720,15 @@ static void __jbd2_journal_temp_unlink_buffer(struct journal_head *jh)
  *
  * jh and bh may be already freed when this function returns.
  */
-//释放jh有关占用的内存空间,这个jh没用了
+//从这个链表中移除jh，释放jh有关占用的内存空间,这个jh没用了
 static void __jbd2_journal_unfile_buffer(struct journal_head *jh)
 {
+    //如果jh已经添加过transaction的链表了，则从这个链表中移除
 	__jbd2_journal_temp_unlink_buffer(jh);
 	jh->b_transaction = NULL;
 	jbd2_journal_put_journal_head(jh);
 }
-
+//从这个链表中移除jh，释放jh有关占用的内存空间,这个jh没用了
 void jbd2_journal_unfile_buffer(journal_t *journal, struct journal_head *jh)
 {
 	struct buffer_head *bh = jh2bh(jh);
@@ -2249,7 +2250,7 @@ void jbd2_journal_file_buffer(struct journal_head *jh,
  * jh and bh may be already free when this function returns
  */
 //jh->b_next_transaction为NILL，jh没用则释放掉
-//否则要把jh再次添加到jh->b_next_transaction执行的BJ_Forget或BJ_Metadata或BJ_Reserved链表
+//否则要把jh再次添加到jh->b_next_transaction指向的BJ_Forget或BJ_Metadata或BJ_Reserved链表
 void __jbd2_journal_refile_buffer(struct journal_head *jh)
 {
 	int was_dirty, jlist;

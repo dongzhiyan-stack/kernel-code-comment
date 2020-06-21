@@ -89,11 +89,15 @@ static inline void __buffer_relink_io(struct journal_head *jh)
  *
  * Requires j_list_lock
  */
+//如果jh对应的bh对应的inode等元数据刷回ext4文件系统了，则释放jh和在checkpointed链表上的jh对应的transaction
 static int __try_to_free_cp_buf(struct journal_head *jh)
 {
 	int ret = 0;
 	struct buffer_head *bh = jh2bh(jh);
 
+    //jh->b_transaction 为NULL表示该jh已经commit过了，并且!buffer_locked(bh)该bh没有与磁盘正在进行数据传输
+    //!buffer_dirty(bh)表示该bh的数据已经刷回磁盘了，不再脏了，这是个重要判断条件，只有jh对应的bh的数据刷回磁盘了
+    //再简单点，就是bh对应的inode元数据刷回ext4文件系统了，才允许释放jh
 	if (jh->b_transaction == NULL && !buffer_locked(bh) &&
 	    !buffer_dirty(bh) && !buffer_write_io_error(bh)) {
 		/*
@@ -102,6 +106,7 @@ static int __try_to_free_cp_buf(struct journal_head *jh)
 		 */
 		get_bh(bh);
 		JBUFFER_TRACE(jh, "remove from checkpoint list");
+        //释放jh和在checkpointed链表上的jh对应的transaction
 		ret = __jbd2_journal_remove_checkpoint(jh) + 1;
 		BUFFER_TRACE(bh, "release");
 		__brelse(bh);
@@ -473,7 +478,7 @@ int jbd2_cleanup_journal_tail(journal_t *journal)
  * Called with j_list_lock held.
  * Returns number of buffers reaped (for debug)
  */
-
+//遍历checkpoint_list链表上所有的jh,如果jh对应的bh对应的inode等元数据是否刷回ext4文件系统了，则释放jh和jh所属的transaction结构
 static int journal_clean_one_cp_list(struct journal_head *jh, int *released)
 {
 	struct journal_head *last_jh;
@@ -484,10 +489,17 @@ static int journal_clean_one_cp_list(struct journal_head *jh, int *released)
 	if (!jh)
 		return 0;
 
+    //已经在journal日志文件分区备份过inode元数据的jh都靠自己的b_cpprev和b_cpnext链入了checkpoint_list链表
+    //jh的上一个jh
 	last_jh = jh->b_cpprev;
+    
+    //这是遍历checkpoint_list链表上所有的jh呀，看jh对应的bh对应的inode等元数据是否刷回ext4文件系统了
 	do {
 		jh = next_jh;
+        //jh的下一个jh
 		next_jh = jh->b_cpnext;
+        
+        //如果jh对应的bh对应的inode等元数据刷回ext4文件系统了，则释放jh和在checkpointed链表上的jh对应的transaction
 		ret = __try_to_free_cp_buf(jh);
 		if (ret) {
 			freed++;
@@ -518,24 +530,36 @@ static int journal_clean_one_cp_list(struct journal_head *jh, int *released)
  * Called with j_list_lock held.
  * Returns number of buffers reaped (for debug)
  */
-
+ //遍历journal->j_checkpoint_transactions->t_checkpoint_list链表上所有的jh,如果jh对应的bh对应的inode等元数据是否刷回ext4文件系统了
+ //则释放jh和jh所属的transaction结构
 int __jbd2_journal_clean_checkpoint_list(journal_t *journal)
 {
 	transaction_t *transaction, *last_transaction, *next_transaction;
 	int ret = 0;
 	int released;
 
+    //journal->j_checkpoint_transactions
 	transaction = journal->j_checkpoint_transactions;
 	if (!transaction)
 		goto out;
 
+    //transaction链表的上一个transaction
 	last_transaction = transaction->t_cpprev;
+    
 	next_transaction = transaction;
-	do {
+    
+    //注意，journal_clean_one_cp_list->__try_to_free_cp_buf->__jbd2_journal_remove_checkpoint->__jbd2_journal_drop_transaction()
+    //如果j_checkpoint_transactions链表上transaction的所有jh对应inode等元数据，全部刷回了ext4文件系统，则journal->j_checkpoint_transactions=NULL
+
+    //循环遍历j_checkpoint_transactions上的每一个transaction，last_transaction是最后一个，当处理完它，下边的while循环退出
+    do {
 		transaction = next_transaction;
+        //下一个transaction
 		next_transaction = transaction->t_cpnext;
-		ret += journal_clean_one_cp_list(transaction->
-				t_checkpoint_list, &released);
+        
+        //遍历transaction->t_checkpoint_list链表上所有的jh,如果jh对应的bh对应的inode等元数据是否刷回ext4文件系统了
+        //则释放jh和jh所属的transaction结构
+		ret += journal_clean_one_cp_list(transaction->t_checkpoint_list, &released);
 		/*
 		 * This function only frees up some memory if possible so we
 		 * dont have an obligation to finish processing. Bail out if
@@ -550,8 +574,8 @@ int __jbd2_journal_clean_checkpoint_list(journal_t *journal)
 		 * t_checkpoint_list with removing the buffer from the list as
 		 * we can possibly see not yet submitted buffers on io_list
 		 */
-		ret += journal_clean_one_cp_list(transaction->
-				t_checkpoint_io_list, &released);
+		//再执行一次journal_clean_one_cp_list，
+		ret += journal_clean_one_cp_list(transaction->t_checkpoint_io_list, &released);
 		if (need_resched())
 			goto out;
 	} while (transaction != last_transaction);
@@ -577,6 +601,7 @@ out:
  *
  * This function is called with j_list_lock held.
  */
+//释放jh和在checkpointed链表上的jh对应的transaction，ext4文件系统卸载时，也会执行到这里
 int __jbd2_journal_remove_checkpoint(struct journal_head *jh)
 {
 	struct transaction_chp_stats_s *stats;
@@ -595,6 +620,7 @@ int __jbd2_journal_remove_checkpoint(struct journal_head *jh)
 	JBUFFER_TRACE(jh, "removing from transaction");
 	__buffer_unlink(jh);
 	jh->b_cp_transaction = NULL;
+    //释放本jh,减少引用计数，引用计数为0才会释放jh结构
 	jbd2_journal_put_journal_head(jh);
 
 	if (transaction->t_checkpoint_list != NULL ||
@@ -621,8 +647,10 @@ int __jbd2_journal_remove_checkpoint(struct journal_head *jh)
 						    jiffies);
 	trace_jbd2_checkpoint_stats(journal->j_fs_dev->bd_dev,
 				    transaction->t_tid, stats);
-
+    
+    //释放本transaction前更新journal->j_checkpoint_transactions链表
 	__jbd2_journal_drop_transaction(journal, transaction);
+    //释放transaction占用的内存
 	jbd2_journal_free_transaction(transaction);
 
 	/* Just in case anybody was waiting for more transactions to be
@@ -641,6 +669,8 @@ out:
  * Called with the journal locked.
  * Called with j_list_lock held.
  */
+//把jh添加到t_checkpoint_list链表
+//jbd2_journal_commit_transaction->__jbd2_journal_insert_checkpoint
 void __jbd2_journal_insert_checkpoint(struct journal_head *jh,
 			       transaction_t *transaction)
 {
@@ -650,16 +680,22 @@ void __jbd2_journal_insert_checkpoint(struct journal_head *jh,
 
 	/* Get reference for checkpointing transaction */
 	jbd2_journal_grab_journal_head(jh2bh(jh));
-	jh->b_cp_transaction = transaction;
+    //这个transaction本是jh所在的commit transaction,现在jh对应的inode元数据已经写入journal日志文件了，jh要被插入到checkpoint_list
+    //之后下次jbd2_journal_commit_transaction()时，再从checkpoint_list链表中取出这个jh，jh->b_cp_transaction是当初commit transaction
+    //如果jh对应的inode元数据已经写入ext4文件系统了，那这个jh和当初commit transaction就可以考虑释放掉了
+	jh->b_cp_transaction = transaction;//jh->b_cp_transaction保存当初commit时所属的transaction
 
+    //第一次添加jh应该transaction->t_checkpoint_list是空
 	if (!transaction->t_checkpoint_list) {
 		jh->b_cpnext = jh->b_cpprev = jh;
 	} else {
+	    //显然jh是加入的t_checkpoint_list链表指向的jh前边
 		jh->b_cpnext = transaction->t_checkpoint_list;
 		jh->b_cpprev = transaction->t_checkpoint_list->b_cpprev;
 		jh->b_cpprev->b_cpnext = jh;
 		jh->b_cpnext->b_cpprev = jh;
 	}
+    //transaction->t_checkpoint_list指向新加入t_checkpoint_list链表的jh
 	transaction->t_checkpoint_list = jh;
 }
 
@@ -672,16 +708,20 @@ void __jbd2_journal_insert_checkpoint(struct journal_head *jh,
  * Called with the journal locked.
  * Called with j_list_lock held.
  */
-
+//释放本transaction前更新journal->j_checkpoint_transactions链表
 void __jbd2_journal_drop_transaction(journal_t *journal, transaction_t *transaction)
 {
 	assert_spin_locked(&journal->j_list_lock);
+    //如果待释放的transaction之前链入到了journal->j_checkpoint_transactions指向的transaction链表
 	if (transaction->t_cpnext) {
+        //下边的操作就是令本transaction前后的transaction构成直接链接关系
 		transaction->t_cpnext->t_cpprev = transaction->t_cpprev;
 		transaction->t_cpprev->t_cpnext = transaction->t_cpnext;
+        //如果本transaction是journal->j_checkpoint_transactions指向的，则令journal->j_checkpoint_transactions指向下一个transaction
 		if (journal->j_checkpoint_transactions == transaction)
 			journal->j_checkpoint_transactions =
 				transaction->t_cpnext;
+        //这应该是说，transaction链表上只有一个transaction，就是待释放的transaction，释放掉transaction链表就没成员了。
 		if (journal->j_checkpoint_transactions == transaction)
 			journal->j_checkpoint_transactions = NULL;
 	}

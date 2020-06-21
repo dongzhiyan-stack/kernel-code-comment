@@ -125,21 +125,24 @@ typedef struct journal_s	journal_t;	/* Journal control structure */
  * Descriptor block types:
  */
 
-#define JBD2_DESCRIPTOR_BLOCK	1
+#define JBD2_DESCRIPTOR_BLOCK	1//描述符块
+//提交块，每次把inode元数据写入写入journal日志文件日志分区后，都要再调用journal_submit_commit_record()发送一个COMMIT_BLOCK，
 #define JBD2_COMMIT_BLOCK	2
 #define JBD2_SUPERBLOCK_V1	3
 #define JBD2_SUPERBLOCK_V2	4
-#define JBD2_REVOKE_BLOCK	5
+#define JBD2_REVOKE_BLOCK	5//取消块
 
 /*
  * Standard header for all descriptor blocks:
  */
+//journal描述符块head
 //jbd2_journal_commit_transaction()中分配赋值，journal描述符块，对应journal空间里的bh，就是用来备份文件inode的bh的
 typedef struct journal_header_s
 {
+    //journal的magic
 	__be32		h_magic;
 	__be32		h_blocktype;
-    //h_sequence是transaction->t_tid
+    //h_sequence记录transaction->t_tid
 	__be32		h_sequence;
 } journal_header_t;
 
@@ -188,7 +191,10 @@ struct commit_header {
  */
 typedef struct journal_block_tag_s
 {
+    //把inode元数据写入journal日志文件分区备份时，要记录这个inode元数据所在的物理块号，就是记录到journal_block_tag_t的t_blocknr
+    //恢复日志do_one_pass()和写入日志jbd2_journal_commit_transaction()，都用到t_blocknr
 	__be32		t_blocknr;	/* The on-disk block number */
+    //uuid+seq+block的checksum值
 	__be16		t_checksum;	/* truncated crc32c(uuid+seq+block) */
 	__be16		t_flags;	/* See below */
 	__be32		t_blocknr_high; /* most-significant high 32bits. */
@@ -198,7 +204,7 @@ typedef struct journal_block_tag_s
 #define JBD2_TAG_SIZE64 (sizeof(journal_block_tag_t))
 
 /* Tail of descriptor block, for checksumming */
-struct jbd2_journal_block_tail {
+struct jbd2_journal_block_tail {//descriptor block 的checksum值
 	__be32		t_checksum;	/* crc32c(uuid+descr_block) */
 };
 
@@ -230,17 +236,25 @@ struct jbd2_journal_revoke_tail {
 typedef struct journal_superblock_s
 {
 /* 0x0000 */
-	journal_header_t s_header;
+	journal_header_t s_header;//journal描述符块head
 
 /* 0x000C */
 	/* Static information describing the journal */
+    //块大小，应该就是ext4文件系统的块大小吧，以为journal日志文件就是ext4文件系统里inode编号是8的那个文件
 	__be32	s_blocksize;		/* journal device blocksize */
+    //journal文件总块数
 	__be32	s_maxlen;		/* total blocks in journal file */
+    //journal文件的第一个block号，貌似是逻辑块号1，不是物理机块号，静态信息，这个在ext4格式化时就确定了吧
 	__be32	s_first;		/* first block of log information */
 
 /* 0x0018 */
+     //jbd2_journal_commit_transaction->jbd2_update_log_tail->__jbd2_update_log_tail->jbd2_journal_update_sb_log_tail中更新
 	/* Dynamic information describing the current state of the log */
+    //这应该是journal日志里保存的第一个commit的ID，应该就是第一个被恢复的，最老的.jbd2_journal_update_sb_log_tail()中被设置
 	__be32	s_sequence;		/* first commit ID expected in log */
+    //journal日志里第一个commit日志的物理块号，，journal日志空间有限，journal保存的日志会被循环覆盖，这个s_start会被不断修改
+    //永远指向第一个journal保存的日志的物理块号。jbd2_journal_update_sb_log_tail()中被设置
+    //如果ext4文件系统正常卸载，s_start被清0，见jbd2_mark_journal_empty()函数，这样将来文件系统mount时，读取journal超级块中的s_start为0，就不执行recover操作了
 	__be32	s_start;		/* blocknr of start of log */
 
 /* 0x0020 */
@@ -268,6 +282,7 @@ typedef struct journal_superblock_s
 	__u8	s_checksum_type;	/* checksum type */
 	__u8	s_padding2[3];
 	__u32	s_padding[42];
+    //superblock结构的checksum值，用于判断superblock数据结构的完整性
 	__be32	s_checksum;		/* crc32c(superblock) */
 
 /* 0x0100 */
@@ -468,7 +483,7 @@ struct transaction_s
 	journal_t		*t_journal;
 
 	/* Sequence number for this transaction [no locking] */
-    //transaction id
+    //transaction id，在jbd2__journal_start->start_this_handle->jbd2_get_transaction中赋值为journal->j_transaction_sequence
 	tid_t			t_tid;
 
 	/*
@@ -494,6 +509,7 @@ struct transaction_s
 	/*
 	 * Where in the log does this transaction's commit start? [no locking]
 	 */
+	//jbd2_journal_commit_transaction()开头被赋值为journal->j_head
 	unsigned long		t_log_start;
 
 	/* Number of buffers on the t_buffers list [j_list_lock] */
@@ -525,6 +541,8 @@ struct transaction_s
 	 * Doubly-linked circular list of all buffers still to be flushed before
 	 * this transaction can be checkpointed. [j_list_lock]
 	 */
+	//jh对应的inode元数据已经写入journal日志文件分区了，要把这个jh放到t_checkpoint_list所指向的jh链表，这个jh链表全是保存这种jh
+	//t_checkpoint_list指向新加入t_checkpoint_list链表的jh，见__jbd2_journal_insert_checkpoint()
 	struct journal_head	*t_checkpoint_list;
 
 	/*
@@ -604,6 +622,8 @@ struct transaction_s
 	 * Forward and backward links for the circular list of all transactions
 	 * awaiting checkpoint. [j_list_lock]
 	 */
+//貌似是所有的commit过的transaction都靠t_cpnext和t_cpprev这两个成员加入到transaction链表，jbd2_journal_commit_transaction()最后添加。
+//t_cpnext和t_cpprev就是普通的链表指针，一个指向下一个transaction结构，一个指向上一个transaction结构
 	transaction_t		*t_cpnext, *t_cpprev;
 
 	/*
@@ -789,6 +809,13 @@ struct journal_s
 	 * ... and a linked circular list of all transactions waiting for
 	 * checkpointing. [j_list_lock]
 	 */
+//应该是所有commit过的transaction，都会链入j_checkpoint_transactions指向的transaction链表，看jbd2_journal_commit_transaction()最后
+//把本次commit transaction插入transaction链表。下次再执行jbd2_journal_commit_transaction函数，会执行__jbd2_journal_clean_checkpoint_list
+//取出j_checkpoint_transactions指向的transaction链表上的jh，看对应的inode元数据是否传输到了ext4文件系统，
+//是的话就把jh有关的结构释放,还有jh对应的transaction释放。
+//注意，journal_clean_one_cp_list->__try_to_free_cp_buf->__jbd2_journal_remove_checkpoint->__jbd2_journal_drop_transaction()
+//如果j_checkpoint_transactions链表上transaction的所有jh对应inode等元数据，全部刷回了ext4文件系统，
+//journal->j_checkpoint_transactions=NULL，设为NULL
 	transaction_t		*j_checkpoint_transactions;
 
 	/*
@@ -800,7 +827,7 @@ struct journal_s
 	wait_queue_head_t	j_wait_transaction_locked;
 
 	/* Wait queue for waiting for checkpointing to complete */
-	wait_queue_head_t	j_wait_logspace;
+	wait_queue_head_t	j_wait_logspace;//__jbd2_journal_remove_checkpoint中唤醒在j_wait_logspace休眠的进程
 
     //jbd2_log_wait_commit()中在j_wait_done_commit上休眠
 	/* Wait queue for waiting for commit to complete */
@@ -832,24 +859,32 @@ struct journal_s
 	 * Journal head: identifies the first unused block in the journal.
 	 * [j_state_lock]
 	 */
-	unsigned long		j_head;//jbd2_journal_next_log_block中从j_head物理块好
-
+	//jbd2_journal_next_log_block中从j_head中找到journal分区的物理块号(然后j_head加1)，可以使用的、保存inode等元数据的物理块
+	//j_head和j_tail应该指向保存journal日志文件分区的物理块号队列的头和尾，从j_head取出journal分区的空闲的物理块号
+	//向j_tail插入空闲的物理块号，journal日志文件分区空间有限，128M，很大可能是，一部分物理块号被使用，一部分空闲，被用的还可能被释放
+	//姑且理解j_head成物理块号，实际是相对journal分区的逻辑块号，实际用时还要转换成物理块号,看jbd2_journal_next_log_block()的转过过程
+	unsigned long		j_head;// journal日志文件分区中第一个未使用的块号，该物理块将被inode元数据
 	/*
 	 * Journal tail: identifies the oldest still-used block in the journal.
 	 * [j_state_lock]
 	 */
-	unsigned long		j_tail;
-
+	//姑且理解j_tail成物理块号，实际是相对journal分区的逻辑块号，实际用时还要转换成物理块号,看jbd2_journal_next_log_block()的转过过程
+    //load_superblock中赋初值bd2_journal_commit_transaction->jbd2_update_log_tail->__jbd2_update_log_tail()更新
+    //
+	unsigned long		j_tail;//journal中仍在使用的最旧的块号.为0说明journal里没有保存有效的inode元数据
 	/*
 	 * Journal free: how many free blocks are there in the journal?
 	 * [j_state_lock]
 	 */
-	unsigned long		j_free;
-
+	unsigned long		j_free;//表示journal日志文件分区空闲物理块数据，这些物理块备份保存inode元数据的
 	/*
 	 * Journal start and end: the block numbers of the first usable block
 	 * and one beyond the last usable block in the journal. [j_state_lock]
 	 */
+	 //实际打印数据 j_head:6 j_tail:1 j_free:32762 j_first:1 j_last:32768
+	 //j_head:12 j_tail:1 j_free:32756 j_first:1 j_last:32768
+	//j_first和j_last应该journal文件那个空间里，保存inode这些元数据的的起始物理块号和结束物理块号吧,姑且理解j_tail成物理块号
+	//实际是相对journal分区的逻辑块号.看load_superblock()，格式化后不变。
 	unsigned long		j_first;
 	unsigned long		j_last;
 
@@ -866,7 +901,7 @@ struct journal_s
 	 * Device which holds the client fs.  For internal journal this will be
 	 * equal to j_dev.
 	 */
-	struct block_device	*j_fs_dev;
+	struct block_device	*j_fs_dev;//就是所在journal日志文件分区所在的磁盘分区的bdev吧?????????
 
 	/* Total maximum capacity of the journal region on disk. */
 	unsigned int		j_maxlen;
@@ -884,12 +919,19 @@ struct journal_s
 	/*
 	 * Sequence number of the oldest transaction in the log [j_state_lock]
 	 */
-	tid_t			j_tail_sequence;
+	//journal日志中最老的transaction ID，这个最老的容易引起误解。应是一段时间里最大的transaction ID，什么意思，比如本次jbd commit执行
+	//jbd2_journal_commit_transaction->jbd2_update_log_tail->__jbd2_update_log_tail()，此时把本次的commit transaction ID保存到
+	//j_tail_sequence，等下次再jbd2_journal_commit_transaction..->__jbd2_update_log_tail，发现新的commit transaction ID比
+	//j_tail_sequence,就把新的commit transaction ID保存到j_tail_sequence，j_tail_sequence相对新的jbd comit transaction id是老的，
+	//是上一次jbd commit transaction id。j_tail_sequence在jbd2_journal_commit_transaction()..->__jbd2_update_log_tail()
+	//最后要记录最大的commit transaction id
+	tid_t			j_tail_sequence; 
 
 	/*
 	 * Sequence number of the next transaction to grant [j_state_lock]
 	 */
-	tid_t			j_transaction_sequence;
+	//jbd2__journal_start->start_this_handle->jbd2_get_transaction 中++
+	tid_t			j_transaction_sequence;//transaction id，赋值给transaction->t_tid，然后加1
 
 	/*
 	 * Sequence number of the most recently committed transaction
@@ -1311,7 +1353,7 @@ static inline int jbd_space_needed(journal_t *journal)
 #define BJ_None		0	/* Not journaled */
 //jh在transaction的元数据BJ_Metadata队列,ext4_handle_dirty_metadata->__ext4_handle_dirty_metadata中添加
 #define BJ_Metadata	1	/* Normal journaled metadata */
-//jh在transaction的BJ_Metadata队列，已经传输过的jh，被作废了，__jbd2_journal_refile_buffer()把jh添加到BJ_Forget
+//jh在transaction的BJ_Forget队列，已经传输过的jh，__jbd2_journal_refile_buffer()把jh添加到BJ_Forget
 #define BJ_Forget	2	/* Buffer superseded by this transaction */
 //new_jh添加到transaction的BJ_IO链表，jbd2_journal_commit_transaction->jbd2_journal_write_metadata_buffer
 #define BJ_IO		3	/* Buffer is for temporary IO use */

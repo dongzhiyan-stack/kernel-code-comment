@@ -460,8 +460,8 @@ repeat:
 	new_bh->b_size = jh2bh(jh_in)->b_size;
 	new_bh->b_bdev = transaction->t_journal->j_dev;
     //new_bh的物理块号，这个blocknr很关键，来自jbd2_journal_commit_transaction->jbd2_journal_next_log_block
-    //来自journal空间文件的磁盘的一个物理块号，将来靠这个吧new_bh的数据写入journal空间文件的物理块
-    //new_bh内存指向的又是文件inode元数据bh的内存。这就是文件inode元数据备份的核心呀
+    //来自journal空间文件的磁盘的一个物理块号，将来靠这个把new_bh的数据写入journal空间文件的物理块，备份inode元数据，
+    //因为new_bh内存指向的是文件inode元数据bh的内存。这就是文件inode元数据备份到journal空间的的核心呀
 	new_bh->b_blocknr = blocknr;
 	set_buffer_mapped(new_bh);
 	set_buffer_dirty(new_bh);
@@ -752,20 +752,23 @@ EXPORT_SYMBOL(jbd2_complete_transaction);
 /*
  * Log buffer allocation routines:
  */
-//从journal上得到物理块号block
+//从journal->j_head上得到journal日志文件分区空闲的保存inode元数据物理块号
 int jbd2_journal_next_log_block(journal_t *journal, unsigned long long *retp)
 {
 	unsigned long blocknr;
 
 	write_lock(&journal->j_state_lock);
 	J_ASSERT(journal->j_free > 1);
-    //从journal->j_head队列取出blocknr物理块号
+    //从journal->j_head指向的队列取出blocknr物理块号，这个队列保存的数据时jounal日志文件分区空闲物理块号，
+    //这些journal里的物理块就是用来备份保存inode元数据的!!!!!!!!!!!!!!
 	blocknr = journal->j_head;
+    //j_head++指向下一个物理块号，姑且理解成物理块号，实际是相对journal分区的逻辑块号，实际用时还要转换成物理块号
 	journal->j_head++;
 	journal->j_free--;
 	if (journal->j_head == journal->j_last)
 		journal->j_head = journal->j_first;
 	write_unlock(&journal->j_state_lock);
+    //完成逻辑块号到物理块号的转变，retp最终返回的是物理块号，直接submit_bio传输用的
 	return jbd2_journal_bmap(journal, blocknr, retp);//貌似就是 *retp=blocknr
 }
 
@@ -810,13 +813,13 @@ int jbd2_journal_bmap(journal_t *journal, unsigned long blocknr,
  * mmaps of blockdevs which hold live JBD-controlled filesystems.
  */
 //从journal->j_head上得到journal队列头保存的物理块号block，再得到对应bh，然后分配jh,bh与jh相互构成联系并返回jh
-//这里的bh，jh是ext4文件系统里journal空间文件里，不是文件inode的bh和jh，是journal空间备份文件inode的bh和jh
+//这里的bh，jh是ext4文件系统里journal空间文件里，不是文件inode的bh和jh，是journal空间备份文件inode的bh、jh
 struct journal_head *jbd2_journal_get_descriptor_buffer(journal_t *journal)
 {
 	struct buffer_head *bh;
 	unsigned long long blocknr;
 	int err;
-    //从journal->j_head上得到journal队列头保存的物理块号block
+    //从journal->j_head上得到journal日志文件分区空闲的保存inode元数据物理块号于blocknr
 	err = jbd2_journal_next_log_block(journal, &blocknr);
 
 	if (err)
@@ -826,7 +829,7 @@ struct journal_head *jbd2_journal_get_descriptor_buffer(journal_t *journal)
 	if (!bh)
 		return NULL;
 	lock_buffer(bh);
-    //这里把bh对应内存的数据清0，这是为什么?????????????????，因为这个bh不是文件inode的bh
+    //这里把bh对应内存的数据清0，这是为什么?????????????????，因为这个bh不是文件inode的bh，是journal日志文件空间的
 	memset(bh->b_data, 0, journal->j_blocksize);
 	set_buffer_uptodate(bh);
 	unlock_buffer(bh);
@@ -845,6 +848,8 @@ struct journal_head *jbd2_journal_get_descriptor_buffer(journal_t *journal)
  * The return value is 0 if journal tail cannot be pushed any further, 1 if
  * it can.
  */
+//一般情况是从journal->j_checkpoint_transactions或者journal->j_committing_transaction得到transaction->t_tid和transaction->t_log_start
+//赋值给tid和block。transaction->t_log_start本质上还是journal->j_head
 int jbd2_journal_get_log_tail(journal_t *journal, tid_t *tid,
 			      unsigned long *block)
 {
@@ -854,19 +859,33 @@ int jbd2_journal_get_log_tail(journal_t *journal, tid_t *tid,
 	read_lock(&journal->j_state_lock);
 	spin_lock(&journal->j_list_lock);
 	transaction = journal->j_checkpoint_transactions;
+
+    //这是journal->j_checkpoint_transactions，走这里说明j_checkpoint_transactions的transaction链表上，还有transaction的jh对应的
+    //inode元数据，还没有刷到ext4文件系统。那使用的tid和block都是j_checkpoint_transactions指向的
 	if (transaction) {
 		*tid = transaction->t_tid;
+        //transaction->t_log_start在jbd2_journal_commit_transaction()开头被赋值为journal->j_head，说到底还是来自journal->j_head
+        //是在j_checkpoint_transactions指向的那个transaction发起commit时执行的赋值，即在jbd2_journal_commit_transaction()开头被赋值为journal->j_head
 		*block = transaction->t_log_start;
-	} else if ((transaction = journal->j_committing_transaction) != NULL) {
+	}
+    //这是journal->j_committing_transaction，也会走这个分支，就是用当前正在commit的transaction
+    else if ((transaction = journal->j_committing_transaction) != NULL) {
 		*tid = transaction->t_tid;
+        //transaction->t_log_start在jbd2_journal_commit_transaction()开头被赋值为journal->j_head
 		*block = transaction->t_log_start;
-	} else if ((transaction = journal->j_running_transaction) != NULL) {
+	} else if ((transaction = journal->j_running_transaction) != NULL) {//这是journal->j_running_transaction
 		*tid = transaction->t_tid;
 		*block = journal->j_head;
 	} else {
+	//j_checkpoint_transactions、j_committing_transaction、j_running_transaction都没有，才*block = journal->j_head
+	//什么鬼，这么多的transactions
 		*tid = journal->j_transaction_sequence;
 		*block = journal->j_head;
 	}
+    /*当tid来自本次commit transaction，journal->j_tail_sequence表示上次jbd commit的transaction id，如果前者大于后者
+    返回1。因为这里的返回1，会执行jbd2_journal_commit_transaction->jbd2_update_log_tail->__jbd2_update_log_tail()
+    把这个tid更新到journal->j_tail_sequence*/
+    //就是比tid和journal->j_tail_sequence大小，*tid>journal->j_tail_sequence返回1，否则返回0
 	ret = tid_gt(*tid, journal->j_tail_sequence);
 	spin_unlock(&journal->j_list_lock);
 	read_unlock(&journal->j_state_lock);
@@ -897,6 +916,8 @@ int __jbd2_update_log_tail(journal_t *journal, tid_t tid, unsigned long block)
 	 * space and if we lose sb update during power failure we'd replay
 	 * old transaction with possibly newly overwritten data.
 	 */
+
+    //把tid和block更新到journal_superblock的sb->s_sequence和sb->s_start
 	ret = jbd2_journal_update_sb_log_tail(journal, tid, block, WRITE_FUA);
 	if (ret)
 		goto out;
@@ -913,7 +934,9 @@ int __jbd2_update_log_tail(journal_t *journal, tid_t tid, unsigned long block)
 		  journal->j_tail_sequence, tid, block, freed);
 
 	journal->j_free += freed;
+    //记录当前最大的commit transction id
 	journal->j_tail_sequence = tid;
+    //journal->j_tail记录当前物理块号，其实来自journal->j_head，看jbd2_journal_commit_transaction->jbd2_journal_get_log_tail
 	journal->j_tail = block;
 	write_unlock(&journal->j_state_lock);
 
@@ -929,6 +952,7 @@ out:
 void jbd2_update_log_tail(journal_t *journal, tid_t tid, unsigned long block)
 {
 	mutex_lock(&journal->j_checkpoint_mutex);
+    //tid大于journal->j_tail_sequence才update
 	if (tid_gt(tid, journal->j_tail_sequence))
 		__jbd2_update_log_tail(journal, tid, block);
 	mutex_unlock(&journal->j_checkpoint_mutex);
@@ -1402,9 +1426,10 @@ int jbd2_journal_update_sb_log_tail(journal_t *journal, tid_t tail_tid,
 	jbd_debug(1, "JBD2: updating superblock (start %lu, seq %u)\n",
 		  tail_block, tail_tid);
 
+    //更新最老的有效的journal tid和tail_block物理块号，将来异常掉电，就是从sb->s_start指向的journal物理块号开始搜索恢复
 	sb->s_sequence = cpu_to_be32(tail_tid);
 	sb->s_start    = cpu_to_be32(tail_block);
-
+    //更新了journal_superblock数据，得刷回到磁盘，要是中途掉电了咋办?这个有备份吗
 	ret = jbd2_write_superblock(journal, write_op);
 	if (ret)
 		goto out;
@@ -1426,12 +1451,14 @@ out:
  * Update a journal's dynamic superblock fields to show that journal is empty.
  * Write updated superblock to disk waiting for IO to complete.
  */
+//ext4文件系统正常卸载会执行到这里，标记ext4 journal存储的日志为空，就是说inode元数据全刷回ext4了，journal日志文件分区没有用了。
 static void jbd2_mark_journal_empty(journal_t *journal)
 {
 	journal_superblock_t *sb = journal->j_superblock;
 
 	BUG_ON(!mutex_is_locked(&journal->j_checkpoint_mutex));
 	read_lock(&journal->j_state_lock);
+    //如果已经为0，就不用再标记
 	/* Is it already empty? */
 	if (sb->s_start == 0) {
 		read_unlock(&journal->j_state_lock);
@@ -1441,6 +1468,7 @@ static void jbd2_mark_journal_empty(journal_t *journal)
 		  journal->j_tail_sequence);
 
 	sb->s_sequence = cpu_to_be32(journal->j_tail_sequence);
+    //sb->s_start 标记为0
 	sb->s_start    = cpu_to_be32(0);
 	read_unlock(&journal->j_state_lock);
 
@@ -2483,7 +2511,7 @@ struct journal_head *jbd2_journal_grab_journal_head(struct buffer_head *bh)
 	jbd_lock_bh_journal_head(bh);
 	if (buffer_jbd(bh)) {
 		jh = bh2jh(bh);//就是返回bh->b_private
-		jh->b_jcount++;
+		jh->b_jcount++;//增加jh应用计数
 	}
 	jbd_unlock_bh_journal_head(bh);
 	return jh;

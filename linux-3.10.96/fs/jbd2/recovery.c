@@ -32,7 +32,7 @@ struct recovery_info
 {
 	tid_t		start_transaction;
 	tid_t		end_transaction;
-
+    //貌似没从journal恢复一个物理块数据到ext4文件系统就加1，见do_one_pass()
 	int		nr_replays;
 	int		nr_revokes;
 	int		nr_revoke_hits;
@@ -128,7 +128,7 @@ failed:
 /*
  * Read a block from the journal
  */
-
+//根据offset这个journal日志文件分区的一个物理块号，读取该块数据，保存到bh
 static int jread(struct buffer_head **bhp, journal_t *journal,
 		 unsigned int offset)
 {
@@ -142,7 +142,7 @@ static int jread(struct buffer_head **bhp, journal_t *journal,
 		printk(KERN_ERR "JBD2: corrupted journal superblock\n");
 		return -EIO;
 	}
-
+    //得到物理块号，简单理解为blocknr=offset，offset是journal日志文件分区的一个物理块号，
 	err = jbd2_journal_bmap(journal, offset, &blocknr);
 
 	if (err) {
@@ -150,7 +150,7 @@ static int jread(struct buffer_head **bhp, journal_t *journal,
 			offset);
 		return err;
 	}
-
+    //根据blocknr物理块号得到bh，里边已经从磁盘读取该物理块的数据
 	bh = __getblk(journal->j_dev, blocknr, journal->j_blocksize);
 	if (!bh)
 		return -ENOMEM;
@@ -225,7 +225,7 @@ static int count_tags(journal_t *journal, struct buffer_head *bh)
 	return nr;
 }
 
-
+//如果var超出队列最大值，回到队列头
 /* Make sure we wrap around the log correctly! */
 #define wrap(journal, var)						\
 do {									\
@@ -260,14 +260,14 @@ int jbd2_journal_recover(journal_t *journal)
 	 * is always zero if, and only if, the journal was cleanly
 	 * unmounted.
 	 */
-
+    //正常卸载文件系统直接在这里返回
 	if (!sb->s_start) {
 		jbd_debug(1, "No recovery required, last transaction %d\n",
 			  be32_to_cpu(sb->s_sequence));
 		journal->j_transaction_sequence = be32_to_cpu(sb->s_sequence) + 1;
 		return 0;
 	}
-
+    //走到这里，说明文件系统没有正常卸载
 	err = do_one_pass(journal, &info, PASS_SCAN);
 	if (!err)
 		err = do_one_pass(journal, &info, PASS_REVOKE);
@@ -285,6 +285,8 @@ int jbd2_journal_recover(journal_t *journal)
 	journal->j_transaction_sequence = ++info.end_transaction;
 
 	jbd2_journal_clear_revoke(journal);
+    //这里应该是说，如果由于异常掉电导致文件系统数据丢失，从journal分区复制了inode元数据到inode在ext4文件系统物理块对应
+    //的bh，这里是把bh中的数据刷回到磁盘?????????????????????
 	err2 = sync_blockdev(journal->j_fs_dev);
 	if (!err)
 		err = err2;
@@ -407,9 +409,10 @@ static int jbd2_block_tag_csum_verify(journal_t *j, journal_block_tag_t *tag,
 	sequence = cpu_to_be32(sequence);
 	calculated = jbd2_chksum(j, j->j_csum_seed, (__u8 *)&sequence,
 				 sizeof(sequence));
+    //jbd本身的数据也带checksum校验，计算出jbd数据的校验值，然后比较jbd数据是否有损坏
 	calculated = jbd2_chksum(j, calculated, buf, j->j_blocksize);
 	provided = be32_to_cpu(tag->t_checksum);
-
+    
 	return provided == cpu_to_be32(calculated);
 }
 
@@ -434,11 +437,14 @@ static int do_one_pass(journal_t *journal,
 	 * (in terms of transaction IDs), and where (in terms of log
 	 * block offsets): query the superblock.
 	 */
-
+    //获取journal_superblock_t
 	sb = journal->j_superblock;
+    //journal日志里superblock保存的第一个commit的ID，应该就是第一个被恢复的
 	next_commit_ID = be32_to_cpu(sb->s_sequence);
+    //第一个journal里superblock保存的日志的物理块号，就是jbd保存的inode这些元数据的物理块号吧
 	next_log_block = be32_to_cpu(sb->s_start);
 
+    //journal日志里保存的第一个commit的ID
 	first_commit_ID = next_commit_ID;
 	if (pass == PASS_SCAN)
 		info->start_transaction = first_commit_ID;
@@ -477,11 +483,13 @@ static int do_one_pass(journal_t *journal,
 		 * record. */
 
 		jbd_debug(3, "JBD2: checking block %ld\n", next_log_block);
+        //第一个journal日志文件里保存日志的物理块号，从磁盘读取该block的数据保存到bh,
 		err = jread(&bh, journal, next_log_block);
 		if (err)
 			goto failed;
-
+        //next_log_block++指向journal日志文件分区的下一个物理块号
 		next_log_block++;
+        //如果next_log_block超出队列最大值，回到队列头
 		wrap(journal, next_log_block);
 
 		/* What kind of buffer is it?
@@ -489,19 +497,22 @@ static int do_one_pass(journal_t *journal,
 		 * If it is a descriptor block, check that it has the
 		 * expected sequence number.  Otherwise, we're all done
 		 * here. */
-
+        //journal里保存日志物理块对应的bh，开头是journal_header_t，jbd2_journal_commit_transaction函数
+        //保存元数据时也是先设置一个journal_header，
 		tmp = (journal_header_t *)bh->b_data;
-
+        //做journal head maigc校验，貌似这里会跳出该函数recover恢复过程
 		if (tmp->h_magic != cpu_to_be32(JBD2_MAGIC_NUMBER)) {
 			brelse(bh);
 			break;
 		}
-
+        //journal_header_t的blocktype，下边根据这个blocktype判断这个journal日志块是JBD2_DESCRIPTOR_BLOCK或JBD2_COMMIT_BLOCK?????
 		blocktype = be32_to_cpu(tmp->h_blocktype);
+        //当初commit jbd 元数据的transaction->t_tid
 		sequence = be32_to_cpu(tmp->h_sequence);
 		jbd_debug(3, "Found magic %d, sequence %d\n",
 			  blocktype, sequence);
-
+        //sequence是从journal日志磁盘分区物理块bh开头中的journal_header_t保存的当初commit jbd 元数据的transaction->t_tid
+        //next_commit_ID是journal日志里superblock保存的第一个commit的ID
 		if (sequence != next_commit_ID) {
 			brelse(bh);
 			break;
@@ -510,12 +521,13 @@ static int do_one_pass(journal_t *journal,
 		/* OK, we have a valid descriptor block which matches
 		 * all of the sequence number checks.  What are we going
 		 * to do with it?  That depends on the pass... */
-
+        //journal_header_t保存的blocktype
 		switch(blocktype) {
 		case JBD2_DESCRIPTOR_BLOCK:
 			/* Verify checksum first */
 			if (JBD2_HAS_INCOMPAT_FEATURE(journal,
 					JBD2_FEATURE_INCOMPAT_CSUM_V2))
+			    //struct jbd2_journal_block_tai结构体大小，4个字节
 				descr_csum_size =
 					sizeof(struct jbd2_journal_block_tail);
 			if (descr_csum_size > 0 &&
@@ -530,6 +542,7 @@ static int do_one_pass(journal_t *journal,
 			 * in pass REPLAY; if journal_checksums enabled, then
 			 * calculate checksums in PASS_SCAN, otherwise,
 			 * just skip over the blocks it describes. */
+			//PASS_SCAN 和 PASS_REVOKE 走这里，然后continue直接回到上方while
 			if (pass != PASS_REPLAY) {
 				if (pass == PASS_SCAN &&
 				    JBD2_HAS_COMPAT_FEATURE(journal,
@@ -547,23 +560,44 @@ static int do_one_pass(journal_t *journal,
 				next_log_block += count_tags(journal, bh);
 				wrap(journal, next_log_block);
 				put_bh(bh);
+                /*如果不是PASS_REPLAY操作，不会执行下边的recover恢复日志操作*/
 				continue;
 			}
 
+            /*走到这一步，应该可以确定，发生异常掉电等行为，journal日志文件去肯定备份了有效的inode元数据。为什么说是
+             有效，因为journal日志文件大小固定，能备份的inode元数据个数有最大值。并且，如果inode元数据写入了ext4文件系统，
+             那journal里备份的inode元数据就可以给其他inode元数据备份使用了。如果文件系统正常卸载，那ext4所有的inode等元数据
+             都会被刷到ext4文件系统，那journal日志文件分区备份的inode等元数据，都是没用的，那就不会走到这里。走到这里，肯定说明
+             有inode等元数据没有被及时刷回ext4文件系统，那就从journal日志文件分区备份的inode元数据，恢复到ext4文件系统inode等
+             元数据异常掉电没有及时保存的物理块。并且根据我的推断，只要走到recover的这里，会把所有写入journal日志文件分区的
+             inode等元数据都恢复到ext4文件系统对应物理块，而不是判断journal日志文件分区哪些备份的inode元数据对应inode已经写会
+             ext4文件系统了，就不应把这些journal日志文件备份的inode元数据恢复到ext4文件系统了。只有文件胸膛没有正常umount
+             sb->s_start就不为0，那就把把所有写入journal日志文件分区的inode等元数据都恢复到ext4文件系统对应物理块，没有必要
+             这样吧，浪费感情，这个分析有可能不对!!!!!!!!!!!!*/
+            
 			/* A descriptor block: we can now write all of
 			 * the data blocks.  Yay, useful work is finally
 			 * getting done here! */
-
+            //跟jbd2_journal_commit_transaction()中部向journal日志文件分区逻辑一样，bh->b_data是保存journal日志的内存
+            //首地址，tagp指向该地址偏移sizeof(journal_header_t)大小后的位置，是journal_block_tag_t结构，也就是说，
+            //journal日志描述符块JBD2_DESCRIPTOR_BLOCK的数据分布是，是journal_header_t结构+journal_block_tag_t结构
 			tagp = &bh->b_data[sizeof(journal_header_t)];
+
+            //这是个循环，tagp依次指向往后的一个个journal_block_tag_t结构,这是journal日志文件去的描述符块区，
+            //一个journal_block_tag_t包含了一个inode元数据的关键数据，比如该inode在ext4文件系统的物理块号
+            //bh->b_data是内存首地址，tagp从该首地址依次向后偏移，journal->j_blocksize是一个bh内存大小
 			while ((tagp - bh->b_data + tag_bytes)
 			       <= journal->j_blocksize - descr_csum_size) {
 				unsigned long io_block;
-
+                //tag指向journal_block_tag_t结构的内存
 				tag = (journal_block_tag_t *) tagp;
 				flags = be16_to_cpu(tag->t_flags);
 
+                //上边next_log_block已经加1了，这样io_block就是第二个journal物理块号，这个物理块号保存的应该是inode元数据
 				io_block = next_log_block++;
+                //如果next_log_block超出队列最大值，回到队列头
 				wrap(journal, next_log_block);
+                //根据io_block这个journal日志文件分区的一个物理块号，读取该块数据，保存到obh，这保存的应该是inode元数据
 				err = jread(&obh, journal, io_block);
 				if (err) {
 					/* Recover what we can, but
@@ -577,12 +611,15 @@ static int do_one_pass(journal_t *journal,
 					unsigned long long blocknr;
 
 					J_ASSERT(obh != NULL);
+                    //即block = be32_to_cpu(tag->t_blocknr)，inode元数据
+                    //所在物理块的块号，见jbd2_journal_commit_transaction()中保存元数据inode时的赋值过程
 					blocknr = read_tag_block(tag_bytes,
 								 tag);
 
 					/* If the block has been
 					 * revoked, then we're all done
 					 * here. */
+					//如果是取消块的话，就跳过，取消块就是在jdb写时，文件删除了，不用管了
 					if (jbd2_journal_test_revoke
 					    (journal, blocknr,
 					     next_commit_ID)) {
@@ -592,6 +629,7 @@ static int do_one_pass(journal_t *journal,
 					}
 
 					/* Look for block corruption */
+                    //计算journal自身的数据obh->b_data是否有损坏，这些数据是journal日志文件分区里保存的备份inode元数据
 					if (!jbd2_block_tag_csum_verify(
 						journal, tag, obh->b_data,
 						be32_to_cpu(tmp->h_sequence))) {
@@ -607,6 +645,7 @@ static int do_one_pass(journal_t *journal,
 
 					/* Find a buffer for the new
 					 * data being restored */
+					//blocknr是inode元数据本身的物理块号，读取该块的数据，并建立bh给nbh
 					nbh = __getblk(journal->j_fs_dev,
 							blocknr,
 							journal->j_blocksize);
@@ -619,8 +658,11 @@ static int do_one_pass(journal_t *journal,
 						brelse(obh);
 						goto failed;
 					}
-
+                    //等待数据传输完成
 					lock_buffer(nbh);
+                   //nbh->b_data保存的是从inode元数据的物理块号读取的数据，就是ext4文件系统里原生的文件inode数据
+                   //obh->b_data是journal日志文件分区里保存的备份inode元数据，这是把journal日志文件分区备份的inode
+                   //元数据bh的数据复制到ext4文件系统中inode物理块对应的bh，然后再刷到bh对应的磁盘物理块，这样就完成元数据恢复
 					memcpy(nbh->b_data, obh->b_data,
 							journal->j_blocksize);
 					if (flags & JBD2_FLAG_ESCAPE) {
@@ -630,8 +672,10 @@ static int do_one_pass(journal_t *journal,
 
 					BUFFER_TRACE(nbh, "marking dirty");
 					set_buffer_uptodate(nbh);
+                    //标记nbh中保存的inode的bh数据脏，
 					mark_buffer_dirty(nbh);
 					BUFFER_TRACE(nbh, "marking uptodate");
+                    //貌似没从journal恢复一个物理块数据到ext4文件系统就加1
 					++info->nr_replays;
 					/* ll_rw_block(WRITE, 1, &nbh); */
 					unlock_buffer(nbh);
@@ -640,6 +684,7 @@ static int do_one_pass(journal_t *journal,
 				}
 
 			skip_write:
+                //tagp 累加tag_bytes，指向下一个journal_block_tag_t
 				tagp += tag_bytes;
 				if (!(flags & JBD2_FLAG_SAME_UUID))
 					tagp += 16;
