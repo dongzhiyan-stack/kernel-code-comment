@@ -81,6 +81,7 @@ struct elv_fs_entry {
 /*
  * identifies an elevator type, such as AS or deadline
  */
+//IO调度类，deadline、noee
 struct elevator_type
 {
 	/* managed by elevator core */
@@ -91,6 +92,7 @@ struct elevator_type
 	size_t icq_size;	/* see iocontext.h */
 	size_t icq_align;	/* ditto */
 	struct elv_fs_entry *elevator_attrs;
+    //调度类的名字
 	char elevator_name[ELV_NAME_MAX];
 	struct module *elevator_owner;
 
@@ -104,8 +106,10 @@ struct elevator_type
 /*
  * each queue has an elevator_queue associated with it
  */
+//IO调度实例
 struct elevator_queue
 {
+    //IO调度类
 	struct elevator_type *type;
 	void *elevator_data;
 	struct kobject kobj;

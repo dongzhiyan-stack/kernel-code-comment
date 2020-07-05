@@ -22,6 +22,7 @@ typedef void (bio_destructor_t) (struct bio *);
 /*
  * was unsigned short, but we might as well be ready for > 64kB I/O pages
  */
+//以该成员bv_offset和bv_len描述的是page cache的一片内存吧，这片数据要写入磁盘
 struct bio_vec {
 	struct page	*bv_page;
 	unsigned int	bv_len;
@@ -36,7 +37,7 @@ struct bio {
     //应该是本次bio请求的起始扇区号
 	sector_t		bi_sector;	/* device address in 512 byte
 						   sectors */
-    //貌似bi_next指向下一个bio
+    //貌似bi_next指向下一个bio，req上有多个bio，bio挂在这个链表上
 	struct bio		*bi_next;	/* request queue link */
     //本次要操作的块设备bdev，其中有struct request_queue            
 	struct block_device	*bi_bdev;
@@ -85,7 +86,7 @@ struct bio {
 	unsigned int		bi_max_vecs;	/* max bvl_vecs we can hold */
 
 	atomic_t		bi_cnt;		/* pin count */
-
+    //以该成员bv_offset和bv_len描述的是page cache的一片内存吧，这片数据要写入磁盘
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
 
 	struct bio_set		*bi_pool;

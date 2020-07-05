@@ -79,11 +79,11 @@ struct partition {
 } __attribute__((packed));
 
 struct disk_stats {
-	unsigned long sectors[2];	/* READs and WRITEs *///读写扇区总数
+	unsigned long sectors[2];	/* READs and WRITEs */
 	unsigned long ios[2];
-	unsigned long merges[2];//应该是合并bio个数
-	unsigned long ticks[2];//读和写req消耗的时间，是jiffes数据
-	unsigned long io_ticks;//每一个req消耗的时间，iostat 的util参数就是用的这个参数
+	unsigned long merges[2];
+	unsigned long ticks[2];
+	unsigned long io_ticks;
 	unsigned long time_in_queue;
 };
 
@@ -106,23 +106,20 @@ struct hd_struct {
 	 * partition while IO is happening to it and update of nr_sects
 	 * can be non-atomic on 32bit machines with 64bit sector_t.
 	 */
-	//块设备主分区大小
 	sector_t nr_sects;
 	seqcount_t nr_sects_seq;
 	sector_t alignment_offset;
 	unsigned int discard_alignment;
 	struct device __dev;
 	struct kobject *holder_dir;
-	int policy, partno;//partno
+	int policy, partno;
 	struct partition_meta_info *info;
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 	int make_it_fail;
 #endif
-	unsigned long stamp;//统计util时，记录上一次的系统时间
-	//保存待传输的rq个数,inflight[1]保存主磁盘分区，比如sda；inflight[0]保存当前块设备的磁盘分区，比如sda2
+	unsigned long stamp;
 	atomic_t in_flight[2];
 #ifdef	CONFIG_SMP
-    //磁盘使用率等统计数据，每个CPU一个
 	struct disk_stats __percpu *dkstats;
 #else
 	struct disk_stats dkstats;
@@ -160,28 +157,21 @@ struct disk_part_tbl {
 	struct rcu_head rcu_head;
 	int len;
 	struct hd_struct __rcu *last_lookup;
-    //disk->part_tbl->part[0]是在disk分配是就已经赋值过的，在alloc_disk_node函数赋值
 	struct hd_struct __rcu *part[];
 };
 
 struct disk_events;
+struct badblocks;
 
-/*
-一个块设备，不管有几个分区，只有一个struct gendisk disk结构，有多个bdev，一个分区一个bdev，
-主分区也有一个特有的bdev。其好多成员是在alloc_disk后，在mmc_blk_alloc_req函数赋值。
-*/
 struct gendisk {
 	/* major, first_minor and minors are input parameters only,
 	 * don't use directly.  Use disk_devt() and disk_max_parts().
 	 */
-	 //块设备主设备号，mmc_blk_alloc_req()中赋值
 	int major;			/* major number of driver */
-    //第一个此设备好??????
 	int first_minor;
-    //设备数，分区数
 	int minors;                     /* maximum number of minors, =1 for
                                          * disks that can't be partitioned. */
-    //mmcblk0，代表主块设备
+
 	char disk_name[DISK_NAME_LEN];	/* name of major driver */
 	char *(*devnode)(struct gendisk *gd, umode_t *mode);
 
@@ -193,14 +183,10 @@ struct gendisk {
 	 * non-critical accesses use RCU.  Always access through
 	 * helpers.
 	 */
-	//disk->part_tbl_part[0]是在disk分配后赋值，在alloc_disk_node赋值。
-	//指向分区，里边的part[0]等就指向分区的struct hd_struct结构
 	struct disk_part_tbl __rcu *part_tbl;
-    //代表设备色主分区
 	struct hd_struct part0;
-    //mmc的fops在alloc_disk后，在mmc_blk_alloc_req中赋值，是mmc_bdops
+
 	const struct block_device_operations *fops;
-    //mmc的fops在alloc_disk后，mmc_blk_probe->mmc_blk_alloc->mmc_blk_alloc_req赋值
 	struct request_queue *queue;
 	void *private_data;
 
@@ -215,8 +201,9 @@ struct gendisk {
 	struct blk_integrity *integrity;
 #endif
 	int node_id;
+	RH_KABI_EXTEND(struct badblocks *bb)
 };
-//struct hd_struct *part应该代表的是一个磁盘分区，比如sda2，part_to_disk代表的是整个磁盘，比如sda
+
 static inline struct gendisk *part_to_disk(struct hd_struct *part)
 {
 	if (likely(part)) {
@@ -395,24 +382,14 @@ static inline void free_part_stats(struct hd_struct *part)
 #define part_stat_sub(cpu, gendiskp, field, subnd)			\
 	part_stat_add(cpu, gendiskp, field, -subnd)
 
-static inline void part_inc_in_flight(struct hd_struct *part, int rw)
-{
-	atomic_inc(&part->in_flight[rw]);
-	if (part->partno)
-		atomic_inc(&part_to_disk(part)->part0.in_flight[rw]);
-}
-
-static inline void part_dec_in_flight(struct hd_struct *part, int rw)
-{
-	atomic_dec(&part->in_flight[rw]);
-	if (part->partno)
-		atomic_dec(&part_to_disk(part)->part0.in_flight[rw]);
-}
-
-static inline int part_in_flight(struct hd_struct *part)
-{
-	return atomic_read(&part->in_flight[0]) + atomic_read(&part->in_flight[1]);
-}
+void part_in_flight(struct request_queue *q, struct hd_struct *part,
+		    unsigned int inflight[2]);
+void part_in_flight_rw(struct request_queue *q, struct hd_struct *part,
+		       unsigned int inflight[2]);
+void part_dec_in_flight(struct request_queue *q, struct hd_struct *part,
+			int rw);
+void part_inc_in_flight(struct request_queue *q, struct hd_struct *part,
+			int rw);
 
 static inline struct partition_meta_info *alloc_part_info(struct gendisk *disk)
 {
@@ -428,10 +405,11 @@ static inline void free_part_info(struct hd_struct *part)
 }
 
 /* block/blk-core.c */
-extern void part_round_stats(int cpu, struct hd_struct *part);
+extern void part_round_stats(struct request_queue *q, int cpu, struct hd_struct *part);
 
 /* block/genhd.c */
 extern void add_disk(struct gendisk *disk);
+extern void add_disk_no_queue_reg(struct gendisk *disk);
 extern void del_gendisk(struct gendisk *gp);
 extern struct gendisk *get_gendisk(dev_t dev, int *partno);
 extern struct block_device *bdget_disk(struct gendisk *disk, int partno);
