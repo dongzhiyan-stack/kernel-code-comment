@@ -104,6 +104,7 @@ enum rq_cmd_type_bits {
 struct request {
 #ifdef __GENKSYMS__
 	union {
+	    //deadline调度算法，应该就是该算法的fifo调度队列，req在该队列中先进先出，还有个超时时间
 		struct list_head queuelist;
 		struct llist_node ll_list;
 	};
@@ -111,6 +112,7 @@ struct request {
 	struct list_head queuelist;
 #endif
 	union {
+	    //deadline调度算法，应该记录了rq的超时时间，看deadline_merged_requests()
 		struct call_single_data csd;
 		RH_KABI_REPLACE(struct work_struct mq_flush_work,
 			        unsigned long fifo_time)
@@ -128,14 +130,16 @@ struct request {
 	int cpu;
 
 	/* the following two fields are internal, NEVER access directly */
-    //应该是该rq里所有的bio读写的磁盘范围的起始扇区和长度
+    //req代表的磁盘空间范围
 	unsigned int __data_len;	/* total data len */
+    //req代表的磁盘范围起始扇区
 	sector_t __sector;		/* sector cursor *///struct bio
     
 	struct bio *bio;//req上的第一个bio吧，一个req可能合并了多个bio，bio的bi_next链表挂着其他bio
-	struct bio *biotail;//在把bio合并到rq时，也是执行新加入的bio，奇怪，看ll_back_merge_fn()
+	struct bio *biotail;//在把bio合并到rq时，也是执行新加入的bio，奇怪，看ll_back_merge_fn()和bio_attempt_back_merge()和attempt_merge
 
 #ifdef __GENKSYMS__
+    //新的req靠这个hash添加到IO调度算法的hash链表里,elv_rqhash_add(),做hash索引是为了在IO算法队列里搜索可以合并的req时，提高搜索速度
 	struct hlist_node hash;	/* merge hash */
 #else
 	/*
@@ -191,7 +195,7 @@ struct request {
 	/* Number of scatter-gather DMA addr+len pairs after
 	 * physical address coalescing is performed.
 	 */
-	unsigned short nr_phys_segments;//应该就是对应的磁盘扇区总个数吧，或者内存page个数???????????????
+	unsigned short nr_phys_segments;//应该就是对应的磁盘扇区总个数吧，或者内存page个数??????????????? ll_merge_requests_fn()
 #if defined(CONFIG_BLK_DEV_INTEGRITY)
 	unsigned short nr_integrity_segments;
 #endif
@@ -355,9 +359,14 @@ struct request_queue {
 	/*
 	 * Together with queue_head for cacheline sharing
 	 */
+	//__elv_add_request()中把新分配的req插入到queue_head
+	//大爷的，queue_head就是存放待发送给驱动传输的req的，见__elv_add_request->elv_drain_elevator->deadline_dispatch_requests->
+	//->deadline_move_request->deadline_move_to_dispatch->elv_dispatch_add_tail.
+	//触发驱动程序取出queue_head上待传输的req的函数路径是
+	//__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn->blk_fetch_request->blk_peek_request->__elv_next_request
 	struct list_head	queue_head;
-	struct request		*last_merge;//上一次合并过的rq?????
-	struct elevator_queue	*elevator;//IO调度实例，IO调度类里边有
+	struct request		*last_merge;//上一次合并过的rq，见elv_merge()或elv_merge_requests()函数
+	struct elevator_queue	*elevator;//每个IO调度算法的总代表
 	int			nr_rqs[2];	/* # allocated [a]sync rqs */
 	int			nr_rqs_elvpriv;	/* # allocated rqs w/ elvpriv */
 
@@ -368,11 +377,11 @@ struct request_queue {
 	 * determined using bio_request_list().
 	 */
 	struct request_list	root_rl;
-    //mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue() 
+    //mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue() 完成初始化赋值
+    //blk_finish_plug->queue_unplugged->__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn  启动磁盘或者emmc数据传输
 	request_fn_proc		*request_fn;//mmc_request_fn()
-	//mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue()->blk_queue_make_request()
-	//中赋值为blk_queue_bio()
-	//nvme blk_mq_init_queue->blk_mq_init_allocated_queue->blk_queue_make_request 中赋值
+//mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue()->blk_queue_make_request()中赋值为blk_queue_bio()
+//nvme blk_mq_init_queue->blk_mq_init_allocated_queue->blk_queue_make_request 中赋值
 	make_request_fn		*make_request_fn;
 	prep_rq_fn		*prep_rq_fn;//mmc_init_queue()中赋值为mmc_prep_request
 	unprep_rq_fn		*unprep_rq_fn;
@@ -401,7 +410,9 @@ struct request_queue {
 	/*
 	 * Dispatch queue sorting
 	 */
+	//elv_dispatch_add_tail  发送给驱动的req的结束扇区地址
 	sector_t		end_sector;
+    //elv_dispatch_add_tail 指向待发送给驱动的req
 	struct request		*boundary_rq;
 
 	/*
@@ -473,7 +484,7 @@ struct request_queue {
 
 	struct blk_queue_tag	*queue_tags;
 	struct list_head	tag_busy_list;
-
+    //队列插入新的一个req加1，__elv_add_request(),elv_dispatch_add_tail()减1
 	unsigned int		nr_sorted;
 	unsigned int		in_flight[2];
 	/*
@@ -1233,6 +1244,7 @@ static inline void blk_post_runtime_resume(struct request_queue *q, int err) {}
  */
 struct blk_plug {
 	unsigned long magic; /* detect uninitialized use-cases */
+    //每个进车独有的blk_plug，每个进程的bio就是先添加到blk_plug链表上
 	struct list_head list; /* requests */
 	struct list_head mq_list; /* blk-mq requests */
 	struct list_head cb_list; /* md requires an unplug callback */

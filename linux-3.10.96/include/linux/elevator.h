@@ -42,20 +42,26 @@ typedef void (elevator_exit_fn) (struct elevator_queue *);
 
 struct elevator_ops
 {
+    //具体IO调度算法函数cfq_merge或者deadline_merge，其他调度算法为NULL，负责查找可以合并bio的req?
 	elevator_merge_fn *elevator_merge_fn;
+    //cfq_merged_request和deadline_merged_request，
 	elevator_merged_fn *elevator_merged_fn;
+    //cfq_merged_requests或deadline_merged_requests或noop_merged_requests
 	elevator_merge_req_fn *elevator_merge_req_fn;
 	elevator_allow_merge_fn *elevator_allow_merge_fn;
+    //cfq_bio_merged,其他调度算法为NULL，貌似只有增加一部分统计数据
 	elevator_bio_merged_fn *elevator_bio_merged_fn;
-
+    //noop_dispatch  deadline_dispatch_requests  cfq_dispatch_requests，向驱动派发req
 	elevator_dispatch_fn *elevator_dispatch_fn;
+    //cfq_insert_request deadline_add_request noop_add_request
 	elevator_add_req_fn *elevator_add_req_fn;
 	elevator_activate_req_fn *elevator_activate_req_fn;
 	elevator_deactivate_req_fn *elevator_deactivate_req_fn;
 
 	elevator_completed_req_fn *elevator_completed_req_fn;
-
+    //elv_rb_former_request和noop_former_request
 	elevator_request_list_fn *elevator_former_req_fn;
+    //elv_rb_latter_request和noop_latter_request
 	elevator_request_list_fn *elevator_latter_req_fn;
 
 	elevator_init_icq_fn *elevator_init_icq_fn;	/* see iocontext.h */
@@ -81,14 +87,14 @@ struct elv_fs_entry {
 /*
  * identifies an elevator type, such as AS or deadline
  */
-//IO调度类，deadline、noee
+//IO调度算法总代表
 struct elevator_type
 {
 	/* managed by elevator core */
 	struct kmem_cache *icq_cache;
 
 	/* fields provided by elevator implementation */
-	struct elevator_ops ops;
+	struct elevator_ops ops;//具体IO调度算法函数集合
 	size_t icq_size;	/* see iocontext.h */
 	size_t icq_align;	/* ditto */
 	struct elv_fs_entry *elevator_attrs;
@@ -106,15 +112,18 @@ struct elevator_type
 /*
  * each queue has an elevator_queue associated with it
  */
-//IO调度实例
+//IO调度
 struct elevator_queue
 {
-    //IO调度类
+    //IO调度算法总代表
 	struct elevator_type *type;
+    //IO调度算法私有数据，如deadline的是struct deadline_data
 	void *elevator_data;
 	struct kobject kobj;
 	struct mutex sysfs_lock;
 	unsigned int registered:1;
+    //新的req靠这个hash添加到IO调度算法的hash链表里，elv_rqhash_add()
+    //做hash索引是为了在IO算法队列里搜索可以合并的req时，提高搜索速度
 	DECLARE_HASHTABLE(hash, ELV_HASH_BITS);
 };
 

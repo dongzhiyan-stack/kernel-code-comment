@@ -2344,7 +2344,7 @@ static void cfq_merged_request(struct request_queue *q, struct request *req,
 		cfq_reposition_rq_rb(cfqq, req);
 	}
 }
-
+//貌似只有增加一部分统计数据
 static void cfq_bio_merged(struct request_queue *q, struct request *req,
 				struct bio *bio)
 {

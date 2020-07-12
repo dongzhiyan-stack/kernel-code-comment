@@ -258,18 +258,22 @@ static void elv_rqhash_del(struct request_queue *q, struct request *rq)
 
 static void elv_rqhash_add(struct request_queue *q, struct request *rq)
 {
+    //e就是IO调度算法实体
 	struct elevator_queue *e = q->elevator;
 
 	BUG_ON(ELV_ON_HASH(rq));
+    //新的req靠rq->hash添加到IO调度算法的hash链表里，做hash索引是为了在IO算法队列里搜索可以合并的req时，提高搜索速度
 	hash_add(e->hash, &rq->hash, rq_hash_key(rq));
 }
 
 static void elv_rqhash_reposition(struct request_queue *q, struct request *rq)
 {
+    //删除req
 	__elv_rqhash_del(rq);
+    //再添加req，应该是req有了新的合并，所以要重新排序req吧
 	elv_rqhash_add(q, rq);
 }
-
+//新加入IO调度队列的req会做hash索引，这应该是是根据bio的扇区起始地址在hash表找req吧，然后rq_hash_key(rq)与offset相等就是找到的rq
 static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
 {
 	struct elevator_queue *e = q->elevator;
@@ -295,6 +299,7 @@ static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
  * RB-tree support functions for inserting/lookup/removal of requests
  * in a sorted RB tree.
  */
+//貌似把rq添加到树里，就是按照每个req的起始扇区排序的
 void elv_rb_add(struct rb_root *root, struct request *rq)
 {
 	struct rb_node **p = &root->rb_node;
@@ -303,8 +308,9 @@ void elv_rb_add(struct rb_root *root, struct request *rq)
 
 	while (*p) {
 		parent = *p;
+        //树种原有的__rq
 		__rq = rb_entry(parent, struct request, rb_node);
-
+        //rq在更前边
 		if (blk_rq_pos(rq) < blk_rq_pos(__rq))
 			p = &(*p)->rb_left;
 		else if (blk_rq_pos(rq) >= blk_rq_pos(__rq))
@@ -394,22 +400,25 @@ EXPORT_SYMBOL(elv_dispatch_sort);
  * entry.  rq is added to the back of the dispatch queue. To be used by
  * specific elevators.
  */
+//把req添加到rq的queue_head队列，将来磁盘驱动程序就是从queue_head链表取出req传输的
 void elv_dispatch_add_tail(struct request_queue *q, struct request *rq)
 {
 	if (q->last_merge == rq)
 		q->last_merge = NULL;
 
 	elv_rqhash_del(q, rq);
-
+    //
 	q->nr_sorted--;
-
+    //结束扇区
 	q->end_sector = rq_end_sector(rq);
 	q->boundary_rq = rq;
+    //把req添加到rq的queue_head队列，将来磁盘驱动程序就是从queue_head链表取出req传输的
 	list_add_tail(&rq->queuelist, &q->queue_head);
 }
 EXPORT_SYMBOL(elv_dispatch_add_tail);
 
-//在elv调度器里查找是否有可以合并的rq
+//在elv调度器里查找是否有可以合并的req，req是把bio合并到的req,这个是调用具体的IO调度算法函数寻找可以合并的req
+//函数返回值 ELEVATOR_BACK_MERGE(前项合并的req)、ELEVATOR_FRONT_MERGE(前项合并)、ELEVATOR_NO_MERGE(没有找到可以合并的req)
 int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 {
 	struct elevator_queue *e = q->elevator;
@@ -428,9 +437,9 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	/*
 	 * First try one-hit cache.
 	 */
-	//是否可以把bio合并到q->last_merge，上次rq队列合并的rq
+	//是否可以把bio合并到q->last_merge，上次rq队列合并过的rq，elv_rq_merge_ok是做一些权限检查啥的
 	if (q->last_merge && elv_rq_merge_ok(q->last_merge, bio)) {
-        //检查bio和rq代表的磁盘范围是否挨着，挨着则可以合并
+        //检查bio和rq代表的磁盘范围是否挨着，挨着则可以合并bio到q->last_merge
 		ret = blk_try_merge(q->last_merge, bio);
 		if (ret != ELEVATOR_NO_MERGE) {
 			*req = q->last_merge;
@@ -444,13 +453,14 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	/*
 	 * See if our hash lookup can find a potential backmerge.
 	 */
-	 //在elv调度器里查找是否有可以合并的rq
+	 //新加入IO调度队列的req会做hash索引，这应该是是根据bio的扇区起始地址在hash表找req吧，然后rq_hash_key(rq)与offset相等就是找到的rq
 	__rq = elv_rqhash_find(q, bio->bi_sector);
 	if (__rq && elv_rq_merge_ok(__rq, bio)) {
 		*req = __rq;
-		return ELEVATOR_BACK_MERGE;
+		return ELEVATOR_BACK_MERGE;//哎，ELEVATOR_BACK_MERGE这里是后项合并?????
 	}
-
+    
+    //具体IO调度算法函数cfq_merge或者deadline_merge，找到可以合并的bio的req???????,这里返回ELEVATOR_FRONT_MERGE，前项合并
 	if (e->type->ops.elevator_merge_fn)
 		return e->type->ops.elevator_merge_fn(q, req, bio);
 
@@ -464,6 +474,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
  *
  * Returns true if we merged, false otherwise
  */
+//尝试对rq合并
 static bool elv_attempt_insert_merge(struct request_queue *q,
 				     struct request *rq)
 {
@@ -476,6 +487,7 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 	/*
 	 * First try one-hit cache.
 	 */
+	//尝试把rq合并到q->last_merge，把rq剔除掉，做一些剔除rq的收尾处理,并更新IO使用率数据
 	if (q->last_merge && blk_attempt_req_merge(q, q->last_merge, rq))
 		return true;
 
@@ -487,7 +499,9 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 	 * See if our hash lookup can find a potential backmerge.
 	 */
 	while (1) {
+        //新加入IO调度队列的req会做hash索引，这应该是是根据rq的扇区起始地址在hash表找req吧，然后rq_hash_key(rq)与offset相等就是找到的rq
 		__rq = elv_rqhash_find(q, blk_rq_pos(rq));
+        //再次尝试合并
 		if (!__rq || !blk_attempt_req_merge(q, __rq, rq))
 			break;
 
@@ -498,32 +512,35 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 
 	return ret;
 }
-
+//看着没啥，req有了新的合并，则对req在IO调度算法队列里冲洗排序
 void elv_merged_request(struct request_queue *q, struct request *rq, int type)
 {
 	struct elevator_queue *e = q->elevator;
 
-	if (e->type->ops.elevator_merged_fn)
+    //req有了新的合并，对req重新排列吧
+	if (e->type->ops.elevator_merged_fn)//cfq_merged_request和deadline_merged_request
 		e->type->ops.elevator_merged_fn(q, rq, type);
 
 	if (type == ELEVATOR_BACK_MERGE)
-		elv_rqhash_reposition(q, rq);
+		elv_rqhash_reposition(q, rq);//req有了新的合并，对req重新排序
 
 	q->last_merge = rq;
 }
-
+//IO调度算法发生了二次合并,即把next合并到了rq，那要把next剔除掉
 void elv_merge_requests(struct request_queue *q, struct request *rq,
 			     struct request *next)
 {
 	struct elevator_queue *e = q->elevator;
 	const int next_sorted = next->cmd_flags & REQ_SORTED;
 
+    //剔除next，并做一些删除req的后续处理
 	if (next_sorted && e->type->ops.elevator_merge_req_fn)
-		e->type->ops.elevator_merge_req_fn(q, rq, next);
-
+		e->type->ops.elevator_merge_req_fn(q, rq, next);//cfq_merged_requests或deadline_merged_requests或noop_merged_requests
+    //貌似是把rq删除后重新添加到调度器队列，这看着是hash有关的队列，跟IO调度队列也有关
 	elv_rqhash_reposition(q, rq);
 
 	if (next_sorted) {
+        //删除next
 		elv_rqhash_del(q, next);
 		q->nr_sorted--;
 	}
@@ -535,7 +552,7 @@ void elv_bio_merged(struct request_queue *q, struct request *rq,
 			struct bio *bio)
 {
 	struct elevator_queue *e = q->elevator;
-
+    //只是增加一部分统计数据吧 
 	if (e->type->ops.elevator_bio_merged_fn)
 		e->type->ops.elevator_bio_merged_fn(q, rq, bio);
 }
@@ -585,8 +602,9 @@ void elv_drain_elevator(struct request_queue *q)
 	static int printed;
 
 	lockdep_assert_held(q->queue_lock);
-
-	while (q->elevator->type->ops.elevator_dispatch_fn(q, 1))
+//选的合适待派发给驱动传输的req,然后把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，将来磁盘驱动程序就是从queue_head链表取出req传输的
+//这个合适的req，来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，同手兼顾，有固定策略
+	while (q->elevator->type->ops.elevator_dispatch_fn(q, 1))//deadline_dispatch_requests
 		;
 	if (q->nr_sorted && printed++ < 10) {
 		printk(KERN_ERR "%s: forced dispatching is broken "
@@ -594,8 +612,8 @@ void elv_drain_elevator(struct request_queue *q)
 		       q->elevator->type->elevator_name, q->nr_sorted);
 	}
 }
-
-void __elv_add_request(struct request_queue *q, struct request *rq, int where)
+//新分配的req插入IO算法队列，或者是把当前进程plug链表上req全部插入到IO调度算法队列
+void __elv_add_request(struct request_queue *q, struct request *rq, int where)//where默认是ELEVATOR_INSERT_SORT
 {
 	trace_block_rq_insert(q, rq);
 
@@ -616,13 +634,15 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 
 	switch (where) {
 	case ELEVATOR_INSERT_REQUEUE:
-	case ELEVATOR_INSERT_FRONT:
+	case ELEVATOR_INSERT_FRONT://前向合并
 		rq->cmd_flags |= REQ_SOFTBARRIER;
-		list_add(&rq->queuelist, &q->queue_head);
+		list_add(&rq->queuelist, &q->queue_head);//req插入q->queue_head
 		break;
 
-	case ELEVATOR_INSERT_BACK:
+	case ELEVATOR_INSERT_BACK://后向合并
 		rq->cmd_flags |= REQ_SOFTBARRIER;
+        //选的合适待派发给驱动传输的req,然后把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，将来磁盘驱动程序就是从queue_head链表取出req传输的
+        //这个合适的req，来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，同手兼顾，有固定策略
 		elv_drain_elevator(q);
 		list_add_tail(&rq->queuelist, &q->queue_head);
 		/*
@@ -635,10 +655,11 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		 *   with anything.  There's no point in delaying queue
 		 *   processing.
 		 */
+		//这里调用底层驱动数据传输函数，就会从rq的queue_head队列取出req发送给磁盘驱动去传输
 		__blk_run_queue(q);
 		break;
 
-	case ELEVATOR_INSERT_SORT_MERGE:
+	case ELEVATOR_INSERT_SORT_MERGE://把进程独有的plug链表上的req插入IO调度算法队列里走这里
 		/*
 		 * If we succeed in merging this request with one in the
 		 * queue already, we are done - rq has now been freed,
@@ -646,11 +667,13 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		 */
 		if (elv_attempt_insert_merge(q, rq))
 			break;
-	case ELEVATOR_INSERT_SORT:
+	case ELEVATOR_INSERT_SORT://新分配的req插入的IO调度算法队列走这里
 		BUG_ON(rq->cmd_type != REQ_TYPE_FS);
 		rq->cmd_flags |= REQ_SORTED;
+        //队列插入新的一个req
 		q->nr_sorted++;
 		if (rq_mergeable(rq)) {
+            //新的req靠rq->hash添加到IO调度算法的hash链表里
 			elv_rqhash_add(q, rq);
 			if (!q->last_merge)
 				q->last_merge = rq;
@@ -661,7 +684,8 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		 * rq cannot be accessed after calling
 		 * elevator_add_req_fn.
 		 */
-		q->elevator->type->ops.elevator_add_req_fn(q, rq);
+		//把req插入到IO调度算法队列里，deadline是插入到红黑树队列和fifo队列
+		q->elevator->type->ops.elevator_add_req_fn(q, rq);//deadline_add_request
 		break;
 
 	case ELEVATOR_INSERT_FLUSH:
@@ -685,12 +709,12 @@ void elv_add_request(struct request_queue *q, struct request *rq, int where)
 	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 EXPORT_SYMBOL(elv_add_request);
-
+//只是从IO调度算法队列里取出rq的下一个rq吧,不同的调度算法调度队列不一样
 struct request *elv_latter_request(struct request_queue *q, struct request *rq)
 {
 	struct elevator_queue *e = q->elevator;
 
-	if (e->type->ops.elevator_latter_req_fn)
+	if (e->type->ops.elevator_latter_req_fn)//elv_rb_latter_request和noop_latter_request
 		return e->type->ops.elevator_latter_req_fn(q, rq);
 	return NULL;
 }
@@ -698,7 +722,7 @@ struct request *elv_latter_request(struct request_queue *q, struct request *rq)
 struct request *elv_former_request(struct request_queue *q, struct request *rq)
 {
 	struct elevator_queue *e = q->elevator;
-
+    //elv_rb_former_request和noop_former_request
 	if (e->type->ops.elevator_former_req_fn)
 		return e->type->ops.elevator_former_req_fn(q, rq);
 	return NULL;
@@ -1058,7 +1082,7 @@ struct request *elv_rb_former_request(struct request_queue *q,
 	return NULL;
 }
 EXPORT_SYMBOL(elv_rb_former_request);
-
+//应该是找到IO调度算法队列里的rq的下一个rq，这个队列貌似只是靠着rq->rb_node构成的一个树形队列呀
 struct request *elv_rb_latter_request(struct request_queue *q,
 				      struct request *rq)
 {

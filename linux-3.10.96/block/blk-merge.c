@@ -333,7 +333,8 @@ static int ll_merge_requests_fn(struct request_queue *q, struct request *req,
 	if ((blk_rq_sectors(req) + blk_rq_sectors(next)) >
 	    blk_rq_get_max_sectors(req))
 		return 0;
-
+    
+    //req和next的nr_phys_segments累加
 	total_phys_segments = req->nr_phys_segments + next->nr_phys_segments;
 	if (blk_phys_contig_segment(q, req->biotail, next->bio)) {
 		if (req->nr_phys_segments == 1)
@@ -383,7 +384,7 @@ void blk_rq_set_mixed_merge(struct request *rq)
 	}
 	rq->cmd_flags |= REQ_MIXED_MERGE;
 }
-
+//更新主块设备和块设备分区的time_in_queue和io_ticks数据,奇怪，没有更新合并的bio次数那个数据呀
 static void blk_account_io_merge(struct request *req)
 {
 	if (blk_do_io_stat(req)) {
@@ -392,7 +393,7 @@ static void blk_account_io_merge(struct request *req)
 
 		cpu = part_stat_lock();
 		part = req->part;
-
+        //更新主块设备和块设备分区的time_in_queue和io_ticks数据
 		part_round_stats(cpu, part);
 		part_dec_in_flight(part, rq_data_dir(req));
 
@@ -404,6 +405,7 @@ static void blk_account_io_merge(struct request *req)
 /*
  * Has to be called with the request spinlock acquired
  */
+//把next合并到req，把next剔除掉，做一些剔除next的收尾处理,并更新IO使用率数据
 static int attempt_merge(struct request_queue *q, struct request *req,
 			  struct request *next)
 {
@@ -434,6 +436,7 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	 * will have updated segment counts, update sector
 	 * counts here.
 	 */
+	//把next合并到req后，在这里更新req->nr_phys_segments，扇区总数
 	if (!ll_merge_requests_fn(q, req, next))
 		return 0;
 
@@ -458,49 +461,62 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	 */
 	if (time_after(req->start_time, next->start_time))
 		req->start_time = next->start_time;
-
+    //一个req对应了多个bio，req->biotail应该是指向next上的第一个bio吧
 	req->biotail->bi_next = next->bio;
+    //biotail貌似指向了next的最后一个bio??????????
 	req->biotail = next->biotail;
-
+    //req吞并了next的磁盘空间范围
 	req->__data_len += blk_rq_bytes(next);
-
+    
+    //调用IO调度算法的elevator_merge_req_fn回调函数
+    //IO调度算法发生了二次合并,即把next合并到了rq，那要把next剔除掉
 	elv_merge_requests(q, req, next);
 
 	/*
 	 * 'next' is going away, so update stats accordingly
 	 */
+	//更新主块设备和块设备分区的time_in_queue和io_ticks IO使用计数,奇怪，没有更新合并的bio次数那个数据呀
 	blk_account_io_merge(next);
-
+    
+    //req优先级?????????????
 	req->ioprio = ioprio_best(req->ioprio, next->ioprio);
 	if (blk_rq_cpu_valid(next))
 		req->cpu = next->cpu;
 
 	/* owner-ship of bio passed from next to req */
 	next->bio = NULL;
+    //释放next
 	__blk_put_request(q, next);
 	return 1;
 }
 
+//blk_queue_bio->attempt_back_merge 传说中的更高阶的合并吧，比如原IO调度算法队列挨着的req1和req2，代表的磁盘空间范围分别是req1:0~5，
+//req2:11~16，新的待合并的bio的磁盘空间是6~10,则先执行bio_attempt_back_merge()把bio后项合并到req1,此时req1:0~10，显然此时req1和req2可以
+//进行二次合并，attempt_back_merge()函数就是这个作用吧，该函数的struct request *next就像举例的req2。合并成功返回1，否则0
 int attempt_back_merge(struct request_queue *q, struct request *rq)
 {
+    //只是从IO调度算法队列里取出rq的下一个rq给next
 	struct request *next = elv_latter_request(q, rq);
 
+    //这是尝试把next(举例中的req2)合并到rq(举例中的合并bio后的req1)，我有个疑问，既然会发生二次合并，那也可以发生三次合并呀，这里应该是
+    //个循环处理，然后合并呀????????????
 	if (next)
-		return attempt_merge(q, rq, next);
+		return attempt_merge(q, rq, next);//把next合并到req，把next剔除掉，做一些剔除next的收尾处理,并更新IO使用率数据
 
 	return 0;
 }
 
 int attempt_front_merge(struct request_queue *q, struct request *rq)
 {
+    //红黑树中取出req原来的前一个req,即prev
 	struct request *prev = elv_former_request(q, rq);
 
-	if (prev)
+	if (prev)//把rq合并到prev
 		return attempt_merge(q, prev, rq);
 
 	return 0;
 }
-
+//把next合并到req，把next剔除掉，做一些剔除next的收尾处理,并更新IO使用率数据
 int blk_attempt_req_merge(struct request_queue *q, struct request *rq,
 			  struct request *next)
 {
@@ -512,7 +528,7 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
     //rq和bio必须属于文件系统
 	if (!rq_mergeable(rq) || !bio_mergeable(bio))
 		return false;
-    //二者
+    //还是检车二者属性吧
 	if (!blk_check_merge_flags(rq->cmd_flags, bio->bi_rw))
 		return false;
 
@@ -522,7 +538,7 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 		return false;
 
 	/* must be same device and not a special request */
-    //是否属于同一个disk
+    //是否属于同一个disk磁盘
 	if (rq->rq_disk != bio->bi_bdev->bd_disk || rq->special)
 		return false;
 

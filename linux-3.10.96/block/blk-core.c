@@ -96,7 +96,9 @@ static void drive_stat_acct(struct request *rq, int new_io)
 			part = &rq->rq_disk->part0;
 			hd_struct_get(part);
 		}
+        //更新主块设备和块设备分区的time_in_queue和io_ticks数据
 		part_round_stats(cpu, part);
+        //有一个新的req加入队列了，增加req计数
 		part_inc_in_flight(part, rw);
 		rq->part = part;
 	}
@@ -329,7 +331,7 @@ inline void __blk_run_queue_uncond(struct request_queue *q)
  *    See @blk_run_queue. This variant must be called with the queue lock
  *    held and interrupts disabled.
  */
-//唤醒emmc读写操作内核线程吧??????????????
+//唤醒emmc或者磁盘读写操作内核线程，开始执行底层驱动函数，启动emmc或者磁盘数据传输
 void __blk_run_queue(struct request_queue *q)
 {
 	if (unlikely(blk_queue_stopped(q)))
@@ -1236,7 +1238,7 @@ static void add_acct_request(struct request_queue *q, struct request *rq,
 	drive_stat_acct(rq, 1);
 	__elv_add_request(q, rq, where);
 }
-
+//统计IO使用率有关的time_in_queue和io_ticks数据
 static void part_round_stats_single(int cpu, struct hd_struct *part,
 				    unsigned long now)
 {
@@ -1267,12 +1269,14 @@ static void part_round_stats_single(int cpu, struct hd_struct *part,
  * /proc/diskstats.  This accounts immediately for all queue usage up to
  * the current jiffies and restarts the counters again.
  */
+//更新主块设备和块设备分区的time_in_queue和io_ticks数据
 void part_round_stats(int cpu, struct hd_struct *part)
 {
 	unsigned long now = jiffies;
 
-	if (part->partno)
+	if (part->partno)//主块设备的
 		part_round_stats_single(cpu, &part_to_disk(part)->part0, now);
+    //当前块设备分区的
 	part_round_stats_single(cpu, part, now);
 }
 EXPORT_SYMBOL_GPL(part_round_stats);
@@ -1364,7 +1368,7 @@ void blk_add_request_payload(struct request *rq, struct page *page,
 	rq->buffer = bio_data(bio);
 }
 EXPORT_SYMBOL_GPL(blk_add_request_payload);
-
+//req和bio二者磁盘范围挨着，req向后合并本次的bio，合并成功返回真
 static bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
 				   struct bio *bio)
 {
@@ -1380,13 +1384,13 @@ static bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
 
 	req->biotail->bi_next = bio;
 	req->biotail = bio;
-	req->__data_len += bio->bi_size;
+	req->__data_len += bio->bi_size;//req->__sector没变，但是req->__data_len累加本次的bio磁盘范围bio->bi_size，
 	req->ioprio = ioprio_best(req->ioprio, bio_prio(bio));
 
 	drive_stat_acct(req, 0);
 	return true;
 }
-
+//req和bio二者磁盘范围挨着，req向前合并本次的bio，合并成功返回真
 static bool bio_attempt_front_merge(struct request_queue *q,
 				    struct request *req, struct bio *bio)
 {
@@ -1409,6 +1413,7 @@ static bool bio_attempt_front_merge(struct request_queue *q,
 	 * not touch req->buffer either...
 	 */
 	req->buffer = bio_data(bio);//该bio对应的bh的内存page地址
+	//req->__sector代表的磁盘空间起始地址为bio->bi_sector，显然req代表的磁盘空间范围向前扩张
 	req->__sector = bio->bi_sector;
 	req->__data_len += bio->bi_size;
 	req->ioprio = ioprio_best(req->ioprio, bio_prio(bio));
@@ -1434,12 +1439,12 @@ static bool bio_attempt_front_merge(struct request_queue *q,
  * reliable access to the elevator outside queue lock.  Only check basic
  * merging parameters without querying the elevator.
  */
-//依次取出进程plug->list链表上已有的rq,判断rq代表的磁盘范围是否挨着本次的bio的范围，是则把bio合并到rq
+//依次取出进程plug->list链表上已有的rq,判断rq代表的磁盘范围是否挨着本次的bio的范围，是则把bio合并到rq。合并成功返回真，否则假
 static bool attempt_plug_merge(struct request_queue *q, struct bio *bio,
 			       unsigned int *request_count)
 {
 	struct blk_plug *plug;
-	struct request *rq;
+	struct request *rq;  
 	bool ret = false;
 
 	plug = current->plug;
@@ -1516,23 +1521,40 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 * any locks.
 	 */
 	//依次取出进程plug->list链表上已有的rq,判断rq代表的磁盘范围是否挨着本次的bio的范围，是则把bio合并到rq
+	//合并成功返回真，直接return返回，否则
 	if (attempt_plug_merge(q, bio, &request_count))
 		return;
 
+    /*从这里开始，对rq队列加锁，一个块设备一个，多个进程对一个块设备读写，就是在这里发生阻塞，下边是尝试将该bio合并到
+     IO调度算法的队列，还合并不成就要对bio分配新的req*/
 	spin_lock_irq(q->queue_lock);
-
-	el_ret = elv_merge(q, &req, bio);//开始尝试elv调度器查找是否有可以合并的rq
-	if (el_ret == ELEVATOR_BACK_MERGE) {//二者磁盘范围挨着，rq向后合并本次的bio
+    //走到这里说明该bio没有合并到当前进程plug链表，那就要尝试通过IO调度算法寻找是否有可以合并bio的req
+    
+    //在elv调度器里查找是否有可以合并的req，这是合并bio的req,是调用具体的IO调度算法函数寻找可以合并的req。
+    //这些req所在的IO调度算法队列是多进程共享的，就像上边所述，进程访问这些队列要加锁，其他进程要等待。
+    //函数返回值 ELEVATOR_BACK_MERGE(前项合并的req)、ELEVATOR_FRONT_MERGE(前项合并)、ELEVATOR_NO_MERGE(没有找到可以合并的req)
+	el_ret = elv_merge(q, &req, bio);
+	if (el_ret == ELEVATOR_BACK_MERGE) {
+	    //后项合并，bio合并到req对应的磁盘空间范围后边
 		if (bio_attempt_back_merge(q, req, bio)) {
+            //调用IO调度算法的elevator_bio_merged_fn函数，即cfq_bio_merged，貌似只有增加一部分统计数据
 			elv_bio_merged(q, req, bio);
+            //传说中的更高阶的合并吧，比如原IO调度算法队列挨着的req1和req2，代表的磁盘空间范围分别是req1:0~5，req2:11~16，
+            //bio的磁盘空间是6~10,则先执行bio_attempt_back_merge()把bio后项合并到req1,此时req1:0~10，显然此时req1和req2可以
+            //进行二次合并，attempt_back_merge()函数就是这个作用吧，合并成功返回1，否则0
 			if (!attempt_back_merge(q, req))
+                //走到这里，应该是二次合并失败了，调用IO调度算法的elevator_merged_fn函数，对req在IO调度算法队列里冲洗排序
 				elv_merged_request(q, req, el_ret);
 			goto out_unlock;
 		}
-	} else if (el_ret == ELEVATOR_FRONT_MERGE) {//二者磁盘范围挨着，rq向后合并本次的bio
+	} else if (el_ret == ELEVATOR_FRONT_MERGE) {
+	    //前项合并
 		if (bio_attempt_front_merge(q, req, bio)) {
+            //增加一部分统计数据
 			elv_bio_merged(q, req, bio);
+            //二次合并，看能否把req合并到IO调度队列里的前一个req
 			if (!attempt_front_merge(q, req))
+                //二次合并失败，因为req至少合并了bio，对req在IO调度队列里重新排序
 				elv_merged_request(q, req, el_ret);
 			goto out_unlock;
 		}
@@ -1553,7 +1575,7 @@ get_rq:
 	 * Grab a free request. This is might sleep but can not fail.
 	 * Returns with the queue unlocked.
 	 */
-	//得到一个新的rq，里边有休眠
+	//得到一个新的rq，里边有可能休眠
 	req = get_request(q, rw_flags, bio, GFP_NOIO);
 	if (unlikely(!req)) {
 		bio_endio(bio, -ENODEV);	/* @q is dead */
@@ -1572,6 +1594,7 @@ get_rq:
 		req->cpu = raw_smp_processor_id();
     //当前进程的plug链表
 	plug = current->plug;
+    //如果该链表上有req，一般应该走这里吧
 	if (plug) {
 		/*
 		 * If this is the first request added after a plug, fire
@@ -1587,16 +1610,18 @@ get_rq:
 				trace_block_plug(q);
 			}
 		}
-        //新分配的rq添加到plug->list链表
+        //新分配的rq添加到plug->list链表,
 		list_add_tail(&req->queuelist, &plug->list);
+        //更新主块设备和块设备分区的time_in_queue和io_ticks数据，增加队列flight中req计数
 		drive_stat_acct(req, 1);
-	} 
-    else 
-	{
+	}
+    else
+	{//否则就
 		spin_lock_irq(q->queue_lock);
         //新分配的rq添加到rq队列
+        //更新主块设备和块设备分区的time_in_queue和io_ticks数据，增加队列flight中req计数
 		add_acct_request(q, req, where);
-        //启动rq队列，通知底层驱动，新的bio来了
+        //启动rq队列，通知底层驱动，新的IO要传输
 		__blk_run_queue(q);
 out_unlock:
 		spin_unlock_irq(q->queue_lock);
@@ -1817,6 +1842,16 @@ end_io:
  * a lower device by calling into generic_make_request recursively, which
  * means the bio should NOT be touched after the call to ->make_request_fn.
  */
+ 
+/*blk_queue_bio->attempt_plug_merge
+  每个进程私有的struct blk_plug *plug链表，bio先保存到plug链表，然后看能否与plug上已有的req合并，只要代表的读写磁盘范围
+  挨着就可以合并。进程plug只是一个临时保存合并该进程bio，等该链表上的bio过多，或者被强制执行了blk_finish_plug函数，会把plug链表
+  上的req插入IO调度队列上，进行第二层合并。每个bio是先合并到进程私有plug链表上，这一步不用考虑多进程的干扰，然后每个进程私有的
+  plug链表上的bio、req，合并到IO调度队列上。因为读写同一个块设备的多个进程，是有概率读写的磁盘范围挨着，这样就可以把这些进程读写
+  磁盘的req进行第二层合并，这就是所谓IO调度算法做的事，如果还是合并不了，IO调度队列会对这些多个进程的req进程排序，还有可能建立查找
+  索引，所谓的IO调度算法其实没那么难，我觉得本质还是想办法合并读写磁盘范围挨着的bio或者req，没啥难的。同时因为每个块设备只有
+  一个队列，此时就得考虑多进程冲突，即只有一个进程占着IO调度队列，其他进程就要等待释放。在这里的时间消耗比较多。
+  */ 
 void generic_make_request(struct bio *bio)
 {
 	struct bio_list bio_list_on_stack;
@@ -1835,6 +1870,7 @@ void generic_make_request(struct bio *bio)
 	 * should be added at the tail
 	 */
 	//如果不为NULL，说明该进程已经有提交过的bio，把这个bio放到bio_list链表，下边的while循环处理完上一个bio，就处理这个bio
+	//这个一般不成立吧????
 	if (current->bio_list) {
 		bio_list_add(current->bio_list, bio);
 		return;
@@ -1858,11 +1894,12 @@ void generic_make_request(struct bio *bio)
 	bio_list_init(&bio_list_on_stack);
     //current->bio_list 指向刚初始化好的bio_list_on_stack
 	current->bio_list = &bio_list_on_stack;
+    //这里的循环什么所用?
 	do {
-        //获取bdev的disk的request_queue，不是bdev的request_queue????????????????
+        //获取bdev的disk的request_queue，不是bdev的request_queue，一个块设备只有一个运行队列
 		struct request_queue *q = bdev_get_queue(bio->bi_bdev);
 
-		q->make_request_fn(q, bio);//blk_queue_bio  和 blk_mq_make_request
+		q->make_request_fn(q, bio);//blk_queue_bio  或者 blk_mq_make_request
         //貌似是取出另一个bio
 		bio = bio_list_pop(current->bio_list);
 	} while (bio);
@@ -2128,11 +2165,12 @@ static inline struct request *blk_pm_peek_request(struct request_queue *q,
  * Context:
  *     queue_lock must be held.
  */
+//从rq队列中取出req，这个req应该最终发送给驱动的
 struct request *blk_peek_request(struct request_queue *q)
 {
 	struct request *rq;
 	int ret;
-
+    //__elv_next_request就是从q->queue_head队列取出待发送给驱动的req
 	while ((rq = __elv_next_request(q)) != NULL) {
 
 		rq = blk_pm_peek_request(q, rq);
@@ -2178,7 +2216,7 @@ struct request *blk_peek_request(struct request_queue *q)
 		if (!q->prep_rq_fn)
 			break;
 
-		ret = q->prep_rq_fn(q, rq);
+		ret = q->prep_rq_fn(q, rq);//mmc_prep_request req预处理
 		if (ret == BLKPREP_OK) {
 			break;
 		} else if (ret == BLKPREP_DEFER) {
@@ -2283,10 +2321,11 @@ EXPORT_SYMBOL(blk_start_request);
  * Context:
  *     queue_lock must be held.
  */
+//从rq队列取出一个req传输
 struct request *blk_fetch_request(struct request_queue *q)
 {
 	struct request *rq;
-
+    //从rq队列中取出req，这个req应该最终发送给驱动的，奇怪，这个req是怎么从IO调度算法队列传给rq队列的?????????
 	rq = blk_peek_request(q);
 	if (rq)
 		blk_start_request(rq);
@@ -2921,7 +2960,7 @@ static int plug_rq_cmp(void *priv, struct list_head *a, struct list_head *b)
 {
 	struct request *rqa = container_of(a, struct request, queuelist);
 	struct request *rqb = container_of(b, struct request, queuelist);
-
+    //比较rpa和rqb两个req的__sector，即起始扇区，前者起始扇区小区后者的，返回0
 	return !(rqa->q < rqb->q ||
 		(rqa->q == rqb->q && blk_rq_pos(rqa) < blk_rq_pos(rqb)));
 }
@@ -2932,6 +2971,7 @@ static int plug_rq_cmp(void *priv, struct list_head *a, struct list_head *b)
  * additional stack usage in driver dispatch, in places where the originally
  * plugger did not intend it.
  */
+//唤醒emmc或者磁盘读写操作内核线程，开始执行底层驱动函数，启动emmc或者磁盘数据传输
 static void queue_unplugged(struct request_queue *q, unsigned int depth,
 			    bool from_schedule)
 	__releases(q->queue_lock)
@@ -2986,7 +3026,7 @@ struct blk_plug_cb *blk_check_plugged(blk_plug_cb_fn unplug, void *data,
 	return cb;
 }
 EXPORT_SYMBOL(blk_check_plugged);
-
+//把进程plug链表上的req依次插入IO调度算法队列上，然后唤醒emmc或者磁盘读写操作内核线程，开始执行底层驱动函数，启动emmc或者磁盘数据传输
 void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 {
 	struct request_queue *q;
@@ -3002,7 +3042,7 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 		return;
 
 	list_splice_init(&plug->list, &list);
-
+    //对plug链表上的req排序，应该是按照每个req的起始扇区地址排序，起始扇区小的排在前
 	list_sort(NULL, &list, plug_rq_cmp);
 
 	q = NULL;
@@ -3013,8 +3053,11 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 	 * queue lock we have to take.
 	 */
 	local_irq_save(flags);
+    //依次取出进程plug链表上的req依次插入IO调度算法队列上
 	while (!list_empty(&list)) {
+        //取出req
 		rq = list_entry_rq(list.next);
+        //从plug链表删除req
 		list_del_init(&rq->queuelist);
 		BUG_ON(!rq->q);
 		if (rq->q != q) {
@@ -3041,21 +3084,23 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 		 */
 		if (rq->cmd_flags & (REQ_FLUSH | REQ_FUA))
 			__elv_add_request(q, rq, ELEVATOR_INSERT_FLUSH);
-		else
+		else//在这里把req插入到IO调度算法队列里
 			__elv_add_request(q, rq, ELEVATOR_INSERT_SORT_MERGE);
 
+        //深度depth加1
 		depth++;
 	}
 
 	/*
 	 * This drops the queue lock
 	 */
-	if (q)
+	if (q)//唤醒emmc或者磁盘读写操作内核线程，开始执行底层驱动函数，启动emmc或者磁盘数据传输
 		queue_unplugged(q, depth, from_schedule);
 
 	local_irq_restore(flags);
 }
 //这个函数 blk_finish_plug->queue_unplugged->__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn 发送emmc命令给emmc控制器
+//这是把当前进程blk_plug链表上的req全部刷到IO调度算法队列上，然后启动磁盘数据传输
 void blk_finish_plug(struct blk_plug *plug)
 {
 	blk_flush_plug_list(plug, false);

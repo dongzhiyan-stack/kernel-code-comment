@@ -49,6 +49,7 @@ noop_former_request(struct request_queue *q, struct request *rq)
 	return list_entry(rq->queuelist.prev, struct request, queuelist);
 }
 
+//应该是找到IO调度算法队列里的rq的下一个rq，这个队列貌似只是靠着rq->queuelist构成的一个队列呀
 static struct request *
 noop_latter_request(struct request_queue *q, struct request *rq)
 {

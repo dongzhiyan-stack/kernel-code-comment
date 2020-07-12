@@ -119,7 +119,8 @@ struct hd_struct {
 	int make_it_fail;
 #endif
 	unsigned long stamp;//统计util时，记录上一次的系统时间
-	//保存待传输的rq个数,inflight[1]保存主磁盘分区，比如sda；inflight[0]保存当前块设备的磁盘分区，比如sda2
+	//保存待传输的rq个数,不对，应该是bio个数吧，part_dec_in_flight()和part_inc_in_flight()
+	//inflight[1]保存主磁盘分区，比如sda；inflight[0]保存当前块设备的磁盘分区，比如sda2
 	atomic_t in_flight[2];
 #ifdef	CONFIG_SMP
     //磁盘使用率等统计数据，每个CPU一个
@@ -394,18 +395,19 @@ static inline void free_part_stats(struct hd_struct *part)
 	part_stat_add(cpu, gendiskp, field, 1)
 #define part_stat_sub(cpu, gendiskp, field, subnd)			\
 	part_stat_add(cpu, gendiskp, field, -subnd)
-
+//有一个新的req加入队列了，增加req计数
 static inline void part_inc_in_flight(struct hd_struct *part, int rw)
 {
 	atomic_inc(&part->in_flight[rw]);
 	if (part->partno)
 		atomic_inc(&part_to_disk(part)->part0.in_flight[rw]);
 }
-
+//有一个req从队列中移除了，减1，减少req计数
 static inline void part_dec_in_flight(struct hd_struct *part, int rw)
 {
+    //当前块设备分区的
 	atomic_dec(&part->in_flight[rw]);
-	if (part->partno)
+	if (part->partno)//主块设备的
 		atomic_dec(&part_to_disk(part)->part0.in_flight[rw]);
 }
 

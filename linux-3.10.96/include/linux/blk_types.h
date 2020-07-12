@@ -37,7 +37,7 @@ struct bio {
     //应该是本次bio请求的起始扇区号
 	sector_t		bi_sector;	/* device address in 512 byte
 						   sectors */
-    //貌似bi_next指向下一个bio，req上有多个bio，bio挂在这个链表上
+    //貌似bi_next指向下一个bio，req上有多个bio，bio挂在这个链表上,bio_attempt_back_merge()和attempt_merge()中有赋值
 	struct bio		*bi_next;	/* request queue link */
     //本次要操作的块设备bdev，其中有struct request_queue            
 	struct block_device	*bi_bdev;
