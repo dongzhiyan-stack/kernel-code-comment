@@ -104,6 +104,7 @@ static int __blk_mq_get_tag(struct blk_mq_alloc_data *data,
 
 unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 {
+    //有调度器时返回硬件队列的hctx->sched_tags，无调度器时返回硬件队列的hctx->tags
 	struct blk_mq_tags *tags = blk_mq_tags_from_data(data);
 	struct sbitmap_queue *bt;
 	struct sbq_wait_state *ws;
@@ -120,6 +121,7 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 		bt = &tags->breserved_tags;
 		tag_offset = 0;
 	} else {
+	    //返回blk_mq_tags的bitmap_tags
 		bt = &tags->bitmap_tags;
 		tag_offset = tags->nr_reserved_tags;
 	}
@@ -395,12 +397,12 @@ struct blk_mq_tags *blk_mq_init_tags(unsigned int total_tags,
 				     int node, int alloc_policy)
 {
 	struct blk_mq_tags *tags;
-
+    //total_tags竟然是set->queue_depth，最大支持的硬件队列数??????????
 	if (total_tags > BLK_MQ_TAG_MAX) {
 		pr_err("blk-mq: tag depth too large\n");
 		return NULL;
 	}
-
+    //分配一个blk_mq_tags结构，设置其成员nr_reserved_tags和nr_tags
 	tags = kzalloc_node(sizeof(*tags), GFP_KERNEL, node);
 	if (!tags)
 		return NULL;

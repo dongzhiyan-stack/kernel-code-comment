@@ -112,13 +112,14 @@ struct request *blk_mq_sched_get_request(struct request_queue *q,
 
 	blk_queue_enter_live(q);
 	data->q = q;
+    
 	if (likely(!data->ctx))
 		data->ctx = blk_mq_get_ctx(q);
 	if (likely(!data->hctx))
 		data->hctx = blk_mq_map_queue(q, data->ctx->cpu);
 
-	if (e) {
-		data->flags |= BLK_MQ_REQ_INTERNAL;
+	if (e) {//有调度器
+		data->flags |= BLK_MQ_REQ_INTERNAL;//有调度时，设置BLK_MQ_REQ_INTERNAL标志
 
 		/*
 		 * Flush requests are special and go directly to the
@@ -328,28 +329,35 @@ void blk_mq_sched_move_to_dispatch(struct blk_mq_hw_ctx *hctx,
 }
 EXPORT_SYMBOL_GPL(blk_mq_sched_move_to_dispatch);
 
+//在IO调度器队列里查找是否有可以合并的req，找到则可以bio后项或前项合并到req，还会触发二次合并，还会对合并后的req在IO调度算法队列里重新排序
 bool blk_mq_sched_try_merge(struct request_queue *q, struct bio *bio,
 			    struct request **merged_request)
 {
 	struct request *rq;
 	int ret;
 
+//在elv调度器队列里查找是否有可以合并的req，找到则可以bio后项或前项合并到req。这个是调用具体的IO调度算法函数寻找可以合并的req。
+//函数返回值 ELEVATOR_BACK_MERGE(前项合并的req)、ELEVATOR_FRONT_MERGE(前项合并)、ELEVATOR_NO_MERGE(没有找到可以合并的req)
 	ret = elv_merge(q, &rq, bio);
-	if (ret == ELEVATOR_BACK_MERGE) {
+	if (ret == ELEVATOR_BACK_MERGE) {//后项合并
 		if (!blk_mq_sched_allow_merge(q, rq, bio))
 			return false;
+        //req和bio二者磁盘范围挨着，req向后合并本次的bio，合并成功返回真
 		if (bio_attempt_back_merge(q, rq, bio)) {
+            //二次合并，即req和bio合并后，新的req代表的磁盘结束地址又与其他req磁盘起始地址挨着了，那就接着后项合并
 			*merged_request = attempt_back_merge(q, rq);
-			if (!*merged_request)
+			if (!*merged_request)//如果没有发生二次合并，则对req对在deadline调度算法红黑树队列中重新排序
 				elv_merged_request(q, rq, ret);
 			return true;
 		}
-	} else if (ret == ELEVATOR_FRONT_MERGE) {
+	} else if (ret == ELEVATOR_FRONT_MERGE) {//前项合并
 		if (!blk_mq_sched_allow_merge(q, rq, bio))
 			return false;
+        //req和bio二者磁盘范围挨着，req向前合并本次的bio，合并成功返回真
 		if (bio_attempt_front_merge(q, rq, bio)) {
+            //二次合并，即req和bio合并后，新的req代表的磁盘空间起始地址又与其他req挨着了，那就接着前项合并
 			*merged_request = attempt_front_merge(q, rq);
-			if (!*merged_request)
+			if (!*merged_request)//如果没有发生二次合并，则对req对在deadline hash队列中重新排序
 				elv_merged_request(q, rq, ret);
 			return true;
 		}
@@ -364,11 +372,15 @@ bool __blk_mq_sched_bio_merge(struct request_queue *q, struct bio *bio)
 	struct elevator_queue *e = q->elevator;
 
 	if (e->aux->ops.mq.bio_merge) {
+        //从q->queue_ctx得到每个CPU专属的软件队列
 		struct blk_mq_ctx *ctx = blk_mq_get_ctx(q);
+        //根据软件队列ctx->cpu绑定的CPU编号，去q->queue_hw_ctx[]寻找硬件队列
 		struct blk_mq_hw_ctx *hctx = blk_mq_map_queue(q, ctx->cpu);
 
 		blk_mq_put_ctx(ctx);
-		return e->aux->ops.mq.bio_merge(hctx, bio);
+//在IO调度器队列里查找是否有可以合并的req，找到则可以bio后项或前项合并到req，还会触发二次合并，还会对合并后的req在IO调度算法队列里重新排序
+//这个合并跟软件队列和硬件队列没有半毛钱的关系吧
+		return e->aux->ops.mq.bio_merge(hctx, bio);//mq-deadline调度算法dd_bio_merge
 	}
 
 	return false;
@@ -537,19 +549,21 @@ static void blk_mq_sched_free_tags(struct blk_mq_tag_set *set,
 		hctx->sched_tags = NULL;
 	}
 }
-
+//为硬件队列结构hctx->sched_tags分配blk_mq_tags，一个硬件队列一个blk_mq_tags，然后根据为这个blk_mq_tags分配q->nr_requests个request，存于tags->static_rqs[]
 static int blk_mq_sched_alloc_tags(struct request_queue *q,
 				   struct blk_mq_hw_ctx *hctx,
 				   unsigned int hctx_idx)
 {
 	struct blk_mq_tag_set *set = q->tag_set;
 	int ret;
-
+    //分配blk_mq_tags结构，分配设置其成员nr_reserved_tags、nr_tags、rqs、static_rqs
 	hctx->sched_tags = blk_mq_alloc_rq_map(set, hctx_idx, q->nr_requests,
 					       set->reserved_tags);
 	if (!hctx->sched_tags)
 		return -ENOMEM;
 
+//针对hctx_idx编号的硬件队列，每一层队列深度都分配request(共分配q->nr_requests个request)赋值于tags->static_rqs[]。具体是分配N个page，将page的内存一片片分割成request集合大小
+//然后tags->static_rqs记录每一个request首地址，然后执行nvme_init_request()底层驱动初始化函数,建立request与nvme队列的关系吧
 	ret = blk_mq_alloc_rqs(set, hctx->sched_tags, hctx_idx, q->nr_requests);
 	if (ret)
 		blk_mq_sched_free_tags(set, hctx, hctx_idx);
@@ -575,13 +589,13 @@ int blk_mq_sched_init_hctx(struct request_queue *q, struct blk_mq_hw_ctx *hctx,
 
 	if (!e)
 		return 0;
-
+    //为硬件队列结构hctx->sched_tags分配blk_mq_tags，一个硬件队列一个blk_mq_tags，然后根据为这个blk_mq_tags分配q->nr_requests个request，存于tags->static_rqs[]
 	ret = blk_mq_sched_alloc_tags(q, hctx, hctx_idx);
 	if (ret)
 		return ret;
 
 	if (e->aux->ops.mq.init_hctx) {
-		ret = e->aux->ops.mq.init_hctx(hctx, hctx_idx);
+		ret = e->aux->ops.mq.init_hctx(hctx, hctx_idx);//nvme_init_hctx
 		if (ret) {
 			blk_mq_sched_free_tags(q->tag_set, hctx, hctx_idx);
 			return ret;

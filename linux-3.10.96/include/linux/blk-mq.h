@@ -20,7 +20,7 @@ struct blk_mq_ctxmap {
 	unsigned int bits_per_word;
 	struct blk_align_bitmap *map;
 };
-//代表硬件队列
+//代表硬件队列结构
 struct blk_mq_hw_ctx {
 	struct {
 		spinlock_t		lock;
@@ -35,12 +35,15 @@ struct blk_mq_hw_ctx {
 	unsigned long		flags;		/* BLK_MQ_F_* flags */
 
 	struct request_queue	*queue;//磁盘对应的队列
-	unsigned int		queue_num;
+	unsigned int		queue_num;//硬件队列编号
 
 	void			*driver_data;
-
+    //看着像是硬件队列关联的软件队列个数?????应该是的，看blk_mq_map_swqueue()，nr_ctx就是ctxs[]数组的下标，即ctxs[nr_ctx++]=ctxs，
+    //每一个blk_mq_ctx软件队列结构体以nr_ctx为数组下标，保存到ctxs[]
 	unsigned int		nr_ctx;
-	struct blk_mq_ctx	**ctxs;//关联的软件队列
+    //保存软件队列结构体指针数组，保存关联的软件队列结构指针，一个硬件队列可以关联多个软件队列结构，
+    //每一个关联当然软件队列结构都保存在ctxs[]，blk_mq_map_swqueue中赋值
+	struct blk_mq_ctx	**ctxs;
 
 	RH_KABI_REPLACE(unsigned int		nr_ctx_map,
 			atomic_t		wait_index)
@@ -53,7 +56,8 @@ struct blk_mq_hw_ctx {
 
 	RH_KABI_REPLACE(struct list_head	page_list,
 			struct list_head	padding3)
-    //bio需要转换成rq,从blk_mq_tags的static_rqs取出rq
+	//blk_mq_init_hctx()和blk_mq_map_swqueue()中赋值，这是硬件队列专属的tags，下边的struct blk_mq_tags	*sched_tags是调度算法的tags
+    //bio需要转换成rq时,就从blk_mq_tags的static_rqs取出rq
 	struct blk_mq_tags	*tags;
 
 	unsigned long		queued;
@@ -69,19 +73,26 @@ struct blk_mq_hw_ctx {
 	struct kobject		kobj;
 
 	RH_KABI_EXTEND(struct delayed_work	run_work)
-	RH_KABI_EXTEND(cpumask_var_t		cpumask)
-	RH_KABI_EXTEND(int			next_cpu)
-	RH_KABI_EXTEND(int			next_cpu_batch)
+	//RH_KABI_EXTEND(cpumask_var_t		cpumask)
+	cpumask_var_t		cpumask;
+	//RH_KABI_EXTEND(int			next_cpu)
+	int			next_cpu;
+	//RH_KABI_EXTEND(int			next_cpu_batch)
+	int			next_cpu_batch;
 
 	RH_KABI_EXTEND(struct sbitmap ctx_map)
 
-	RH_KABI_EXTEND(atomic_t		nr_active)
+	//RH_KABI_EXTEND(atomic_t		nr_active)
+	atomic_t		nr_active;
 
 	RH_KABI_EXTEND(struct blk_flush_queue	*fq)
 	RH_KABI_EXTEND(struct srcu_struct	queue_rq_srcu)
 	RH_KABI_EXTEND(wait_queue_t		dispatch_wait)
 	RH_KABI_EXTEND(void			*sched_data)
-	RH_KABI_EXTEND(struct blk_mq_tags	*sched_tags)
+	
+	//RH_KABI_EXTEND(struct blk_mq_tags	*sched_tags)
+	//blk_mq_sched_alloc_tags()中分配赋值，跟调度算法有关的blk_mq_tags
+	struct blk_mq_tags	*sched_tags;
 	RH_KABI_EXTEND(struct blk_mq_ctx	*dispatch_from)
 #ifdef CONFIG_BLK_DEBUG_FS
 	RH_KABI_EXTEND(struct dentry		*debugfs_dir)
@@ -102,22 +113,30 @@ struct blk_mq_reg {
 	unsigned int		flags;		/* BLK_MQ_F_* */
 };
 #else
-//貌似blk_mq_init_queue->blk_mq_init_allocated_queue 传递blk_mq_tag_set去设置rq队列，
+//nvme_dev_add->blk_mq_alloc_tag_set->blk_mq_alloc_rq_maps->__blk_mq_alloc_rq_maps->__blk_mq_alloc_rq_map 传递blk_mq_tag_set去设置rq队列，
+//在驱动nvme_dev_add函数中设置nr_hw_queues、queue_depth，硬件队列个数与队列深度到底什么关系???????????
 struct blk_mq_tag_set {
-	RH_KABI_CONST struct blk_mq_ops  *ops;
-	unsigned int		nr_hw_queues;//硬件队列数
-	unsigned int		queue_depth;	/* max hw supported */
+	//RH_KABI_CONST struct blk_mq_ops  *ops;
+	struct blk_mq_ops  *ops;
+	unsigned int		nr_hw_queues;//硬件队列数,blk_mq_alloc_tag_set中被设置为1，说是因为kdump开启的原因
+	
+	//大爷的，本来迷糊以为queue_depth是支持的最大硬件队列数?不是的，应为是一个硬件队列中最多支持的req个数吧，所谓队列深度就是
+	//一个队里里对多容纳的成员个数吧，这里的成员应该就是req，见__blk_mq_alloc_rq_maps->__blk_mq_alloc_rq_map 根据队列深度设置
+	//一个硬件队列里的req
+	unsigned int		queue_depth;	/* max hw supported 队列深度 blk_mq_alloc_tag_set中有设置*/
 	unsigned int		reserved_tags;
 	unsigned int		cmd_size;	/* per-request extra data */
 	int			numa_node;
 	unsigned int		timeout;
 	unsigned int		flags;		/* BLK_MQ_F_* */
 	void			*driver_data;
-
-	struct blk_mq_tags	**tags;//硬件队列分配rq使用
-
+    //见__blk_mq_alloc_rq_map()，分配和设置blk_mq_tags结构
+	struct blk_mq_tags	**tags;//保存每个硬件队列对应的blk_mq_tags结构指针，一个硬件队列对应一个，数组小标是硬件队列编号，从0开始
 	struct mutex		tag_list_lock;
 	struct list_head	tag_list;
+    //这是个迷幻的数组，看blk_mq_update_queue_map()中的注释，该数组下标是CPU的编号，数组成员是硬件队列的编号
+    //该数组成员在blk_mq_alloc_tag_set()中分配，与CPU个数相等。数组成员初值全是0，即0号硬件队列，如果硬件队列只有一个，就因该全是0。
+    //如果硬件队列有3个，mq_map[0]、mq_map[1]、mq_map[2]依次是0、1、2，，其他成员还是0，这是CPU个数大于硬件队列个数的情况
 	unsigned int		*mq_map;
 };
 #endif
@@ -180,7 +199,7 @@ struct blk_mq_aux_ops {
 	get_budget_fn		*get_budget;
 	put_budget_fn		*put_budget;
 };
-
+//nvme_dev_add()中设置为nvme_mq_ops
 struct blk_mq_ops {
 	/*
 	 * Queue request
@@ -199,7 +218,7 @@ struct blk_mq_ops {
 	 */
 	RH_KABI_REPLACE(rq_timed_out_fn *timeout, timeout_fn *timeout)
 
-	softirq_done_fn		*complete;
+	softirq_done_fn		*complete;//nvme_pci_complete_rq
 
 #ifdef __GENKSYMS__
 	/*
@@ -296,6 +315,7 @@ bool blk_mq_can_queue(struct blk_mq_hw_ctx *);
 enum {
 	BLK_MQ_REQ_NOWAIT	= (1 << 0), /* return when out of requests */
 	BLK_MQ_REQ_RESERVED	= (1 << 1), /* allocate from reserved pool */
+	//blk_mq_sched_get_request()有调度器设置BLK_MQ_REQ_INTERNAL
 	BLK_MQ_REQ_INTERNAL	= (1 << 2), /* allocate internal/sched tag */
 	BLK_MQ_REQ_PREEMPT	= (1 << 3), /* set RQF_PREEMPT */
 };
@@ -387,7 +407,7 @@ static inline struct request_aux *rq_aux(struct request *rq)
 {
 	return __rq_aux(rq, rq->q);
 }
-
+//就是根据硬件队列数，依次从q->queue_hw_ctx[i]数组取出硬件队列结构体
 #define queue_for_each_hw_ctx(q, hctx, i)				\
 	for ((i) = 0; (i) < (q)->nr_hw_queues &&			\
 	     ({ hctx = (q)->queue_hw_ctx[i]; 1; }); (i)++)

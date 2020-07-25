@@ -40,27 +40,53 @@
 
 #include "blk.h"
 #include "blk-cgroup.h"
+#include "blk-mq-sched.h"
 
 static DEFINE_SPINLOCK(elv_list_lock);
 static LIST_HEAD(elv_list);
+static LIST_HEAD(elv_aux_list);
 
 /*
  * Merge hash stuff.
  */
-//hash key是req的扇区结束地址呀
 #define rq_hash_key(rq)		(blk_rq_pos(rq) + blk_rq_sectors(rq))
+
+static struct elevator_type_aux *__elevator_aux_find(const struct elevator_type *e)
+{
+	struct elevator_type_aux *e_aux;
+
+	list_for_each_entry(e_aux, &elv_aux_list, list) {
+		if (e_aux->type == e)
+			return e_aux;
+	}
+	return NULL;
+}
+
+struct elevator_type_aux *elevator_aux_find(struct elevator_type *e)
+{
+	struct elevator_type_aux *e_aux;
+
+	spin_lock(&elv_list_lock);
+	e_aux = __elevator_aux_find(e);
+	spin_unlock(&elv_list_lock);
+
+	return e_aux;
+}
+EXPORT_SYMBOL(elevator_aux_find);
 
 /*
  * Query io scheduler to see if the current process issuing bio may be
  * merged with rq.
  */
-static int elv_iosched_allow_merge(struct request *rq, struct bio *bio)
+static int elv_iosched_allow_bio_merge(struct request *rq, struct bio *bio)
 {
 	struct request_queue *q = rq->q;
 	struct elevator_queue *e = q->elevator;
 
-	if (e->type->ops.elevator_allow_merge_fn)
-		return e->type->ops.elevator_allow_merge_fn(q, rq, bio);
+	if (e->uses_mq && e->aux->ops.mq.allow_merge)
+		return e->aux->ops.mq.allow_merge(q, rq, bio);
+	else if (!e->uses_mq && e->aux->ops.sq.elevator_allow_bio_merge_fn)
+		return e->aux->ops.sq.elevator_allow_bio_merge_fn(q, rq, bio);
 
 	return 1;
 }
@@ -68,25 +94,64 @@ static int elv_iosched_allow_merge(struct request *rq, struct bio *bio)
 /*
  * can we safely merge with this request?
  */
+bool elv_bio_merge_ok(struct request *rq, struct bio *bio)
+{
+	if (!blk_rq_merge_ok(rq, bio))
+		return false;
+
+	if (!elv_iosched_allow_bio_merge(rq, bio))
+		return false;
+
+	return true;
+}
+EXPORT_SYMBOL(elv_bio_merge_ok);
+
 bool elv_rq_merge_ok(struct request *rq, struct bio *bio)
 {
-    //对本次新的bio能否合并到rq链表已有的rq做各个前期检查，检查通过返回true
-	if (!blk_rq_merge_ok(rq, bio))
-		return 0;
-
-	if (!elv_iosched_allow_merge(rq, bio))
-		return 0;
-
-	return 1;
+	return elv_bio_merge_ok(rq, bio);
 }
 EXPORT_SYMBOL(elv_rq_merge_ok);
 
-static struct elevator_type *elevator_find(const char *name)
+/* called when elv_list_lock is held */
+static bool __elevator_match(const struct elevator_type *e, const char *name)
+{
+	struct elevator_type_aux *aux;
+
+	if (!strcmp(e->elevator_name, name))
+		return true;
+
+	aux = __elevator_aux_find(e);
+	if (!aux)
+		return false;
+
+	if (aux->elevator_alias && !strcmp(aux->elevator_alias, name))
+		return true;
+
+	return false;
+}
+
+/* called when elv_list_lock isn't held */
+static bool elevator_match(const struct elevator_type *e, const char *name)
+{
+	bool ret;
+
+	spin_lock(&elv_list_lock);
+	ret = __elevator_match(e, name);
+	spin_unlock(&elv_list_lock);
+
+	return ret;
+}
+
+/*
+ * Return scheduler with name 'name' and with matching 'mq capability
+ */
+static struct elevator_type *elevator_find(const char *name, bool mq)
 {
 	struct elevator_type *e;
 
 	list_for_each_entry(e, &elv_list, list) {
-		if (!strcmp(e->elevator_name, name))
+		if (__elevator_match(e, name) &&
+				(mq == !e->ops.elevator_init_fn))
 			return e;
 	}
 
@@ -98,29 +163,30 @@ static void elevator_put(struct elevator_type *e)
 	module_put(e->elevator_owner);
 }
 
-static struct elevator_type *elevator_get(const char *name, bool try_loading)
+static struct elevator_type *elevator_get(struct request_queue *q,
+					  const char *name, bool try_loading)
 {
 	struct elevator_type *e;
 
 	spin_lock(&elv_list_lock);
 
-	e = elevator_find(name);
+	e = elevator_find(name, q->mq_ops != NULL);
 	if (!e && try_loading) {
 		spin_unlock(&elv_list_lock);
 		request_module("%s-iosched", name);
 		spin_lock(&elv_list_lock);
-		e = elevator_find(name);
+		e = elevator_find(name, q->mq_ops != NULL);
 	}
 
 	if (e && !try_module_get(e->elevator_owner))
 		e = NULL;
 
 	spin_unlock(&elv_list_lock);
-
 	return e;
 }
 
-static char chosen_elevator[ELV_NAME_MAX];
+char chosen_elevator[ELV_NAME_MAX];
+EXPORT_SYMBOL(chosen_elevator);
 
 static int __init elevator_setup(char *str)
 {
@@ -142,8 +208,12 @@ void __init load_default_elevator_module(void)
 	if (!chosen_elevator[0])
 		return;
 
+	/*
+	 * Boot parameter is deprecated, we haven't supported that for MQ.
+	 * Only look for non-mq schedulers from here.
+	 */
 	spin_lock(&elv_list_lock);
-	e = elevator_find(chosen_elevator);
+	e = elevator_find(chosen_elevator, false);
 	spin_unlock(&elv_list_lock);
 
 	if (!e)
@@ -162,9 +232,13 @@ struct elevator_queue *elevator_alloc(struct request_queue *q,
 		goto err;
 
 	eq->type = e;
+	eq->aux = elevator_aux_find(e);
+	if (!eq->aux)
+		goto err;
 	kobject_init(&eq->kobj, &elv_ktype);
 	mutex_init(&eq->sysfs_lock);
 	hash_init(eq->hash);
+	eq->uses_mq = eq->aux->uses_mq;
 
 	return eq;
 err:
@@ -187,6 +261,7 @@ int elevator_init(struct request_queue *q, char *name)
 {
 	struct elevator_type *e = NULL;
 	int err;
+	struct elevator_type_aux *aux;
 
 	/*
 	 * q->sysfs_lock must be held to provide mutual exclusion between
@@ -203,43 +278,65 @@ int elevator_init(struct request_queue *q, char *name)
 	q->boundary_rq = NULL;
 
 	if (name) {
-		e = elevator_get(name, true);
+		e = elevator_get(q, name, true);
 		if (!e)
 			return -EINVAL;
 	}
 
 	/*
-	 * Use the default elevator specified by config boot param or
-	 * config option.  Don't try to load modules as we could be running
-	 * off async and request_module() isn't allowed from async.
+	 * Use the default elevator specified by config boot param for
+	 * non-mq devices, or by config option. Don't try to load modules
+	 * as we could be running off async and request_module() isn't
+	 * allowed from async.
 	 */
-	if (!e && *chosen_elevator) {
-		e = elevator_get(chosen_elevator, false);
+	if (!e && !q->mq_ops && *chosen_elevator) {
+		e = elevator_get(q, chosen_elevator, false);
 		if (!e)
 			printk(KERN_ERR "I/O scheduler %s not found\n",
 							chosen_elevator);
 	}
 
 	if (!e) {
-		e = elevator_get(CONFIG_DEFAULT_IOSCHED, false);
+		/*
+		 * For blk-mq devices, we default to using mq-deadline,
+		 * if available, for single queue devices. If deadline
+		 * isn't available OR we have multiple queues, default
+		 * to "none".
+		 */
+		if (q->mq_ops) {
+			if (q->nr_hw_queues == 1)
+				e = elevator_get(q, "mq-deadline", false);
+			if (!e)
+				return 0;
+		} else
+			e = elevator_get(q, CONFIG_DEFAULT_IOSCHED, false);
+
 		if (!e) {
 			printk(KERN_ERR
 				"Default I/O scheduler not found. " \
 				"Using noop.\n");
-			e = elevator_get("noop", false);
+			e = elevator_get(q, "noop", false);
 		}
 	}
 
-	err = e->ops.elevator_init_fn(q, e);
-	return 0;
+	aux = elevator_aux_find(e);
+	if (aux->uses_mq)
+		err = blk_mq_init_sched(q, e);
+	else
+		err = aux->ops.sq.elevator_init_fn(q, e);
+	if (err)
+		elevator_put(e);
+	return err;
 }
 EXPORT_SYMBOL(elevator_init);
 
-void elevator_exit(struct elevator_queue *e)
+void elevator_exit(struct request_queue *q, struct elevator_queue *e)
 {
 	mutex_lock(&e->sysfs_lock);
-	if (e->type->ops.elevator_exit_fn)
-		e->type->ops.elevator_exit_fn(e);
+	if (e->uses_mq && e->aux->ops.mq.exit_sched)
+		blk_mq_exit_sched(q, e);
+	else if (!e->uses_mq && e->aux->ops.sq.elevator_exit_fn)
+		e->aux->ops.sq.elevator_exit_fn(e);
 	mutex_unlock(&e->sysfs_lock);
 
 	kobject_put(&e->kobj);
@@ -249,41 +346,38 @@ EXPORT_SYMBOL(elevator_exit);
 static inline void __elv_rqhash_del(struct request *rq)
 {
 	hash_del(&rq->hash);
+	rq->cmd_flags &= ~REQ_HASHED;
 }
 
-static void elv_rqhash_del(struct request_queue *q, struct request *rq)
+void elv_rqhash_del(struct request_queue *q, struct request *rq)
 {
 	if (ELV_ON_HASH(rq))
 		__elv_rqhash_del(rq);
 }
+EXPORT_SYMBOL_GPL(elv_rqhash_del);
 
-static void elv_rqhash_add(struct request_queue *q, struct request *rq)
+void elv_rqhash_add(struct request_queue *q, struct request *rq)
 {
-    //e就是IO调度算法实体
 	struct elevator_queue *e = q->elevator;
 
 	BUG_ON(ELV_ON_HASH(rq));
-    //新的req靠rq->hash添加到IO调度算法的hash链表里，做hash索引是为了在IO算法队列里搜索可以合并的req时，提高搜索速度
 	hash_add(e->hash, &rq->hash, rq_hash_key(rq));
+	rq->cmd_flags |= REQ_HASHED;
 }
+EXPORT_SYMBOL_GPL(elv_rqhash_add);
 
-static void elv_rqhash_reposition(struct request_queue *q, struct request *rq)
+void elv_rqhash_reposition(struct request_queue *q, struct request *rq)
 {
-    //删除req
 	__elv_rqhash_del(rq);
-    //再添加req，应该是req有了新的合并，所以要重新排序req吧
 	elv_rqhash_add(q, rq);
 }
-//新加入IO调度队列的req会做hash索引，这应该是是根据bio的扇区起始地址在hash表找req吧，然后rq_hash_key(rq)与offset相等就是找到的rq
-//如果找到匹配的req，则req的扇区结束地址等于bio的扇区起始地址，这样bio就是后项合并到req
-static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)//offset是bio->bi_sector
+
+struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
 {
 	struct elevator_queue *e = q->elevator;
 	struct hlist_node *next;
 	struct request *rq;
 
-    //新的req靠这个hash添加到IO调度算法的hash链表e->hash里，做hash索引是为了在IO算法队列里搜索可以合并的req时，提高搜索速度
-    //这里遍历hash链表上的req
 	hash_for_each_possible_safe(e->hash, rq, next, hash, offset) {
 		BUG_ON(!ELV_ON_HASH(rq));
 
@@ -291,8 +385,7 @@ static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
 			__elv_rqhash_del(rq);
 			continue;
 		}
-        //req的扇区结束地址等于offset，offset是bio的扇区起始地址，这样bio就是后项合并到req
-        //hash key是req的扇区结束地址
+
 		if (rq_hash_key(rq) == offset)
 			return rq;
 	}
@@ -304,7 +397,6 @@ static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
  * RB-tree support functions for inserting/lookup/removal of requests
  * in a sorted RB tree.
  */
-//按照req的磁盘起始地址把req添加到红黑树队列里，这个红黑树里req的排列规则是，谁的磁盘起始地址小谁靠左
 void elv_rb_add(struct rb_root *root, struct request *rq)
 {
 	struct rb_node **p = &root->rb_node;
@@ -313,16 +405,14 @@ void elv_rb_add(struct rb_root *root, struct request *rq)
 
 	while (*p) {
 		parent = *p;
-        //取出红黑树中的__rq
 		__rq = rb_entry(parent, struct request, rb_node);
-        //rq的磁盘起始地址比__rq的小，那rq应该插入到左子树，显然，谁的磁盘起始地址小，谁靠左
+
 		if (blk_rq_pos(rq) < blk_rq_pos(__rq))
 			p = &(*p)->rb_left;
-        //否则，rq的磁盘起始地址>=__rq的，则rq应该插入到右子树
 		else if (blk_rq_pos(rq) >= blk_rq_pos(__rq))
 			p = &(*p)->rb_right;
 	}
-    //rq链接到红黑树
+
 	rb_link_node(&rq->rb_node, parent, p);
 	rb_insert_color(&rq->rb_node, root);
 }
@@ -336,29 +426,22 @@ void elv_rb_del(struct rb_root *root, struct request *rq)
 }
 EXPORT_SYMBOL(elv_rb_del);
 
-
-//该函数是在调度算法的 读或写红黑树队列里，遍历req,找到req起始扇区地址等于bio_end_sector(bio)的req返回，否则返回NULL
-//struct rb_root *root调度队列保存req的红黑树头结点吧，有两个，一个读，一个写。红黑树队列中的req排序的规则是req的磁盘起始扇区，
-//可以认为是按照磁盘起始扇区从小到大排列的吧。sector是bio_end_sector(bio)，bio代表的磁盘扇区的结束地址。
 struct request *elv_rb_find(struct rb_root *root, sector_t sector)
 {
 	struct rb_node *n = root->rb_node;
 	struct request *rq;
 
 	while (n) {
-        //从root根节点开始遍历，依次取出红黑树中的一个req
 		rq = rb_entry(n, struct request, rb_node);
-        //bio的扇区结束地址sector 小于 req的起始扇区地址，则遍历左子树，很明显，红黑树队列的req排列规则是，谁的起始扇区地址小谁靠左
+
 		if (sector < blk_rq_pos(rq))
 			n = n->rb_left;
-        //bio的扇区结束地址sector 大于  req的起始扇区地址，则遍历右子树
 		else if (sector > blk_rq_pos(rq))
 			n = n->rb_right;
-		else//我去，这是bio的扇区结束地址sector = req的起始扇区地址呀，所示要把bio合并到req前边，这是前项合并
+		else
 			return rq;
 	}
-    //如果走到这里，应该是红黑树队列就没有req成员吧，是空的，因为只要红黑树有一个req,那bio的磁盘结束地址，肯定 大于或小于或等于 req的起始地址吧
-    //错了错了，只有sector = blk_rq_pos(rq)才会return rq，如果没有找到匹配的req,n = n->rb_right/rb_left遍历到树底，n为NULL退出循环
+
 	return NULL;
 }
 EXPORT_SYMBOL(elv_rb_find);
@@ -413,25 +496,21 @@ EXPORT_SYMBOL(elv_dispatch_sort);
  * entry.  rq is added to the back of the dispatch queue. To be used by
  * specific elevators.
  */
-//把req添加到rq的queue_head队列，将来磁盘驱动程序就是从queue_head链表取出req传输的
 void elv_dispatch_add_tail(struct request_queue *q, struct request *rq)
 {
 	if (q->last_merge == rq)
 		q->last_merge = NULL;
 
 	elv_rqhash_del(q, rq);
-    //
+
 	q->nr_sorted--;
-    //结束扇区
+
 	q->end_sector = rq_end_sector(rq);
 	q->boundary_rq = rq;
-    //把req添加到rq的queue_head队列，将来磁盘驱动程序就是从queue_head链表取出req传输的
 	list_add_tail(&rq->queuelist, &q->queue_head);
 }
 EXPORT_SYMBOL(elv_dispatch_add_tail);
 
-//在elv调度器里查找是否有可以合并的req，找到则可以bio后项或前项合并到req。这个是调用具体的IO调度算法函数寻找可以合并的req。
-//函数返回值 ELEVATOR_BACK_MERGE(前项合并的req)、ELEVATOR_FRONT_MERGE(前项合并)、ELEVATOR_NO_MERGE(没有找到可以合并的req)
 int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 {
 	struct elevator_queue *e = q->elevator;
@@ -450,9 +529,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	/*
 	 * First try one-hit cache.
 	 */
-	//是否可以把bio合并到q->last_merge，上次rq队列合并过的rq，elv_rq_merge_ok是做一些权限检查啥的
-	if (q->last_merge && elv_rq_merge_ok(q->last_merge, bio)) {
-        //检查bio和rq代表的磁盘范围是否挨着，挨着则可以合并bio到q->last_merge
+	if (q->last_merge && elv_bio_merge_ok(q->last_merge, bio)) {
 		ret = blk_try_merge(q->last_merge, bio);
 		if (ret != ELEVATOR_NO_MERGE) {
 			*req = q->last_merge;
@@ -466,28 +543,17 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	/*
 	 * See if our hash lookup can find a potential backmerge.
 	 */
-	 //新加入IO调度队列的req会做hash索引，这应该是是根据bio的扇区起始地址在hash表找req吧，然后rq_hash_key(rq)与offset相等就是找到的rq
-	 //如果找到匹配的req，则req的扇区结束地址等于bio的扇区起始地址，这样bio就是后项合并到req
 	__rq = elv_rqhash_find(q, bio->bi_sector);
-	if (__rq && elv_rq_merge_ok(__rq, bio)) {
+	if (__rq && elv_bio_merge_ok(__rq, bio)) {
 		*req = __rq;
-		return ELEVATOR_BACK_MERGE;//哎，ELEVATOR_BACK_MERGE这里是后项合并
+		return ELEVATOR_BACK_MERGE;
 	}
-/*    -----原始内核的，下边的是3.10.0.957.27内核，就增加了e->aux->ops.mq.request_merge
-    //具体IO调度算法函数cfq_merge或者deadline_merge，找到可以合并的bio的req???????,这里返回ELEVATOR_FRONT_MERGE，前项合并
-	if (e->type->ops.elevator_merge_fn)
-		return e->type->ops.elevator_merge_fn(q, req, bio);
-*/
-    
-    if (e->uses_mq && e->aux->ops.mq.request_merge)
-          //dd_request_merge 和 deadline_merge的函数源码就是一样的，就是在调度算法的 读或写红黑树队列里，找到等于bio_end_sector(bio)的req
-          //找到说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并ELEVATOR_FRONT_MERGE
-          return e->aux->ops.mq.request_merge(q, req, bio);//dd_request_merge
-    else if (!e->uses_mq && e->aux->ops.sq.elevator_merge_fn)
-    //具体IO调度算法函数cfq_merge或者deadline_merge，该函数是在调度算法的 读或写红黑树队列里，遍历req,找到req起始扇区地址
-    //等于bio_end_sector(bio)的req，如果找到匹配的req，说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并ELEVATOR_FRONT_MERGE
-          return e->aux->ops.sq.elevator_merge_fn(q, req, bio);
-    
+
+	if (e->uses_mq && e->aux->ops.mq.request_merge)
+		return e->aux->ops.mq.request_merge(q, req, bio);
+	else if (!e->uses_mq && e->aux->ops.sq.elevator_merge_fn)
+		return e->aux->ops.sq.elevator_merge_fn(q, req, bio);
+
 	return ELEVATOR_NO_MERGE;
 }
 
@@ -498,9 +564,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
  *
  * Returns true if we merged, false otherwise
  */
-//尝试对rq合并
-static bool elv_attempt_insert_merge(struct request_queue *q,
-				     struct request *rq)
+bool elv_attempt_insert_merge(struct request_queue *q, struct request *rq)
 {
 	struct request *__rq;
 	bool ret;
@@ -511,7 +575,6 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 	/*
 	 * First try one-hit cache.
 	 */
-	//尝试把rq合并到q->last_merge，把rq剔除掉，做一些剔除rq的收尾处理,并更新IO使用率数据
 	if (q->last_merge && blk_attempt_req_merge(q, q->last_merge, rq))
 		return true;
 
@@ -523,9 +586,7 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 	 * See if our hash lookup can find a potential backmerge.
 	 */
 	while (1) {
-        //新加入IO调度队列的req会做hash索引，这应该是是根据rq的扇区起始地址在hash表找req吧，然后rq_hash_key(rq)与offset相等就是找到的rq
 		__rq = elv_rqhash_find(q, blk_rq_pos(rq));
-        //再次尝试合并
 		if (!__rq || !blk_attempt_req_merge(q, __rq, rq))
 			break;
 
@@ -536,48 +597,40 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 
 	return ret;
 }
-//看着没啥，req有了新的合并，则对req在IO调度算法队列里重新排序
+
 void elv_merged_request(struct request_queue *q, struct request *rq, int type)
 {
 	struct elevator_queue *e = q->elevator;
 
-	/*貌似deadline调度算法的红黑树，在插入req时，就是按照req代表的扇区起始地址来对比，谁的扇区起始地址小，谁排列靠左.
-	  见 deadline_add_request->deadline_add_rq_rb->elv_rb_add插入req和elv_merge->deadline_merge->elv_rb_find遍历req。
-	  blk_mq_sched_try_merge->elv_merged_request->deadline_merged_request重新req排序，针对deadline调度算法的红黑树队列，
-	  对前项合并后的req进行重新排序，因为前项合并后的req扇区起始地址变小了，既然红黑树队列对req排序规则是谁的扇区起始地址小谁靠左,
-	  那就要对这个req重新再红黑树队列里排序。
-	  
-	  同样的，deadline调度算法的hash队列，也是一种req队列，但排序规则是req的扇区结束地址，为什么这么说，
-	  看hash添加时的elv_rqhash_add函数里的hash_add(e->hash, &rq->hash, rq_hash_key(rq))，rq_hash_key(rq)就是hash key，req扇区结束地址。
-	  所以在elv_merged_request->elv_rqhash_reposition中，是req进行了后项合并，扇区结束地址变大了，那就要对这个req进行在hash表中冲洗排序。
-	  blk_queue_bio->add_acct_request->__elv_add_request->elv_rqhash_add添加，elv_merge->elv_rqhash_find遍历
-	  blk_mq_sched_try_merge->elv_merged_request->elv_rqhash_reposition重新排序。对后项合并后的req进行一次重新排序
-	*/
-
-    //发生了前项合并，IO调度算法队列
-	if (e->type->ops.elevator_merged_fn)//cfq_merged_request和deadline_merged_request，mq没有
-		e->type->ops.elevator_merged_fn(q, rq, type);
+	if (e->uses_mq && e->aux->ops.mq.request_merged)
+		e->aux->ops.mq.request_merged(q, rq, type);
+	else if (!e->uses_mq && e->aux->ops.sq.elevator_merged_fn)
+		e->aux->ops.sq.elevator_merged_fn(q, rq, type);
 
 	if (type == ELEVATOR_BACK_MERGE)
-		elv_rqhash_reposition(q, rq);//req有了新的合并，对req重新排序
+		elv_rqhash_reposition(q, rq);
 
 	q->last_merge = rq;
 }
-//IO调度算法，调度算法的队列发生了二次合并,则尝试把next req合并到req，然后要把next req从调度算法的队列剔除掉
+
 void elv_merge_requests(struct request_queue *q, struct request *rq,
 			     struct request *next)
 {
 	struct elevator_queue *e = q->elevator;
-	const int next_sorted = next->cmd_flags & REQ_SORTED;
 
-    //剔除next，并做一些删除req的后续处理
-	if (next_sorted && e->type->ops.elevator_merge_req_fn)
-		e->type->ops.elevator_merge_req_fn(q, rq, next);//cfq_merged_requests或deadline_merged_requests或noop_merged_requests
-    //貌似是把rq删除后重新添加到调度器队列，这看着是hash有关的队列，跟IO调度队列也有关
+	bool next_sorted = false;
+
+	if (e->uses_mq && e->aux->ops.mq.requests_merged)
+		e->aux->ops.mq.requests_merged(q, rq, next);
+	else if (e->aux->ops.sq.elevator_merge_req_fn) {
+		next_sorted = (__force bool)(next->cmd_flags & REQ_SORTED);
+		if (next_sorted)
+			e->aux->ops.sq.elevator_merge_req_fn(q, rq, next);
+	}
+
 	elv_rqhash_reposition(q, rq);
 
 	if (next_sorted) {
-        //删除next
 		elv_rqhash_del(q, next);
 		q->nr_sorted--;
 	}
@@ -589,9 +642,12 @@ void elv_bio_merged(struct request_queue *q, struct request *rq,
 			struct bio *bio)
 {
 	struct elevator_queue *e = q->elevator;
-    //只是增加一部分统计数据吧 
-	if (e->type->ops.elevator_bio_merged_fn)
-		e->type->ops.elevator_bio_merged_fn(q, rq, bio);
+
+	if (WARN_ON_ONCE(e->uses_mq))
+		return;
+
+	if (e->aux->ops.sq.elevator_bio_merged_fn)
+		e->aux->ops.sq.elevator_bio_merged_fn(q, rq, bio);
 }
 
 #ifdef CONFIG_PM_RUNTIME
@@ -636,12 +692,15 @@ void elv_requeue_request(struct request_queue *q, struct request *rq)
 
 void elv_drain_elevator(struct request_queue *q)
 {
+	struct elevator_queue *e = q->elevator;
 	static int printed;
 
+	if (WARN_ON_ONCE(e->uses_mq))
+		return;
+
 	lockdep_assert_held(q->queue_lock);
-//选的合适待派发给驱动传输的req,然后把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，将来磁盘驱动程序就是从queue_head链表取出req传输的
-//这个合适的req，来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，同手兼顾，有固定策略
-	while (q->elevator->type->ops.elevator_dispatch_fn(q, 1))//deadline_dispatch_requests
+
+	while (e->aux->ops.sq.elevator_dispatch_fn(q, 1))
 		;
 	if (q->nr_sorted && printed++ < 10) {
 		printk(KERN_ERR "%s: forced dispatching is broken "
@@ -649,8 +708,8 @@ void elv_drain_elevator(struct request_queue *q)
 		       q->elevator->type->elevator_name, q->nr_sorted);
 	}
 }
-//新分配的req插入IO算法队列，或者是把当前进程plug链表上req全部插入到IO调度算法队列
-void __elv_add_request(struct request_queue *q, struct request *rq, int where)//where默认是ELEVATOR_INSERT_SORT
+
+void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 {
 	trace_block_rq_insert(q, rq);
 
@@ -671,15 +730,13 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)//
 
 	switch (where) {
 	case ELEVATOR_INSERT_REQUEUE:
-	case ELEVATOR_INSERT_FRONT://前向合并
+	case ELEVATOR_INSERT_FRONT:
 		rq->cmd_flags |= REQ_SOFTBARRIER;
-		list_add(&rq->queuelist, &q->queue_head);//req插入q->queue_head
+		list_add(&rq->queuelist, &q->queue_head);
 		break;
 
-	case ELEVATOR_INSERT_BACK://后向合并
+	case ELEVATOR_INSERT_BACK:
 		rq->cmd_flags |= REQ_SOFTBARRIER;
-        //选的合适待派发给驱动传输的req,然后把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，将来磁盘驱动程序就是从queue_head链表取出req传输的
-        //这个合适的req，来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，同手兼顾，有固定策略
 		elv_drain_elevator(q);
 		list_add_tail(&rq->queuelist, &q->queue_head);
 		/*
@@ -692,11 +749,10 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)//
 		 *   with anything.  There's no point in delaying queue
 		 *   processing.
 		 */
-		//这里调用底层驱动数据传输函数，就会从rq的queue_head队列取出req发送给磁盘驱动去传输
 		__blk_run_queue(q);
 		break;
 
-	case ELEVATOR_INSERT_SORT_MERGE://把进程独有的plug链表上的req插入IO调度算法队列里走这里
+	case ELEVATOR_INSERT_SORT_MERGE:
 		/*
 		 * If we succeed in merging this request with one in the
 		 * queue already, we are done - rq has now been freed,
@@ -704,13 +760,11 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)//
 		 */
 		if (elv_attempt_insert_merge(q, rq))
 			break;
-	case ELEVATOR_INSERT_SORT://新分配的req插入的IO调度算法队列走这里
+	case ELEVATOR_INSERT_SORT:
 		BUG_ON(rq->cmd_type != REQ_TYPE_FS);
 		rq->cmd_flags |= REQ_SORTED;
-        //队列插入新的一个req
 		q->nr_sorted++;
 		if (rq_mergeable(rq)) {
-            //新的req靠rq->hash添加到IO调度算法的hash链表里
 			elv_rqhash_add(q, rq);
 			if (!q->last_merge)
 				q->last_merge = rq;
@@ -721,8 +775,7 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)//
 		 * rq cannot be accessed after calling
 		 * elevator_add_req_fn.
 		 */
-		//把req插入到IO调度算法队列里，deadline是插入到红黑树队列和fifo队列
-		q->elevator->type->ops.elevator_add_req_fn(q, rq);//deadline_add_request
+		q->elevator->aux->ops.sq.elevator_add_req_fn(q, rq);
 		break;
 
 	case ELEVATOR_INSERT_FLUSH:
@@ -746,22 +799,27 @@ void elv_add_request(struct request_queue *q, struct request *rq, int where)
 	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 EXPORT_SYMBOL(elv_add_request);
-//只是从IO调度算法队列里取出rq的下一个rq吧,不同的调度算法调度队列不一样
+
 struct request *elv_latter_request(struct request_queue *q, struct request *rq)
 {
 	struct elevator_queue *e = q->elevator;
 
-	if (e->type->ops.elevator_latter_req_fn)//elv_rb_latter_request和noop_latter_request
-		return e->type->ops.elevator_latter_req_fn(q, rq);
+	if (e->uses_mq && e->aux->ops.mq.next_request)
+		return e->aux->ops.mq.next_request(q, rq);//elv_rb_latter_request
+	else if (!e->uses_mq && e->aux->ops.sq.elevator_latter_req_fn)
+		return e->aux->ops.sq.elevator_latter_req_fn(q, rq);//elv_rb_latter_request
+
 	return NULL;
 }
 
 struct request *elv_former_request(struct request_queue *q, struct request *rq)
 {
 	struct elevator_queue *e = q->elevator;
-    //elv_rb_former_request和noop_former_request
-	if (e->type->ops.elevator_former_req_fn)
-		return e->type->ops.elevator_former_req_fn(q, rq);
+
+	if (e->uses_mq && e->aux->ops.mq.former_request)
+		return e->aux->ops.mq.former_request(q, rq);
+	if (!e->uses_mq && e->aux->ops.sq.elevator_former_req_fn)
+		return e->aux->ops.sq.elevator_former_req_fn(q, rq);
 	return NULL;
 }
 
@@ -770,8 +828,11 @@ int elv_set_request(struct request_queue *q, struct request *rq,
 {
 	struct elevator_queue *e = q->elevator;
 
-	if (e->type->ops.elevator_set_req_fn)
-		return e->type->ops.elevator_set_req_fn(q, rq, bio, gfp_mask);
+	if (WARN_ON_ONCE(e->uses_mq))
+		return 0;
+
+	if (e->aux->ops.sq.elevator_set_req_fn)
+		return e->aux->ops.sq.elevator_set_req_fn(q, rq, bio, gfp_mask);
 	return 0;
 }
 
@@ -779,43 +840,32 @@ void elv_put_request(struct request_queue *q, struct request *rq)
 {
 	struct elevator_queue *e = q->elevator;
 
-	if (e->type->ops.elevator_put_req_fn)
-		e->type->ops.elevator_put_req_fn(rq);
+	if (WARN_ON_ONCE(e->uses_mq))
+		return;
+
+	if (e->aux->ops.sq.elevator_put_req_fn)
+		e->aux->ops.sq.elevator_put_req_fn(rq);
 }
 
 int elv_may_queue(struct request_queue *q, int rw)
 {
 	struct elevator_queue *e = q->elevator;
 
-	if (e->type->ops.elevator_may_queue_fn)
-		return e->type->ops.elevator_may_queue_fn(q, rw);
+	if (WARN_ON_ONCE(e->uses_mq))
+		return 0;
+
+	if (e->aux->ops.sq.elevator_may_queue_fn)
+		return e->aux->ops.sq.elevator_may_queue_fn(q, rw);
 
 	return ELV_MQUEUE_MAY;
 }
 
-void elv_abort_queue(struct request_queue *q)
-{
-	struct request *rq;
-
-	blk_abort_flushes(q);
-
-	while (!list_empty(&q->queue_head)) {
-		rq = list_entry_rq(q->queue_head.next);
-		rq->cmd_flags |= REQ_QUIET;
-		trace_block_rq_abort(q, rq);
-		/*
-		 * Mark this request as started so we don't trigger
-		 * any debug logic in the end I/O path.
-		 */
-		blk_start_request(rq);
-		__blk_end_request_all(rq, -EIO);
-	}
-}
-EXPORT_SYMBOL(elv_abort_queue);
-
 void elv_completed_request(struct request_queue *q, struct request *rq)
 {
 	struct elevator_queue *e = q->elevator;
+
+	if (WARN_ON_ONCE(e->uses_mq))
+		return;
 
 	/*
 	 * request is released from the driver, io must be done
@@ -823,8 +873,8 @@ void elv_completed_request(struct request_queue *q, struct request *rq)
 	if (blk_account_rq(rq)) {
 		q->in_flight[rq_is_sync(rq)]--;
 		if ((rq->cmd_flags & REQ_SORTED) &&
-		    e->type->ops.elevator_completed_req_fn)
-			e->type->ops.elevator_completed_req_fn(q, rq);
+		    e->aux->ops.sq.elevator_completed_req_fn)
+			e->aux->ops.sq.elevator_completed_req_fn(q, rq);
 	}
 }
 
@@ -892,6 +942,8 @@ int elv_register_queue(struct request_queue *q)
 		}
 		kobject_uevent(&e->kobj, KOBJ_ADD);
 		e->registered = 1;
+		if (!e->uses_mq && e->aux->ops.sq.elevator_registered_fn)
+			e->aux->ops.sq.elevator_registered_fn(q);
 	}
 	return error;
 }
@@ -908,6 +960,38 @@ void elv_unregister_queue(struct request_queue *q)
 	}
 }
 EXPORT_SYMBOL(elv_unregister_queue);
+
+static int elv_aux_register(struct elevator_type *e)
+{
+	struct elevator_type_aux *e_aux;
+
+	e_aux = kzalloc(sizeof(*e_aux), GFP_KERNEL);
+	if (!e_aux)
+		goto fail;
+
+	e_aux->type = e;
+	memcpy(&e_aux->ops.sq, &e->ops, sizeof(struct elevator_ops));
+	spin_lock(&elv_list_lock);
+	list_add_tail(&e_aux->list, &elv_aux_list);
+	spin_unlock(&elv_list_lock);
+
+	return 0;
+ fail:
+	elv_unregister(e);
+	return -ENOMEM;
+}
+
+static void elv_aux_unregister(struct elevator_type *e)
+{
+	struct elevator_type_aux *e_aux;
+
+	spin_lock(&elv_list_lock);
+	e_aux = __elevator_aux_find(e);
+	if (e_aux)
+		list_del_init(&e_aux->list);
+	spin_unlock(&elv_list_lock);
+	kfree(e_aux);
+}
 
 int elv_register(struct elevator_type *e)
 {
@@ -927,9 +1011,13 @@ int elv_register(struct elevator_type *e)
 			return -ENOMEM;
 	}
 
-	/* register, don't allow duplicate names */
+	/*
+	 * register, don't allow duplicate names, we never set e->ops
+	 * for mq schedulers and always set it for non-mq schedulers,
+	 * so this way is reliable to decide if it uses mq
+	 */
 	spin_lock(&elv_list_lock);
-	if (elevator_find(e->elevator_name)) {
+	if (elevator_find(e->elevator_name, !e->ops.elevator_init_fn)) {
 		spin_unlock(&elv_list_lock);
 		if (e->icq_cache)
 			kmem_cache_destroy(e->icq_cache);
@@ -938,12 +1026,14 @@ int elv_register(struct elevator_type *e)
 	list_add_tail(&e->list, &elv_list);
 	spin_unlock(&elv_list_lock);
 
-	/* print pretty message */
-	if (!strcmp(e->elevator_name, chosen_elevator) ||
-			(!*chosen_elevator &&
-			 !strcmp(e->elevator_name, CONFIG_DEFAULT_IOSCHED)))
-				def = " (default)";
+	if (elv_aux_register(e))
+		return -ENOMEM;
 
+	/* print pretty message */
+	if (elevator_match(e, chosen_elevator) ||
+			(!*chosen_elevator &&
+			 elevator_match(e, CONFIG_DEFAULT_IOSCHED)))
+		def = " (default)";
 	printk(KERN_INFO "io scheduler %s registered%s\n", e->elevator_name,
 								def);
 	return 0;
@@ -966,8 +1056,47 @@ void elv_unregister(struct elevator_type *e)
 		kmem_cache_destroy(e->icq_cache);
 		e->icq_cache = NULL;
 	}
+	elv_aux_unregister(e);
 }
 EXPORT_SYMBOL_GPL(elv_unregister);
+
+static int elevator_switch_mq(struct request_queue *q,
+			      struct elevator_type *new_e)
+{
+	int ret;
+
+	blk_mq_freeze_queue(q);
+	blk_mq_quiesce_queue(q);
+
+	if (q->elevator) {
+		if (q->elevator->registered)
+			elv_unregister_queue(q);
+		ioc_clear_queue(q);
+		elevator_exit(q, q->elevator);
+	}
+
+	ret = blk_mq_init_sched(q, new_e);
+	if (ret)
+		goto out;
+
+	if (new_e) {
+		ret = elv_register_queue(q);
+		if (ret) {
+			elevator_exit(q, q->elevator);
+			goto out;
+		}
+	}
+
+	if (new_e)
+		blk_add_trace_msg(q, "elv switch: %s", new_e->elevator_name);
+	else
+		blk_add_trace_msg(q, "elv switch: none");
+
+out:
+	blk_mq_unquiesce_queue(q);
+	blk_mq_unfreeze_queue(q);
+	return ret;
+}
 
 /*
  * switch to new_e io scheduler. be careful not to introduce deadlocks -
@@ -978,8 +1107,12 @@ EXPORT_SYMBOL_GPL(elv_unregister);
 static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 {
 	struct elevator_queue *old = q->elevator;
-	bool registered = old->registered;
+	bool old_registered = false;
 	int err;
+	struct elevator_type_aux *aux;
+
+	if (q->mq_ops)
+		return elevator_switch_mq(q, new_e);
 
 	/*
 	 * Turn on BYPASS and drain all requests w/ elevator private data.
@@ -988,42 +1121,49 @@ static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 	 * using INSERT_BACK.  All requests have SOFTBARRIER set and no
 	 * merge happens either.
 	 */
-	blk_queue_bypass_start(q);
+	if (old) {
+		old_registered = old->registered;
 
-	/* unregister and clear all auxiliary data of the old elevator */
-	if (registered)
-		elv_unregister_queue(q);
+		blk_queue_bypass_start(q);
 
-	spin_lock_irq(q->queue_lock);
-	ioc_clear_queue(q);
-	spin_unlock_irq(q->queue_lock);
+		/* unregister and clear all auxiliary data of the old elevator */
+		if (old_registered)
+			elv_unregister_queue(q);
 
+		spin_lock_irq(q->queue_lock);
+		ioc_clear_queue(q);
+		spin_unlock_irq(q->queue_lock);
+	}
+
+	aux = elevator_aux_find(new_e);
 	/* allocate, init and register new elevator */
-	err = new_e->ops.elevator_init_fn(q, new_e);
+	err = aux->ops.sq.elevator_init_fn(q, new_e);
 	if (err)
 		goto fail_init;
 
-	if (registered) {
-		err = elv_register_queue(q);
-		if (err)
-			goto fail_register;
-	}
+	err = elv_register_queue(q);
+	if (err)
+		goto fail_register;
 
 	/* done, kill the old one and finish */
-	elevator_exit(old);
-	blk_queue_bypass_end(q);
+	if (old) {
+		elevator_exit(q, old);
+		blk_queue_bypass_end(q);
+	}
 
 	blk_add_trace_msg(q, "elv switch: %s", new_e->elevator_name);
 
 	return 0;
 
 fail_register:
-	elevator_exit(q->elevator);
+	elevator_exit(q, q->elevator);
 fail_init:
 	/* switch failed, restore and re-register old elevator */
-	q->elevator = old;
-	elv_register_queue(q);
-	blk_queue_bypass_end(q);
+	if (old) {
+		q->elevator = old;
+		elv_register_queue(q);
+		blk_queue_bypass_end(q);
+	}
 
 	return err;
 }
@@ -1036,17 +1176,22 @@ static int __elevator_change(struct request_queue *q, const char *name)
 	char elevator_name[ELV_NAME_MAX];
 	struct elevator_type *e;
 
-	if (!q->elevator)
-		return -ENXIO;
+	/* Make sure queue is not in the middle of being removed */
+	if (!test_bit(QUEUE_FLAG_REGISTERED, &q->queue_flags))
+		return -ENOENT;
+
+	/*
+	 * Special case for mq, turn off scheduling
+	 */
+	if (q->mq_ops && !strncmp(name, "none", 4))
+		return elevator_switch(q, NULL);
 
 	strlcpy(elevator_name, name, sizeof(elevator_name));
-	e = elevator_get(strstrip(elevator_name), true);
-	if (!e) {
-		printk(KERN_ERR "elevator: type %s not found\n", elevator_name);
+	e = elevator_get(q, strstrip(elevator_name), true);
+	if (!e)
 		return -EINVAL;
-	}
 
-	if (!strcmp(elevator_name, q->elevator->type->elevator_name)) {
+	if (q->elevator && elevator_match(q->elevator->type, elevator_name)) {
 		elevator_put(e);
 		return 0;
 	}
@@ -1072,37 +1217,52 @@ ssize_t elv_iosched_store(struct request_queue *q, const char *name,
 {
 	int ret;
 
-	if (!q->elevator)
+	if (!(q->mq_ops || q->request_fn))
 		return count;
 
 	ret = __elevator_change(q, name);
 	if (!ret)
 		return count;
 
-	printk(KERN_ERR "elevator: switch to %s failed\n", name);
 	return ret;
 }
 
 ssize_t elv_iosched_show(struct request_queue *q, char *name)
 {
 	struct elevator_queue *e = q->elevator;
-	struct elevator_type *elv;
+	struct elevator_type *elv = NULL;
 	struct elevator_type *__e;
+	bool uses_mq = q->mq_ops != NULL;
 	int len = 0;
 
-	if (!q->elevator || !blk_queue_stackable(q))
+	if (!blk_queue_stackable(q))
 		return sprintf(name, "none\n");
 
-	elv = e->type;
+	if (!q->elevator)
+		len += sprintf(name+len, "[none] ");
+	else
+		elv = e->type;
 
 	spin_lock(&elv_list_lock);
 	list_for_each_entry(__e, &elv_list, list) {
-		if (!strcmp(elv->elevator_name, __e->elevator_name))
+		struct elevator_type_aux *aux;
+
+		if (elv && __elevator_match(elv, __e->elevator_name) &&
+		    (uses_mq == !__e->ops.elevator_init_fn)) {
 			len += sprintf(name+len, "[%s] ", elv->elevator_name);
-		else
+			continue;
+		}
+
+		aux = __elevator_aux_find(__e);
+		if (aux->uses_mq && q->mq_ops)
+			len += sprintf(name+len, "%s ", __e->elevator_name);
+		else if (!aux->uses_mq && !q->mq_ops)
 			len += sprintf(name+len, "%s ", __e->elevator_name);
 	}
 	spin_unlock(&elv_list_lock);
+
+	if (q->mq_ops && q->elevator)
+		len += sprintf(name+len, "none");
 
 	len += sprintf(len+name, "\n");
 	return len;
@@ -1119,7 +1279,7 @@ struct request *elv_rb_former_request(struct request_queue *q,
 	return NULL;
 }
 EXPORT_SYMBOL(elv_rb_former_request);
-//应该是找到IO调度算法队列里的rq的下一个rq，这个队列貌似只是靠着rq->rb_node构成的一个树形队列呀
+
 struct request *elv_rb_latter_request(struct request_queue *q,
 				      struct request *rq)
 {

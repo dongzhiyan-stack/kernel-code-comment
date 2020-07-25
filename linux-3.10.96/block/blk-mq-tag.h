@@ -9,18 +9,28 @@
 #ifdef __GENKSYMS__
 struct blk_mq_tags;
 #else
-//bio需要转换成rq,从blk_mq_tags的static_rqs取出rq
+
+//nvme_dev_add->blk_mq_alloc_tag_set->blk_mq_alloc_rq_maps->__blk_mq_alloc_rq_maps->__blk_mq_alloc_rq_map->blk_mq_alloc_rq_map
+//..->blk_mq_init_tags，中分配blk_mq_tags，设置其成员static_rqs、rqs、nr_tags、nr_reserved_tags
+
+//每个硬件队列对应一个blk_mq_tags，硬件队列结构是blk_mq_hw_ctx，二者都代表硬件队列吧，但是意义不一样，blk_mq_hw_ctx从整理上描述
+//硬件队列，blk_mq_tags主要用于从这里取出request吧
+//struct blk_mq_tag_set的tags[]指针数组保存每个硬件队列独有的blk_mq_tags
 struct blk_mq_tags {
-	unsigned int nr_tags;
+	unsigned int nr_tags;//来自set->queue_depth，一个硬件队列的队列深度，见blk_mq_init_tags()
 	unsigned int nr_reserved_tags;
 
 	atomic_t active_queues;
-
+    //
 	struct sbitmap_queue bitmap_tags;
 	struct sbitmap_queue breserved_tags;
 
 	struct request **rqs;//这里边的rqs正在使用
-	struct request **static_rqs;//bio分配rq从这里取???????
+
+	//static_rqs指针数组，该数组一个成员保存每一层队列深度对应的request结构首地址，硬件队列每一层深度，对应一个request结构
+	//见__blk_mq_alloc_rq_map->blk_mq_alloc_rqs
+	struct request **static_rqs;//bio需要转换成rq,从static_rqs取出rq
+	//blk_mq_alloc_rqs()中分配page,然后添加到page_list，
 	struct list_head page_list;
 };
 #endif

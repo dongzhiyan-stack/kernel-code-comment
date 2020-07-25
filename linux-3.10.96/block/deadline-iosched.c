@@ -31,6 +31,19 @@ struct deadline_data {
 	/*
 	 * requests (deadline_rq s) are present on both sort_list and fifo_list
 	 */
+	 /*deadline调度算法的红黑树，在插入req时，就是按照req代表的扇区起始地址来对比，谁的扇区起始地址小，谁排列靠左.
+	  见 deadline_add_request->deadline_add_rq_rb->elv_rb_add插入req和elv_merge->deadline_merge->elv_rb_find遍历req。
+	  blk_mq_sched_try_merge->elv_merged_request->deadline_merged_request重新req排序，针对deadline调度算法的红黑树队列，
+	  对前项合并后的req进行重新排序，因为前项合并后的req扇区起始地址变小了，既然红黑树队列对req排序规则是谁的扇区起始地址小谁靠左,
+	  那就要对这个req重新再红黑树队列里排序。
+	  
+	  同样的，deadline调度算法的hash队列，也是一种req队列，但排序规则是req的扇区结束地址，为什么这么说，
+	  看hash添加时的elv_rqhash_add函数里的hash_add(e->hash, &rq->hash, rq_hash_key(rq))，rq_hash_key(rq)就是hash key，req扇区结束地址。
+	  所以在elv_merged_request->elv_rqhash_reposition中，是req进行了后项合并，扇区结束地址变大了，那就要对这个req进行在hash表中冲洗排序。
+	  blk_queue_bio->add_acct_request->__elv_add_request->elv_rqhash_add添加，elv_merge->elv_rqhash_find遍历
+	  blk_mq_sched_try_merge->elv_merged_request->elv_rqhash_reposition重新排序。对后项合并后的req进行一次重新排序
+	*/
+	
 	//插入req的红黑树队列的头结点，两个成员分为读和写.红黑树队列中的req排序的规则是req的磁盘起始扇区，
 	//可以认为是按照磁盘起始扇区从小到大排列的吧，见deadline_add_request()->deadline_add_rq_rb。
 	struct rb_root sort_list[2];
@@ -70,6 +83,7 @@ static void deadline_move_request(struct deadline_data *, struct request *);
 static inline struct rb_root *
 deadline_rb_root(struct deadline_data *dd, struct request *rq)
 {
+    //取出调度算法的 读或者写红黑树队列头rb_root
 	return &dd->sort_list[rq_data_dir(rq)];
 }
 
@@ -140,6 +154,8 @@ static void deadline_remove_request(struct request_queue *q, struct request *rq)
 	deadline_del_rq_rb(dd, rq);
 }
 
+//该函数是在调度算法的 读或写红黑树队列里，遍历req,找到req起始扇区地址等于bio_end_sector(bio)的req，
+//如果找到匹配的req，说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并
 static int
 deadline_merge(struct request_queue *q, struct request **req, struct bio *bio)
 {
@@ -152,11 +168,12 @@ deadline_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	 */
 	if (dd->front_merges) {
 		sector_t sector = bio_end_sector(bio);
-
+        
+         //该函数是在调度算法的 读或写红黑树队列里，遍历req,找到req起始扇区地址等于bio_end_sector(bio)的req返回，否则返回NULL
 		__rq = elv_rb_find(&dd->sort_list[bio_data_dir(bio)], sector);
 		if (__rq) {
 			BUG_ON(sector != blk_rq_pos(__rq));
-
+            //如果找到匹配的req，说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并
 			if (elv_rq_merge_ok(__rq, bio)) {
 				ret = ELEVATOR_FRONT_MERGE;
 				goto out;
@@ -178,10 +195,12 @@ static void deadline_merged_request(struct request_queue *q,
 	/*
 	 * if the merge was a front merge, we need to reposition request
 	 */
-	//如果是前项合并
-	if (type == ELEVATOR_FRONT_MERGE) {
+
+    //如果是前项合并，则把要把req从调度算法队列红黑树里剔除掉，重新插入到红黑树。为什么只针对前项合并才对req重排，后项不合并呢?
+    if (type == ELEVATOR_FRONT_MERGE) {
 		elv_rb_del(deadline_rb_root(dd, req), req);//也是删除req原来位置
-		deadline_add_rq_rb(dd, req);//重新把req添加到新的位置
+		//按照req的磁盘起始地址把req添加到红黑树队列里，这个红黑树里req的排列规则是，谁的磁盘起始地址小谁靠左
+		deadline_add_rq_rb(dd, req);
 	}
 }
 //剔除next，并做一些删除req的后续处理

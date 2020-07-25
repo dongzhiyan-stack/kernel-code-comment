@@ -8,15 +8,16 @@
 
 struct blk_mq_tag_set;
 
-//描述软件队列
+//描述软件队列，每个CPU一个
 struct blk_mq_ctx {
 	struct {
 		spinlock_t		lock;
-		struct list_head	rq_list;//当rq没有调度器时，存放带传输的rq????????
+        //blk_mq_make_request->blk_mq_merge_bio->blk_mq_attempt_merge，就是依次遍历软件队列ctx->rq_list链表上的req，然后看req能否与bio前项或者后项合并
+		struct list_head	rq_list;//软件队列存放req的链表
 	}  ____cacheline_aligned_in_smp;
 
-	unsigned int		cpu;
-	unsigned int		index_hw;
+	unsigned int		cpu;//对应的CPU编号，根据这个CPU编号去寻找硬件队列结构体，看blk_mq_make_request->blk_mq_sched_bio_merge->__blk_mq_sched_bio_merge->blk_mq_map_queue
+	unsigned int		index_hw;//blk_mq_map_swqueue()中赋值
 
 	RH_KABI_DEPRECATE(unsigned int, ipi_redirect)
 
@@ -27,7 +28,7 @@ struct blk_mq_ctx {
 	/* incremented at completion time */
 	unsigned long		____cacheline_aligned_in_smp rq_completed[2];
 
-	struct request_queue	*queue;
+	struct request_queue	*queue;//磁盘硬件唯一的队列
 	struct kobject		kobj;
 } ____cacheline_aligned_in_smp;
 
@@ -86,10 +87,13 @@ void blk_mq_try_issue_list_directly(struct blk_mq_hw_ctx *hctx,
  */
 int blk_mq_map_queues(struct blk_mq_tag_set *set);
 extern int blk_mq_hw_queue_to_node(unsigned int *map, unsigned int);
-
+//根据CPU编号先从q->mq_map[cpu]找到硬件队列编号，再q->queue_hw_ctx[硬件队列编号]返回硬件队列唯一的blk_mq_hw_ctx结构体
+//如果硬件队列只有一个，那总是返回0号硬件队列的blk_mq_hw_ctx
 static inline struct blk_mq_hw_ctx *blk_mq_map_queue(struct request_queue *q,
 		int cpu)
 {
+    //q->queue_hw_ctx[]数组保存的是每个硬件队列的blk_mq_hw_ctx结构体指针，q->mq_map[cpu]保存的是硬件队列编号，
+    //这样就有问题了，如果只有一个硬件队列怎么办?q->mq_map[0~CPU个数-1]难道都是0，即硬件队列0编号，是的，全是0，返回q->queue_hw_ctx[0]
 	return q->queue_hw_ctx[q->mq_map[cpu]];
 }
 
@@ -117,6 +121,7 @@ static inline struct blk_mq_ctx *__blk_mq_get_ctx(struct request_queue *q,
  * care about preemption, since we know the ctx's are persistent. This does
  * mean that we can't rely on ctx always matching the currently running CPU.
  */
+//从q->queue_ctx得到每个CPU专属的软件队列
 static inline struct blk_mq_ctx *blk_mq_get_ctx(struct request_queue *q)
 {
 	return __blk_mq_get_ctx(q, get_cpu());
@@ -130,19 +135,21 @@ static inline void blk_mq_put_ctx(struct blk_mq_ctx *ctx)
 struct blk_mq_alloc_data {
 	/* input parameter */
 	struct request_queue *q;
-	unsigned int flags;
+	unsigned int flags;//blk_mq_sched_get_request()有调度器设置BLK_MQ_REQ_INTERNAL
 	unsigned int shallow_depth;
 
 	/* input & output parameter */
-	struct blk_mq_ctx *ctx;
-	struct blk_mq_hw_ctx *hctx;
+	struct blk_mq_ctx *ctx;//软件队列
+	struct blk_mq_hw_ctx *hctx;//硬件队列
 };
 
 static inline struct blk_mq_tags *blk_mq_tags_from_data(struct blk_mq_alloc_data *data)
 {
+    //有调度器时返回硬件队列的hctx->sched_tags
 	if (data->flags & BLK_MQ_REQ_INTERNAL)
 		return data->hctx->sched_tags;
-
+    
+    //无调度器时返回硬件队列的hctx->tags
 	return data->hctx->tags;
 }
 

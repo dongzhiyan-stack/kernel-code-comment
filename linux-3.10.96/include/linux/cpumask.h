@@ -23,9 +23,9 @@ typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
 #define cpumask_bits(maskp) ((maskp)->bits)
 
 #if NR_CPUS == 1
-#define nr_cpu_ids		1
+#define nr_cpu_ids		1//no，这里不成立
 #else
-extern int nr_cpu_ids;
+extern int nr_cpu_ids;//这里，是CPU的个数
 #endif
 
 #ifdef CONFIG_CPUMASK_OFFSTACK
@@ -252,6 +252,7 @@ int cpumask_any_but(const struct cpumask *mask, unsigned int cpu);
  * @cpu: cpu number (< nr_cpu_ids)
  * @dstp: the cpumask pointer
  */
+//dstp->bits变量里对应的cpu那一位置1
 static inline void cpumask_set_cpu(unsigned int cpu, struct cpumask *dstp)
 {
 	set_bit(cpumask_check(cpu), cpumask_bits(dstp));

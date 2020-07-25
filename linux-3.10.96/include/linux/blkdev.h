@@ -130,7 +130,7 @@ struct request {
 	int cpu;
 
 	/* the following two fields are internal, NEVER access directly */
-    //req代表的磁盘空间范围
+    //req代表的磁盘空间大小
 	unsigned int __data_len;	/* total data len */
     //req代表的磁盘范围起始扇区
 	sector_t __sector;		/* sector cursor *///struct bio
@@ -355,6 +355,7 @@ struct queue_limits {
 	RH_KABI_USE(3, struct queue_limits_aux *limits_aux)
 };
 //貌似在blk_alloc_queue_node()分配struct request_queue
+//块设备初始化时通过blk_mq_init_queue()创建request_queue并对大部分成员初始化，还有分配软件、硬件队列，
 struct request_queue {
 	/*
 	 * Together with queue_head for cacheline sharing
@@ -386,26 +387,28 @@ struct request_queue {
 	prep_rq_fn		*prep_rq_fn;//mmc_init_queue()中赋值为mmc_prep_request
 	unprep_rq_fn		*unprep_rq_fn;
 	merge_bvec_fn		*merge_bvec_fn;
-	softirq_done_fn		*softirq_done_fn;
+	softirq_done_fn		*softirq_done_fn;//nvme_pci_complete_rq   blk_queue_softirq_done中设置
 	rq_timed_out_fn		*rq_timed_out_fn;
 	dma_drain_needed_fn	*dma_drain_needed;
 	lld_busy_fn		*lld_busy_fn;
 
-	RH_KABI_CONST struct blk_mq_ops *mq_ops;//跟硬件有关的操作函数
-
+	RH_KABI_CONST struct blk_mq_ops *mq_ops;//跟硬件有关的操作函数，指向 nvme_mq_ops
+    //这个数组保存了每个CPU对应的硬件队列编号，blk_mq_init_allocated_queue()被赋值为struct blk_mq_tag_set *set->mq_map
+    //数组下标是CPU编号
 	unsigned int		*mq_map;
 
-    //软件队列，每个cpu一个，blk_mq_init_queue->blk_mq_init_allocated_queue，中分配blk_mq_ctx
+   
 	/* sw queues */
-	RH_KABI_REPLACE(struct blk_mq_ctx	*queue_ctx,
-		          struct blk_mq_ctx __percpu	*queue_ctx)
-
+	//RH_KABI_REPLACE(struct blk_mq_ctx	*queue_ctx,-------------原生有RH_KABI_REPLACE，影响代码阅读，取出掉
+	//软件队列，每个cpu一个，blk_mq_init_queue中分配blk_mq_ctx
+	struct blk_mq_ctx __percpu	*queue_ctx;
+    //队列个数，blk_mq_init_allocated_queue()中设置为CPU个数
 	unsigned int		nr_queues;
 
 	/* hw dispatch queues */
-    //blk_mq_init_queue->blk_mq_init_allocated_queue，中分配blk_mq_hw_ctx
-	struct blk_mq_hw_ctx	**queue_hw_ctx;//硬件队列，
-	unsigned int		nr_hw_queues;//硬件队列数量???????????????
+    //blk_mq_init_queue->blk_mq_init_allocated_queue->blk_mq_realloc_hw_ctxs中分配blk_mq_hw_ctx结构并初始化
+	struct blk_mq_hw_ctx	**queue_hw_ctx;//保存每一个硬件队列唯一对应的blk_mq_hw_ctx结构体指针
+	unsigned int		nr_hw_queues;//硬件队列数量，来自set->nr_hw_queues,blk_mq_realloc_hw_ctxs()最后被设置为1，不知道为啥???????
 
 	/*
 	 * Dispatch queue sorting
@@ -471,7 +474,7 @@ struct request_queue {
 	/*
 	 * queue settings
 	 */
-	//最多的rq请求数,不是当前的rq数
+	//最多的rq请求数,不是当前的rq数，硬件队列有关的，blk_mq_sched_alloc_tags()中用到的。blk_mq_init_allocated_queue被设置为硬件队列深度。
 	unsigned long		nr_requests;	/* Max # of requests */
 	unsigned int		nr_congestion_on;
 	unsigned int		nr_congestion_off;
@@ -554,7 +557,8 @@ struct request_queue {
 
 	RH_KABI_EXTEND(unprep_rq_fn		*unprep_rq_fn)
     //blk_mq_init_queue->blk_mq_init_allocated_queue->blk_mq_add_queue_tag_set 设置blk_mq_tag_set
-	RH_KABI_EXTEND(struct blk_mq_tag_set	*tag_set)
+	//RH_KABI_EXTEND(struct blk_mq_tag_set	*tag_set)
+	struct blk_mq_tag_set	*tag_set;
 	RH_KABI_EXTEND(struct list_head		tag_set_list)
 
 	RH_KABI_EXTEND(struct list_head		requeue_list)
@@ -566,13 +570,18 @@ struct request_queue {
 	RH_KABI_EXTEND(struct percpu_ref	q_usage_counter)
 	RH_KABI_EXTEND(bool			mq_sysfs_init_done)
 	//blk_mq_init_queue->blk_mq_init_allocated_queue 中分配初始化
-	RH_KABI_EXTEND(struct work_struct	timeout_work)
-	RH_KABI_EXTEND(struct delayed_work	requeue_work)
+	//RH_KABI_EXTEND(struct work_struct	timeout_work)
+	struct work_struct	timeout_work;
+	//RH_KABI_EXTEND(struct delayed_work	requeue_work)
+	struct delayed_work	requeue_work;
 	RH_KABI_EXTEND(struct blk_queue_stats	*stats)
-	RH_KABI_EXTEND(struct blk_stat_callback	*poll_cb)
+	//blk_mq_init_allocated_queue()中初始化
+	//RH_KABI_EXTEND(struct blk_stat_callback	*poll_cb)
+	struct blk_stat_callback	*poll_cb;
 	RH_KABI_EXTEND(struct blk_rq_stat	poll_stat[2])
 	RH_KABI_EXTEND(atomic_t		shared_hctx_restart)
-	RH_KABI_EXTEND(unsigned int		queue_depth)
+	//RH_KABI_EXTEND(unsigned int		queue_depth)
+	unsigned int		queue_depth;
 
 	/*
 	 * The flag need to be set if this queue is blk-mq queue and at

@@ -1808,6 +1808,7 @@ bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
  *
  * Caller must ensure !blk_queue_nomerges(q) beforehand.
  */
+//遍历当前进程plug_list链表上的所有req，检查bio和req代表的磁盘范围是否挨着，挨着则把bio合并到req
 bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
 			    unsigned int *request_count,
 			    struct request **same_queue_rq)
@@ -1816,17 +1817,17 @@ bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
 	struct request *rq;
 	bool ret = false;
 	struct list_head *plug_list;
-
+    
 	plug = current->plug;
 	if (!plug)
 		goto out;
 	*request_count = 0;
 
-	if (q->mq_ops)
+	if (q->mq_ops)//yes，多队列模式下plug_list是plug->mq_list，单队列模式下才应该是下边的plug->list
 		plug_list = &plug->mq_list;
 	else
 		plug_list = &plug->list;
-
+    //遍历当前进程plug_list链表上的req
 	list_for_each_entry_reverse(rq, plug_list, queuelist) {
 		int el_ret;
 
@@ -1843,13 +1844,15 @@ bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
 
 		if (rq->q != q || !blk_rq_merge_ok(rq, bio))
 			continue;
-
+        //检查bio和req代表的磁盘范围是否挨着，挨着则可以合并
 		el_ret = blk_try_merge(rq, bio);
 		if (el_ret == ELEVATOR_BACK_MERGE) {
+            //前向合并
 			ret = bio_attempt_back_merge(q, rq, bio);
 			if (ret)
 				break;
 		} else if (el_ret == ELEVATOR_FRONT_MERGE) {
+		    //前项合并
 			ret = bio_attempt_front_merge(q, rq, bio);
 			if (ret)
 				break;
