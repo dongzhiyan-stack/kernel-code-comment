@@ -52,6 +52,7 @@ static bool blk_mq_hctx_has_pending(struct blk_mq_hw_ctx *hctx)
 /*
  * Mark this ctx as having pending work in this hardware queue
  */
+//¸ÃÈí¼þ¶ÓÁÐÓÐreqÁË£¬¶ÔÓ¦µÄÓ²¼þ¶ÓÁÐhctx->ctx_mapÀïµÄbitÎ»±»ÖÃ1£¬±íÊ¾¼¤»î
 static void blk_mq_hctx_mark_pending(struct blk_mq_hw_ctx *hctx,
 				     struct blk_mq_ctx *ctx)
 {
@@ -282,6 +283,7 @@ void blk_mq_rq_ctx_init(struct request_queue *q, struct blk_mq_ctx *ctx,
 	INIT_LIST_HEAD(&rq->queuelist);
 	/* csd/requeue_work/fifo_time is initialized before use */
 	rq->q = q;
+    //¸³ÖµÈí¼þ¶ÓÁÐ
 	rq->mq_ctx = ctx;
 	rq->cmd_flags |= rw_flags;
 	/* do not touch atomic flags, it needs atomic ops against the timer */
@@ -322,18 +324,25 @@ void blk_mq_rq_ctx_init(struct request_queue *q, struct blk_mq_ctx *ctx,
 }
 EXPORT_SYMBOL_GPL(blk_mq_rq_ctx_init);
 
+//´ÓÓ²¼þ¶ÓÁÐÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éÀïµÃµ½¿ÕÏÐµÄrequest¡£»ñÈ¡Ê§°ÜÔòÆô¶¯Ó²¼þIOÊý¾ÝÅÉ·¢£¬
+//Ö®ºóÔÙ³¢ÊÔ´Óblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éÀïµÃµ½¿ÕÏÐµÄrequest²¢·µ»Ø¡£
 struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data, int rw)
 {
 	struct request *rq;
 	unsigned int tag;
 
+   //´ÓÓ²¼þ¶ÓÁÐÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éÀïµÃµ½¿ÕÏÐµÄrequest¡£»ñÈ¡Ê§°ÜÔòÆô¶¯Ó²¼þIOÊý¾ÝÅÉ·¢£¬
+   //Ö®ºóÔÙ³¢ÊÔ´Óblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éÀïµÃµ½¿ÕÏÐµÄrequest¡£×¢Òâ£¬ÕâÀï·µ»ØµÄÊÇ¿ÕÏÐµÄrequestÔÚ
+   //static_rqs[]Êý×éµÄÏÂ±ê
 	tag = blk_mq_get_tag(data);
 	if (tag != BLK_MQ_TAG_FAIL) {
+        //ÓÐµ÷¶ÈÆ÷Ê±·µ»ØÓ²¼þ¶ÓÁÐµÄhctx->sched_tags,ÎÞµ÷¶ÈÆ÷Ê±·µ»ØÓ²¼þ¶ÓÁÐµÄhctx->tags
 		struct blk_mq_tags *tags = blk_mq_tags_from_data(data);
-
+        
+        //¿´µ½Ã»£¬ÕâÀï²ÅÊÇ´Ótags->static_rqs[tag]µÃµ½¿ÕÏÐµÄreq
 		rq = tags->static_rqs[tag];
 
-		if (data->flags & BLK_MQ_REQ_INTERNAL) {
+		if (data->flags & BLK_MQ_REQ_INTERNAL) {//µ÷¶ÈËã·¨
 			rq->tag = -1;
 			__rq_aux(rq, data->q)->internal_tag = tag;
 		} else {
@@ -341,11 +350,13 @@ struct request *__blk_mq_alloc_request(struct blk_mq_alloc_data *data, int rw)
 				rq->cmd_flags = REQ_MQ_INFLIGHT;
 				atomic_inc(&data->hctx->nr_active);
 			}
+            //¸³ÖµÎª¿ÕÏÐreqÔÚblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éµÄÏÂ±ê
 			rq->tag = tag;
 			__rq_aux(rq, data->q)->internal_tag = -1;
+            //ÕâÀï±ß±£´æµÄreqÊÇ¸Õ´Óstatic_rqs[]µÃµ½µÄ¿ÕÏÐµÄreq
 			data->hctx->tags->rqs[rq->tag] = rq;
 		}
-
+        //¶ÔÐÂ·ÖÅäµÄreq½øÐÐ³õÊ¼»¯£¬¸³ÖµÈí¼þ¶ÓÁÐÉ¶µÄ
 		blk_mq_rq_ctx_init(data->q, data->ctx, rq, rw);
 		if (data->flags & BLK_MQ_REQ_PREEMPT)
 			rq->cmd_flags |= REQ_PREEMPT;
@@ -477,6 +488,7 @@ EXPORT_SYMBOL_GPL(blk_mq_free_request);
 
 inline void __blk_mq_end_request(struct request *rq, int error)
 {
+    //ÓÐreq´«ÊäÍê³ÉÁË£¬Ôö¼Óios¡¢ticks¡¢time_in_queue¡¢io_ticks¡¢flightµÈÊ¹ÓÃ¼ÆÊý
 	blk_account_io_done(rq);
 
 	if (rq->end_io) {
@@ -488,11 +500,15 @@ inline void __blk_mq_end_request(struct request *rq, int error)
 	}
 }
 EXPORT_SYMBOL(__blk_mq_end_request);
-
+//ÓÐreq´«ÊäÍê³ÉÁË£¬Ôö¼Óios¡¢ticks¡¢time_in_queue¡¢io_ticks¡¢flight¡¢sectorsÉÈÇøÊýµÈÊ¹ÓÃ¼ÆÊý¡£
+//ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓÐreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üÐÂbio½á¹¹Ìå³ÉÔ±Êý¾Ý£¬Ö´ÐÐbioµÄ»Øµ÷º¯Êý.»¹¸üÐÂeq->__data_lenºÍreq->buffer¡£
 void blk_mq_end_request(struct request *rq, int error)
 {
+    /* 1 Ôö¼ÓsectorsÉÈÇøÊýIOÊ¹ÓÃ¼ÆÊý£¬¼´´«ÊäµÄÉÈÇøÊý¡£¸üÐÂreq->__data_lenºÍreq->buffer
+     2 ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓÐreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üÐÂbio½á¹¹Ìå³ÉÔ±Êý¾Ý£¬Ö´ÐÐbioµÄ»Øµ÷º¯Êý*/
 	if (blk_update_request(rq, error, blk_rq_bytes(rq)))
 		BUG();
+    //ÓÐreq´«ÊäÍê³ÉÁË£¬Ôö¼Óios¡¢ticks¡¢time_in_queue¡¢io_ticks¡¢flightµÈÊ¹ÓÃ¼ÆÊý
 	__blk_mq_end_request(rq, error);
 }
 EXPORT_SYMBOL(blk_mq_end_request);
@@ -619,7 +635,7 @@ void blk_mq_start_request(struct request *rq)
 
 	trace_block_rq_issue(q, rq);
 
-	rq->resid_len = blk_rq_bytes(rq);
+	rq->resid_len = blk_rq_bytes(rq);//req´ú±íµÄ´ÅÅÌlen
 	if (unlikely(blk_bidi_rq(rq)))
 		rq->next_rq->resid_len = blk_rq_bytes(rq->next_rq);
 
@@ -627,7 +643,7 @@ void blk_mq_start_request(struct request *rq)
 		blk_stat_set_issue_time(&rq_aux(rq)->issue_stat);
 		rq->cmd_flags |= REQ_STATS;
 	}
-
+    //°ÑreqÌí¼Óµ½q->timeout_list£¬²¢ÇÒÆô¶¯q->timeout
 	blk_add_timer(rq);
 
 	/*
@@ -1014,9 +1030,11 @@ static inline unsigned int queued_to_index(unsigned int queued)
 
 	return min(BLK_MQ_MAX_DISPATCH_ORDER - 1, ilog2(queued) + 1);
 }
-
+//´ÓÓ²¼þ¶ÓÁÐhctxÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓÐ¿ÕÏÐÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬Ôòhctx->tags->rqs[rq->tag]=rq£¬
+//rq¼´reqÀ´×Ôµ±Ç°½ø³ÌµÄplug->mq_listÁ´±í£¬ÏÖÔÚ¸³Öµµ½ÁËÓ²¼þ¶ÓÁÐhctx->tags->rqs[rq->tag]
+//½á¹¹£¬¾Í½¨Á¢ÁËreqÓëÓ²¼þ¶ÓÁÐµÄ¹ØÏµ°É
 bool blk_mq_get_driver_tag(struct request *rq, struct blk_mq_hw_ctx **hctx,
-			   bool wait)
+			   bool wait)//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í
 {
 	struct blk_mq_alloc_data data = {
 		.q = rq->q,
@@ -1026,22 +1044,26 @@ bool blk_mq_get_driver_tag(struct request *rq, struct blk_mq_hw_ctx **hctx,
 
 	if (rq->tag != -1)
 		goto done;
-
+    //ÅÐ¶ÏtagÊÇ·ñÔ¤ÁôµÄ
 	if (blk_mq_tag_is_reserved(data.hctx->sched_tags, rq_aux(rq)->internal_tag))
 		data.flags |= BLK_MQ_REQ_RESERVED;
 
+    //´ÓÓ²¼þ¶ÓÁÐÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éÀïµÃµ½¿ÕÏÐµÄrequest¡£»ñÈ¡Ê§°ÜÔòÆô¶¯Ó²¼þIOÊý¾ÝÅÉ·¢£¬
+   //Ö®ºóÔÙ³¢ÊÔ´Óblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éÀïµÃµ½¿ÕÏÐµÄrequest
 	rq->tag = blk_mq_get_tag(&data);
 	if (rq->tag >= 0) {
 		if (blk_mq_tag_busy(data.hctx)) {
 			rq->cmd_flags |= REQ_MQ_INFLIGHT;
 			atomic_inc(&data.hctx->nr_active);
 		}
+        //¶Ôblk_mq_tagsµÄrqs[rq->tag]¸³Öµ
 		data.hctx->tags->rqs[rq->tag] = rq;
 	}
 
 done:
 	if (hctx)
 		*hctx = data.hctx;
+    //·ÖÅä³É¹¦·µ»Ø1
 	return rq->tag != -1;
 }
 
@@ -1226,7 +1248,7 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 			bd.last = !blk_mq_get_driver_tag(nxt, NULL, false);
 		}
 
-		ret = q->mq_ops->queue_rq(hctx, &bd);
+		ret = q->mq_ops->queue_rq(hctx, &bd);//nvme_queue_rq
 		switch (ret) {
 		case BLK_MQ_RQ_QUEUE_OK:
 			queued++;
@@ -1387,6 +1409,7 @@ void blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs)
 }
 EXPORT_SYMBOL(blk_mq_delay_run_hw_queue);
 
+//Æô¶¯Ó²¼þ¶ÓÁÐÉÏµÄreqÅÉ·¢
 bool blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async)
 {
 	int srcu_idx;
@@ -1563,19 +1586,22 @@ void __blk_mq_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
  * Should only be used carefully, when the caller knows we want to
  * bypass a potential IO scheduler on the target device.
  */
+//°ÑreqÌí¼Óµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢
 void blk_mq_request_bypass_insert(struct request *rq, bool run_queue)
 {
 	struct blk_mq_ctx *ctx = rq->mq_ctx;
 	struct blk_mq_hw_ctx *hctx = blk_mq_map_queue(rq->q, ctx->cpu);
 
 	spin_lock(&hctx->lock);
+    //°ÑreqÌí¼Óµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ
 	list_add_tail(&rq->queuelist, &hctx->dispatch);
 	spin_unlock(&hctx->lock);
 
-	if (run_queue)
+	if (run_queue)//Æô¶¯reqÅÉ·¢
 		blk_mq_run_hw_queue(hctx, false);
 }
-
+//°ÑlistÁ´±íµÄ³ÉÔ±²åÈëµ½µ½ctx->rq_listÁ´±íºó±ß£¬È»ºó¶ÔlistÇå0£¬Õâ¸ölistÁ´±íÔ´×Ôµ±Ç°½ø³ÌµÄplugÁ´±í¡£Ã¿Ò»¸öreqÔÚ·ÖÅäÊ±£¬
+//req->mq_ctx»áÖ¸Ïòµ±Ç°CPUµÄÈí¼þ¶ÓÁÐ£¬µ«ÊÇÕæÕý°Ñreq²åÈëµ½Èí¼þ¶ÓÁÐ£¬¿´×ÅµÃÖ´ÐÐblk_mq_insert_requests²ÅÐÐÑ½
 void blk_mq_insert_requests(struct blk_mq_hw_ctx *hctx, struct blk_mq_ctx *ctx,
 			    struct list_head *list)
 
@@ -1592,7 +1618,9 @@ void blk_mq_insert_requests(struct blk_mq_hw_ctx *hctx, struct blk_mq_ctx *ctx,
 	}
 
 	spin_lock(&ctx->lock);
+    //°ÑlistÁ´±íµÄ³ÉÔ±²åÈëµ½µ½ctx->rq_listÁ´±íºó±ß£¬È»ºó¶ÔlistÇå0£¬Õâ¸ölistÁ´±íÔ´×Ôµ±Ç°½ø³ÌµÄplugÁ´±í
 	list_splice_tail_init(list, &ctx->rq_list);
+    //¸ÃÈí¼þ¶ÓÁÐÓÐreqÁË£¬¶ÔÓ¦µÄÓ²¼þ¶ÓÁÐhctx->ctx_mapÀïµÄbitÎ»±»ÖÃ1£¬±íÊ¾¼¤»î
 	blk_mq_hctx_mark_pending(hctx, ctx);
 	spin_unlock(&ctx->lock);
 }
@@ -1606,42 +1634,63 @@ static int plug_ctx_cmp(void *priv, struct list_head *a, struct list_head *b)
 		 (rqa->mq_ctx == rqb->mq_ctx &&
 		  blk_rq_pos(rqa) < blk_rq_pos(rqb)));
 }
-
+/*È¡³öµ±Ç°½ø³Ìplug->mq_listÁ´±íÉÏµÄreq£¬Èç¹ûÓÐIOµ÷¶ÈËã·¨£¬Ôò°Ñreq²åÈëelvµÄhash¶ÓÁÐ£¬
+mq-deadlineËã·¨µÄ»¹Òª²åÈëºìºÚÊ÷ºÍfifo¶ÓÁÐ¡£Èç¹ûÃ»ÓÐIOµ÷¶ÈËã·¨£¬ÔÚÓ²¼þ¶ÓÁÐ¿ÕÏÐÊ±£¬³¢ÊÔ°Ñplug->mq_listÁ´±íµÄÉÏµÄreq½¨Á¢Óë
+Ó²¼þ¶ÓÁÐhctxµÄÁªÏµ£¬»¹»á°Ñreq²åÈëµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬Ö´ÐÐblk_mq_run_hw_queue¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢¡£
+Èç¹ûÓ²¼þ¶ÓÁÐÈÝÄÉµÄreq´ïµ½ÉÏÏÞ£¬Ó²¼þ¶ÓÁÐ±äÃ¦£¬Ôò°ÑÊ£ÓàµÄplug->mq_listÁ´±íµÄÉÏµÄreq²åÈëµ½Èí¼þ¶ÓÁÐctx->rq_listÁ´±íÉÏ¡£
+Õâ¸ö¹ý³ÌÉæ¼°µ½ÁËplug->mq_listÁ´±íÉÏµÄreq²åÈëÓ²¼þ¶ÓÁÐºÍÈí¼þ¶ÓÁÐµÄÖî¶àÏ¸½Ú´¦Àí¡£*/
 void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 {
 	struct blk_mq_ctx *this_ctx;
 	struct request_queue *this_q;
 	struct request *rq;
 	LIST_HEAD(list);
-	LIST_HEAD(ctx_list);
+	LIST_HEAD(ctx_list);//¾Ö²¿ctxÁ´±í
 	unsigned int depth;
-
+    //¾ÍÊÇÁîlistÖ¸Ïòplug->mq_listµÄ°É
 	list_splice_init(&plug->mq_list, &list);
-
+    //¶Ôplug->mq_listÁ´±íÉÏµÄreq½øÐÐÅÅÐò°É£¬ÅÅÐò¹æÔòÊÇreqµÄÉÈÇøÆðÊ¼µØÖ·
 	list_sort(NULL, &list, plug_ctx_cmp);
 
 	this_q = NULL;
 	this_ctx = NULL;
 	depth = 0;
 
+    //Ñ­»·Ö±µ½plug->mq_listÁ´±íÉÏµÄreq¿Õ
 	while (!list_empty(&list)) {
+        //plug->mq_listÈ¡Ò»¸öreq
 		rq = list_entry_rq(list.next);
+        //É¾³ýreq
 		list_del_init(&rq->queuelist);
 		BUG_ON(!rq->q);
-		if (rq->mq_ctx != this_ctx) {
-			if (this_ctx) {
-				trace_block_unplug(this_q, depth, from_schedule);
-				blk_mq_sched_insert_requests(this_q, this_ctx,
-								&ctx_list,
-								from_schedule);
-			}
+        
+        
+        //this_ctxÊÇÉÏÒ»¸öreqµÄÈí¼þ¶ÓÁÐ£¬rq->mq_ctxÊÇµ±Ç°reqµÄÈí¼þ¶ÓÁÐ¡£¶þÕßÈí¼þ¶ÓÁÐÏàµÈÔòif²»³ÉÁ¢£¬°ÑreqÌí¼Óµ½ctx_listÁ´±í
+        //Èç¹û¶þÕßÈí¼þ¶ÓÁÐ²»µÈ£¬ÔòÖ´ÐÐifÀï±ßµÄblk_mq_sched_insert_requests°Ñctx_listÁ´±íÉÏµÄreq²åÈëµ½Ó²¼þ¶ÓÁÐ»òÕßÈí¼þ¶ÓÁÐ£¬
+        //Í¬Ê±°Ñctx_listÁ´±íÇå¿Õ¡£ÖØ¸´ÉÏÊöÑ­»·
 
+        //µÚÒ»´ÎÑ­»·¿Ï¶¨³ÉÁ¢£¬reqÔÚ·ÖÅäºó¾Í»á³õÊ¼»¯Ö¸Ïòµ±Ç°CPUµÄÈí¼þ¶ÓÁÐ¡£
+        if (rq->mq_ctx != this_ctx) {
+            
+			if (this_ctx) {//µÚ¶þ´ÎÑ­»·¿ªÊ¼²Å³ÉÁ¢
+				trace_block_unplug(this_q, depth, from_schedule);
+                
+//Èç¹ûÓÐIOµ÷¶ÈËã·¨£¬Ôò°Ñplug->mq_listÁ´±íÉÏµÄreq²åÈëelvµÄhash¶ÓÁÐ£¬mq-deadlineËã·¨µÄ»¹Òª²åÈëºìºÚÊ÷ºÍfifo¶ÓÁÐ¡£Èç¹ûÃ»ÓÐIOµ÷¶ÈËã·¨£¬ÔÚÓ²¼þ¶ÓÁÐ
+//¿ÕÏÐÊ±£¬³¢ÊÔ°Ñplug->mq_listÁ´±íµÄÉÏµÄreq½¨Á¢ÓëÓ²¼þ¶ÓÁÐhctxµÄÁªÏµ£¬»¹»á°Ñreq²åÈëµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬Ö´ÐÐblk_mq_run_hw_queue
+//¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢¡£Èç¹ûÓ²¼þ¶ÓÁÐÈÝÄÉµÄreq´ïµ½ÉÏÏÞ£¬Ó²¼þ¶ÓÁÐ±äÃ¦£¬Ôò°ÑÊ£ÓàµÄplug->mq_listÁ´±íµÄÉÏµÄreq²åÈëµ½Èí¼þ¶ÓÁÐctx->rq_listÁ´±íÉÏ¡£
+				blk_mq_sched_insert_requests(this_q, this_ctx,
+								&ctx_list,//ctx_listÁÙÊ±±£´æÁËµ±Ç°½ø³Ìplug->mq_listÁ´±íÉÏµÄ²¿·Öreq
+								from_schedule);//from_schedule´Óblk_finish_plugºÍblk_mq_make_request¹ýÀ´µÄÊÇfalse
+			}
+            //this_ctx¸³ÖµÎªreqÈí¼þ¶ÓÁÐ£¬ºÎÀí?
 			this_ctx = rq->mq_ctx;
 			this_q = rq->q;
+            //°Ñctx_listÉÏµÄreq²åÈëÓ²¼þºÍÈí¼þ¶ÓÁÐºó£¬ctx_listÁ´±íÇå0£¬depthÒ²Çå0
 			depth = 0;
 		}
 
 		depth++;
+        //°ÑreqÌí¼Óµ½¾Ö²¿±äÁ¿ctx_listÁ´±í£¬¿´×ÅÊÇÏòctx_list²åÈëÒ»¸öreq£¬depthÉî¶È¾Í¼Ó1
 		list_add_tail(&rq->queuelist, &ctx_list);
 	}
 
@@ -1649,6 +1698,8 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 	 * If 'this_ctx' is set, we know we have entries to complete
 	 * on 'ctx_list'. Do those.
 	 */
+	//¸Ð¾õÕâÀïÊÇ£¬Èç¹ûplug->mq_listÉÏµÄreq£¬rq->mq_ctx¶¼Ö¸ÏòÍ¬Ò»¸öÈí¼þ¶ÓÁÐ£¬ÉÏ±ßµÄblk_mq_sched_insert_requestsÖ´ÐÐ²»ÁË£¬
+	//ÔÚÕâÀïÖ´ÐÐÒ»´Î£¬°Ñctx_listÁ´±íÉÏµÄreq²åÈëµ½Ó²¼þ¶ÓÁÐºÍÈí¼þ¶ÓÁÐ
 	if (this_ctx) {
 		trace_block_unplug(this_q, depth, from_schedule);
 		blk_mq_sched_insert_requests(this_q, this_ctx, &ctx_list,
@@ -1658,10 +1709,11 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 
 static void blk_mq_bio_to_request(struct request *rq, struct bio *bio)
 {
+    //¸³ÖµreqÉÈÇøÆðÊ¼µØÖ·£¬req½áÊøµØÖ·£¬rq->bio = rq->biotail=bio
 	init_request_from_bio(rq, bio);
 
 	if (blk_do_io_stat(rq))
-		blk_account_io_start(rq, true);
+		blk_account_io_start(rq, true);//Í³¼Æ´ÅÅÌÊ¹ÓÃÂÊµÈÊý¾Ý
 }
 
 static inline bool hctx_allow_merges(struct blk_mq_hw_ctx *hctx)
@@ -1697,7 +1749,7 @@ static inline void blk_mq_queue_io(struct blk_mq_hw_ctx *hctx,
 	spin_unlock(&ctx->lock);
 }
 
-static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *rq)
+static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *rq)//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í
 {
 	struct request_queue *q = rq->q;
 	struct blk_mq_queue_data bd = {
@@ -1712,10 +1764,11 @@ static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *r
 	 * Any other error (busy), just add it to our list as we
 	 * previously would have done.
 	 */
-	ret = q->mq_ops->queue_rq(hctx, &bd);
+	//¸ù¾ÝreqÉèÖÃnvme command,°ÑreqÌí¼Óµ½q->timeout_list£¬²¢ÇÒÆô¶¯q->timeout,°ÑÐÂµÄnvme command¸´ÖÆµ½nvmeq->sq_cmds[]¶ÓÁÐ
+	ret = q->mq_ops->queue_rq(hctx, &bd);//nvme_queue_rq
 	switch (ret) {
 	case BLK_MQ_RQ_QUEUE_OK:
-		blk_mq_update_dispatch_busy(hctx, false);
+		blk_mq_update_dispatch_busy(hctx, false);//¿´×Å¾Íhctx->dispatch_busy = ewma
 		break;
 	case BLK_MQ_RQ_QUEUE_BUSY:
 	case BLK_MQ_RQ_QUEUE_DEV_BUSY:
@@ -1729,9 +1782,11 @@ static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *r
 
 	return ret;
 }
-
+//´ÓÓ²¼þ¶ÓÁÐhctxÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓÐ¿ÕÏÐÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬Ôòhctx->tags->rqs[rq->tag]=rq
+//½¨Á¢reqºÍÓ²¼þ¶ÓÁÐhctxµÄÁªÏµ¡£È»ºóµ÷ÓÃnvme_queue_rq£¬¸ù¾ÝreqÉèÖÃnvme command£¬Æô¶¯q->timeout¶¨Ê±Æ÷µÈµÈ,Õâ¿´×ÅÊÇreq
+//Ö±½Ó·¢¸ønvmeÓ²¼þ´«ÊäÁË¡£Èç¹û²»ÄÜÖ±½Ó·¢¸ønvmeÓ²¼þ´«Êä£¬Ôò°ÑreqÌí¼Óµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢
 static int __blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
-						struct request *rq,
+						struct request *rq,//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í
 						bool bypass_insert)
 {
 	struct request_queue *q = rq->q;
@@ -1756,16 +1811,24 @@ static int __blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 	if (!blk_mq_get_dispatch_budget(hctx))
 		goto insert;
 
+    //´ÓÓ²¼þ¶ÓÁÐhctxÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓÐ¿ÕÏÐÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬
+    //½Ó×Åhctx->tags->rqs[rq->tag]=rq£¬rq»òÕßreqÀ´×Ôµ±Ç°½ø³ÌµÄplug->mq_listÁ´±í£¬ÏÖÔÚ¸³Öµµ½ÁËÓ²¼þ¶ÓÁÐhctx->tags->rqs[rq->tag]
+    //½á¹¹£¬¾Í½¨Á¢ÁËreqÓëÓ²¼þ¶ÓÁÐµÄ¹ØÏµ¡£Èç¹û´Óblk_mq_tagsµÃµ½¿ÕÏÐµÄreq³É¹¦£¬if³ÉÁ¢
 	if (!blk_mq_get_driver_tag(rq, NULL, false)) {
-		blk_mq_put_dispatch_budget(hctx);
+		blk_mq_put_dispatch_budget(hctx);//Ã»É¶ÊµÖÊ²Ù×÷
 		goto insert;
 	}
-
+    
+    //µ÷ÓÃnvme_queue_rq£¬¸ù¾ÝreqÉèÖÃnvme command,°ÑreqÌí¼Óµ½q->timeout_list£¬²¢ÇÒÆô¶¯q->timeout¶¨Ê±Æ÷,°ÑÐÂµÄnvme command
+    //¸´ÖÆµ½nvmeq->sq_cmds[]¶ÓÁÐ£¬Õâ¿´×ÅÊÇreqÖ±½Ó·¢¸ønvmeÓ²¼þ´«ÊäÁË
 	return __blk_mq_issue_directly(hctx, rq);
+    
 insert:
 	if (bypass_insert)
 		return BLK_MQ_RQ_QUEUE_BUSY;
 
+    //Ö´ÐÐÕâ¸öº¯Êý£¬ËµÃ÷reqÃ»ÓÐÖ±½Ó·¢ËÍ¸ønvmeÓ²¼þ¡£
+    //°ÑreqÌí¼Óµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢
 	blk_mq_request_bypass_insert(rq, run_queue);
 	return BLK_MQ_RQ_QUEUE_OK;
 }
@@ -1787,37 +1850,55 @@ static void blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 	hctx_unlock(hctx, srcu_idx);
 }
 
-int blk_mq_request_issue_directly(struct request *rq)
+int blk_mq_request_issue_directly(struct request *rq)//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í
 {
 	int ret;
 	int srcu_idx;
+    //reqËùÔÚµÄÈí¼þ¶ÓÁÐ
 	struct blk_mq_ctx *ctx = rq->mq_ctx;
+    //Óëctx->cpuÕâ¸öCPU±àºÅ¶ÔÓ¦µÄÓ²¼þ¶ÓÁÐ
 	struct blk_mq_hw_ctx *hctx = blk_mq_map_queue(rq->q, ctx->cpu);
 
 	hctx_lock(hctx, &srcu_idx);
+//´ÓÓ²¼þ¶ÓÁÐhctxÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓÐ¿ÕÏÐÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬Ôòhctx->tags->rqs[rq->tag]=rq
+//½¨Á¢reqºÍÓ²¼þ¶ÓÁÐhctxµÄÁªÏµ¡£È»ºóµ÷ÓÃnvme_queue_rq£¬¸ù¾ÝreqÉèÖÃnvme command£¬Æô¶¯q->timeout¶¨Ê±Æ÷µÈµÈ,Õâ¿´×ÅÊÇreq
+//Ö±½Ó·¢¸ønvmeÓ²¼þ´«ÊäÁË¡£Èç¹û²»ÄÜÖ±½Ó·¢¸ønvmeÓ²¼þ´«Êä£¬Ôò°ÑreqÌí¼Óµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢
 	ret = __blk_mq_try_issue_directly(hctx, rq, true);
 	hctx_unlock(hctx, srcu_idx);
 
 	return ret;
 }
-
+//ÒÀ´Î±éÀúµ±Ç°½ø³Ìplug->mq_listÁ´±íÉÏµÄreq£¬½¨Á¢reqºÍÓ²¼þ¶ÓÁÐhctxµÄÁªÏµ£¬»¹»áÆô¶¯nvmeÓ²¼þ´«Êä£¬req´«ÊäÍê³ÉÔòÍ³¼ÆIOÊ¹ÓÃÂÊµÈÊý¾Ý
+//¶ÓÁÐÃ¦µÄ»°£¬Ôò°ÑreqÌí¼Óµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬Ö´ÐÐblk_mq_run_hw_queue¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢
 void blk_mq_try_issue_list_directly(struct blk_mq_hw_ctx *hctx,
 		struct list_head *list)
 {
+    //listÁÙÊ±±£´æÁËµ±Ç°½ø³Ìplug->mq_listÁ´±íÉÏµÄ²¿·Öreq,±éÀú¸ÃÁ´±íÉÏµÄreq
 	while (!list_empty(list)) {
 		int ret;
 		struct request *rq = list_first_entry(list, struct request,
 				queuelist);
-
+        //´ÓlistÁ´±íÌÞ³ýreq
 		list_del_init(&rq->queuelist);
+//´ÓÓ²¼þ¶ÓÁÐhctxÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓÐ¿ÕÏÐÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬Ôòhctx->tags->rqs[rq->tag]=rq
+//½¨Á¢reqºÍÓ²¼þ¶ÓÁÐhctxµÄÁªÏµ¡£È»ºóµ÷ÓÃnvme_queue_rq£¬¸ù¾ÝreqÉèÖÃnvme command£¬Æô¶¯q->timeout¶¨Ê±Æ÷µÈµÈ,Õâ¿´×ÅÊÇreq
+//Ö±½Ó·¢¸ønvmeÓ²¼þ´«ÊäÁË¡£Èç¹û²»ÄÜÖ±½Ó·¢¸ønvmeÓ²¼þ´«Êä£¬Ôò°ÑreqÌí¼Óµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢
 		ret = blk_mq_request_issue_directly(rq);
 		if (ret != BLK_MQ_RQ_QUEUE_OK) {
 			if (ret == BLK_MQ_RQ_QUEUE_BUSY ||
 					ret == BLK_MQ_RQ_QUEUE_DEV_BUSY) {
+				//Ó²¼þ¶ÓÁÐ·±Ã¦£¬Ôò°ÑreqÌí¼Óµ½Ó²¼þ¶ÓÁÐhctx->dispatch¶ÓÁÐ£¬¼ä½ÓÆô¶¯reqÓ²¼þÅÉ·¢
 				blk_mq_request_bypass_insert(rq,
 							list_empty(list));
+                //×¢Òâ£¬¶ÓÁÐ·±Ã¦µÄ»°£¬Ö±½ÓÖ±½ÓÌø³öÑ­»·£¬º¯Êý·µ»ØÁË
 				break;
 			}
+        /*ºÃÉñÆæÑ½£¬Ã²ËÆ×ßµ½ÕâÀï£¬¾ÍËµÃ÷Õâ¸öreqÓ²¼þÊý¾Ý´«ÊäÍê³ÉÁË£¬ÊÇµÄ£¬¾ÍÊÇ£¬Ã»ÓÐ´«ÊäµÄÇé¿ö£¬ÉÏ±ßbreakÌø³öÁË¡£
+         Ò²¾ÍÊÇËµ£¬ÉÏ±ßÖ´ÐÐµÄblk_mq_request_issue_directly(),ÊÇÖ±½Ó´Óµ±Ç°½ø³Ìplug->mq_listÁ´±íÈ¡³öreq£¬È»ºóÆô¶¯Ó²¼þ´«ÊäÁË£¬
+         Èç¹ûÖ´ÐÐµ½ÕâÀï£¬¾ÍËµÃ÷reqÓ²¼þ´«ÊäÍê³ÉÁË?????²»»á°É£¬Õâ¸öreq¾­¹ýIOºÏ²¢Ã»?¾­¹ýIOµ÷¶ÈËã·¨µÄºÏ²¢Ã»?Ã»ÓÐºÏ²¢µÄ»°£¬Æñ²»ÊÇÐ§ÂÊºÜµÍ*/
+
+        //ÓÐreq´«ÊäÍê³ÉÁË£¬Ôö¼Óios¡¢ticks¡¢time_in_queue¡¢io_ticks¡¢flight¡¢sectorsÉÈÇøÊýµÈÊ¹ÓÃ¼ÆÊý¡£
+       //ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓÐreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üÐÂbio½á¹¹Ìå³ÉÔ±Êý¾Ý£¬Ö´ÐÐbioµÄ»Øµ÷º¯Êý.»¹¸üÐÂreq->__data_lenºÍreq->buffer¡£
 			blk_mq_end_request(rq, ret);
 		}
 	}
@@ -1858,23 +1939,27 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
 		return;
 
 	trace_block_getrq(q, bio, bio->bi_rw);
-    //×ßµ½ÕâÀï£¬ËµÃ÷ºÏ²¢bioÊ§°Ü£¬ÐèÒªÖØÐÂ·ÖÅäÒ»¸öreq,´ÓÓ²¼þ¶ÓÁÐÀï·ÖÅäÒ»¸öreq
+    
+    //´ÓÓ²¼þ¶ÓÁÐÓÐ¹ØµÄblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éÀïµÃµ½¿ÕÏÐµÄrequest¡£»ñÈ¡Ê§°ÜÔòÆô¶¯Ó²¼þIOÊý¾ÝÅÉ·¢£¬
+    //Ö®ºóÔÙ³¢ÊÔ´Óblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êý×éÀïµÃµ½¿ÕÏÐµÄrequest²¢·µ»Ø¡£
 	rq = blk_mq_sched_get_request(q, bio, bio->bi_rw, &data);
 	if (unlikely(!rq))
 		return;
+    
     //µ±Ç°½ø³ÌµÄblk_plug¶ÓÁÐ
 	plug = current->plug;
-	if (unlikely(is_flush_fua)) {
+	if (unlikely(is_flush_fua)) {//flush
 		blk_mq_put_ctx(data.ctx);
 		blk_mq_bio_to_request(rq, bio);
 
 		/* bypass scheduler for flush rq */
 		blk_insert_flush(rq);
 		blk_mq_run_hw_queue(data.hctx, true);
-	} else if (plug && q->nr_hw_queues == 1) {
+	} else if (plug && q->nr_hw_queues == 1) {//Ó²¼þ¶ÓÁÐÊý1
 		struct request *last = NULL;
 
 		blk_mq_put_ctx(data.ctx);
+        //¸³ÖµreqÉÈÇøÆðÊ¼µØÖ·£¬req½áÊøµØÖ·£¬rq->bio = rq->biotail=bio£¬²¢ÇÒÍ³¼Æ´ÅÅÌÊ¹ÓÃÂÊµÈÊý¾Ý
 		blk_mq_bio_to_request(rq, bio);
 
 		/*
@@ -1884,23 +1969,23 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
 		if (list_empty(&plug->mq_list))
 			request_count = 0;
 		else if (blk_queue_nomerges(q))
+            //Í³¼Æµ±Ç°½ø³ÌµÄplug_listÁ´±íÉÏµÄreqÊý¾ÝÁ¿
 			request_count = blk_plug_queued_count(q);
 
 		if (!request_count)
 			trace_block_plug(q);
 		else
 			last = list_entry_rq(plug->mq_list.prev);
-
+        //µ±Ç°½ø³ÌµÄplug_listÁ´±íÉÏµÄreqÊý¾ÝÁ¿´óÓÚBLK_MAX_REQUEST_COUNT£¬Ç¿ÖÆ°ÑreqË¢µ½´ÅÅÌ
 		if (request_count >= BLK_MAX_REQUEST_COUNT || (last &&
 		    blk_rq_bytes(last) >= BLK_PLUG_FLUSH_SIZE)) {
 			blk_flush_plug_list(plug, false);
 			trace_block_plug(q);
 		}
-
+        //°ÑreqÌí¼Óµ½plug->mq_listÁ´±íÉÏ
 		list_add_tail(&rq->queuelist, &plug->mq_list);
 	}
     else if (plug && !blk_queue_nomerges(q)) {
-        //ÕâÀï
 		blk_mq_bio_to_request(rq, bio);
 
 		/*
@@ -1923,7 +2008,8 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
 					same_queue_rq->mq_ctx->cpu);
 			blk_mq_try_issue_directly(data.hctx, same_queue_rq);
 		}
-	} else if ((q->nr_hw_queues > 1 && is_sync) || (!q->elevator &&
+	}
+    else if ((q->nr_hw_queues > 1 && is_sync) || (!q->elevator &&
 			!data.hctx->dispatch_busy)) {
 		blk_mq_put_ctx(data.ctx);
 		blk_mq_bio_to_request(rq, bio);
@@ -2403,7 +2489,8 @@ static void blk_mq_map_swqueue(struct request_queue *q,
 		hctx = blk_mq_map_queue(q, i);
 
 		cpumask_set_cpu(i, hctx->cpumask);
-        //Ó²¼þ¶ÓÁÐ±àºÅ£
+        //Ó²¼þ¶ÓÁÐ¹ØÁªµÄµÚ¼¸¸öÈí¼þ¶ÓÁÐ¡£Ó²¼þ¶ÓÁÐÃ¿¹ØÁªÒ»¸öÈí¼þ¶ÓÁÐ£¬¶¼hctx->ctxs[hctx->nr_ctx++] = ctx°ÑÈí¼þ¶ÓÁÐ½á¹¹±£´æµ½
+        //hctx->ctxs[hctx->nr_ctx++]Ó²¼þ¶ÓÁÐ½á¹¹µÄhctx->ctxs[]Êý×é£¬¶øctx->index_hw»áÏÈ±£´æhctx->nr_ctx¡£
 		ctx->index_hw = hctx->nr_ctx;
         //Èí¼þ¶ÓÁÐ½á¹¹ÒÔhctx->nr_ctxÎªÏÂ±ê±£´æµ½hctx->ctxs[]
 		hctx->ctxs[hctx->nr_ctx++] = ctx;

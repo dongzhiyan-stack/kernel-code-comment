@@ -621,7 +621,7 @@ void elv_merge_requests(struct request_queue *q, struct request *rq,
 	bool next_sorted = false;
 
 	if (e->uses_mq && e->aux->ops.mq.requests_merged)
-		e->aux->ops.mq.requests_merged(q, rq, next);
+		e->aux->ops.mq.requests_merged(q, rq, next);//dd_merged_requests
 	else if (e->aux->ops.sq.elevator_merge_req_fn) {
 		next_sorted = (__force bool)(next->cmd_flags & REQ_SORTED);
 		if (next_sorted)

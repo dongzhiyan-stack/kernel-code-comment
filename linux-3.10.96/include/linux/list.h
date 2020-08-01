@@ -269,17 +269,20 @@ static inline void list_cut_position(struct list_head *list,
 	else
 		__list_cut_position(list, head, entry);
 }
-
+//把list链表的成员插入到到prev和next节点的中间，prev和next两个节点挨着，或者是同一个节点，说白了就是把list链表合并到prev和next所在链表
 static inline void __list_splice(const struct list_head *list,
 				 struct list_head *prev,
 				 struct list_head *next)
 {
+    //list是原来的链表头，first和last是这个链表的第一个和最后一个成员
 	struct list_head *first = list->next;
 	struct list_head *last = list->prev;
 
+    //list链表的第一个成员first插入到prev节点后边
 	first->prev = prev;
 	prev->next = first;
 
+    //list链表的最后一个成员last插入next节点的前边
 	last->next = next;
 	next->prev = last;
 }
@@ -292,6 +295,7 @@ static inline void __list_splice(const struct list_head *list,
 static inline void list_splice(const struct list_head *list,
 				struct list_head *head)
 {
+    //把list链表的成员插入到到head和head->next节点的中间，head和head->next两个节点挨着，list插入到head后边
 	if (!list_empty(list))
 		__list_splice(list, head, head->next);
 }
@@ -304,6 +308,7 @@ static inline void list_splice(const struct list_head *list,
 static inline void list_splice_tail(struct list_head *list,
 				struct list_head *head)
 {
+    //把list链表的成员插入到到head->prev和head节点的中间，head->prev和head两个节点挨着，list插入到head前边
 	if (!list_empty(list))
 		__list_splice(list, head->prev, head);
 }
@@ -319,7 +324,9 @@ static inline void list_splice_init(struct list_head *list,
 				    struct list_head *head)
 {
 	if (!list_empty(list)) {
+        //把list链表的成员插入到到head和head->next节点的中间，head和head->next两个节点挨着，list插入到head后边
 		__list_splice(list, head, head->next);
+        //list链表清0，没有成员了
 		INIT_LIST_HEAD(list);
 	}
 }
@@ -336,7 +343,9 @@ static inline void list_splice_tail_init(struct list_head *list,
 					 struct list_head *head)
 {
 	if (!list_empty(list)) {
+        //把list链表的成员插入到到head->prev和head节点的中间，head->prev和head两个节点挨着，list插入到head前边
 		__list_splice(list, head->prev, head);
+        //list链表清0，没有成员了
 		INIT_LIST_HEAD(list);
 	}
 }

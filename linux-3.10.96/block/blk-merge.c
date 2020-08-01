@@ -405,7 +405,9 @@ static void blk_account_io_merge(struct request *req)
 /*
  * Has to be called with the request spinlock acquired
  */
-//把next合并到req，把next剔除掉，做一些剔除next的收尾处理,并更新IO使用率数据
+//把next合并到req后边，并更新IO使用率数据。然后调用IO调度算法的elevator_merge_req_fn回调函数，当为mq-deadline调度算法时，执行过程是:
+//next已经合并到了req后,在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,
+//还更新dd->next_rq[]赋值next的下一个req。因为rq合并了next，扇区结束地址变大了，则rq从hash队列中删除掉再重新按照扇区结束地址在hash队列中排序。
 static int attempt_merge(struct request_queue *q, struct request *req,
 			  struct request *next)
 {
@@ -418,6 +420,7 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	/*
 	 * not contiguous
 	 */
+	//检查req扇区范围后边紧挨着next，没有紧挨着返回0
 	if (blk_rq_pos(req) + blk_rq_sectors(req) != blk_rq_pos(next))
 		return 0;
 
@@ -436,7 +439,7 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	 * will have updated segment counts, update sector
 	 * counts here.
 	 */
-	//把next合并到req后，在这里更新req->nr_phys_segments，扇区总数
+	//在这里更新req->nr_phys_segments，扇区总数，因为要把next合并到req后边吧
 	if (!ll_merge_requests_fn(q, req, next))
 		return 0;
 
@@ -469,7 +472,8 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	req->__data_len += blk_rq_bytes(next);
     
     //调用IO调度算法的elevator_merge_req_fn回调函数
-    //IO调度算法发生了二次合并,即把next合并到了rq，那要把next剔除掉
+    //在这里，next已经合并到了rq,在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,
+    //还更新dd->next_rq[]赋值next的下一个req。因为rq合并了next，扇区结束地址变大了，则rq从hash队列中删除掉再重新再hash中排序
 	elv_merge_requests(q, req, next);
 
 	/*
@@ -516,7 +520,9 @@ int attempt_front_merge(struct request_queue *q, struct request *rq)
 
 	return 0;
 }
-//把next合并到req，把next剔除掉，做一些剔除next的收尾处理,并更新IO使用率数据
+//把next合并到req后边，并更新IO使用率数据。然后调用IO调度算法的elevator_merge_req_fn回调函数，当为mq-deadline调度算法时，执行过程是:
+//next已经合并到了req后,在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,
+//还更新dd->next_rq[]赋值next的下一个req。因为rq合并了next，扇区结束地址变大了，则rq从hash队列中删除掉再重新按照扇区结束地址在hash队列中排序。
 int blk_attempt_req_merge(struct request_queue *q, struct request *rq,
 			  struct request *next)
 {

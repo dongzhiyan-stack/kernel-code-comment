@@ -802,12 +802,15 @@ EXPORT_SYMBOL(submit_bio_wait);
  *
  * @bio will then represent the remaining, uncompleted portion of the io.
  */
+//传输完了bytes大小数据，更新bio->bi_sector、bio->bi_size、bio->bi_idx、bio_vec中的数据
 void bio_advance(struct bio *bio, unsigned bytes)
 {
 	if (bio_integrity(bio))
 		bio_integrity_advance(bio, bytes);
 
+    //bytes是本次传输完成的字节数，这个是bio的扇区起始地址向后偏移bytes
 	bio->bi_sector += bytes >> 9;
+    //传输字节数减少bytes,减完后bio->bi_size正常应该就为0了
 	bio->bi_size -= bytes;
 
 	if (bio->bi_rw & BIO_NO_ADVANCE_ITER_MASK)
@@ -819,13 +822,14 @@ void bio_advance(struct bio *bio, unsigned bytes)
 				  bio->bi_idx, bio->bi_vcnt);
 			break;
 		}
-
-		if (bytes >= bio_iovec(bio)->bv_len) {
+        //更新bio_vec中的数据
+		if (bytes >= bio_iovec(bio)->bv_len)//传输字节数bytes大于bio_iovec(bio)->bv_len
+        {
 			bytes -= bio_iovec(bio)->bv_len;
-			bio->bi_idx++;
+			bio->bi_idx++;//貌似传输完一个bio_vec就加一
 		} else {
 			bio_iovec(bio)->bv_len -= bytes;
-			bio_iovec(bio)->bv_offset += bytes;
+			bio_iovec(bio)->bv_offset += bytes;//bv_offset向后增加bytes
 			bytes = 0;
 		}
 	}
@@ -1716,6 +1720,7 @@ void bio_endio(struct bio *bio, int error)
 	else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
 		error = -EIO;
 
+    //执行bio传输前注册的回调函数，如ext4_end_bio
 	if (bio->bi_end_io)
 		bio->bi_end_io(bio, error);
 }

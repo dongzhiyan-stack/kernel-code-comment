@@ -24,6 +24,7 @@ struct blk_mq_ctxmap {
 struct blk_mq_hw_ctx {
 	struct {
 		spinlock_t		lock;
+        //待派发的req放到这个队列，见blk_mq_request_bypass_insert()
 		struct list_head	dispatch;//硬件队列与磁盘打交道，这个队列上的rq就是马上发给磁盘的吧????
 	} ____cacheline_aligned_in_smp;
 
@@ -38,8 +39,9 @@ struct blk_mq_hw_ctx {
 	unsigned int		queue_num;//硬件队列编号
 
 	void			*driver_data;
-    //看着像是硬件队列关联的软件队列个数?????应该是的，看blk_mq_map_swqueue()，nr_ctx就是ctxs[]数组的下标，即ctxs[nr_ctx++]=ctxs，
-    //每一个blk_mq_ctx软件队列结构体以nr_ctx为数组下标，保存到ctxs[]
+    //看着像是硬件队列关联的软件队列个数?????看blk_mq_map_swqueue()，nr_ctx就是ctxs[]数组的下标，即ctxs[nr_ctx++]=ctxs，
+    //每一个blk_mq_ctx软件队列结构体以nr_ctx为数组下标，保存到ctxs[]。不对，应该是硬件队列关联的软件队列编号，硬件队列可以关联多个
+    //软件队列，保存在硬件队列结构blk_mq_hw_ctx的成员ctxs[nr_ctx++]=ctxs，nr_ctx准确说是硬件队列关联的第几个软件队列吧
 	unsigned int		nr_ctx;
     //保存软件队列结构体指针数组，保存关联的软件队列结构指针，一个硬件队列可以关联多个软件队列结构，
     //每一个关联当然软件队列结构都保存在ctxs[]，blk_mq_map_swqueue中赋值
@@ -48,9 +50,12 @@ struct blk_mq_hw_ctx {
 	RH_KABI_REPLACE(unsigned int		nr_ctx_map,
 			atomic_t		wait_index)
 
-	RH_KABI_REPLACE(unsigned long		*ctx_map,
-			unsigned long		*padding1)
-
+	//RH_KABI_REPLACE(unsigned long		*ctx_map,
+	//		unsigned long		*padding1)
+	//blk_mq_insert_requests->blk_mq_hctx_mark_pending中，软件队列插入req了，然后把软件队列对应的ctx_map的bit置1，激活
+    unsigned long		*ctx_map;
+    unsigned long		*padding1;
+    
 	RH_KABI_REPLACE(struct request		**rqs,
 			struct request		**padding2)
 
@@ -98,7 +103,9 @@ struct blk_mq_hw_ctx {
 	RH_KABI_EXTEND(struct dentry		*debugfs_dir)
 	RH_KABI_EXTEND(struct dentry		*sched_debugfs_dir)
 #endif
-	RH_KABI_EXTEND(int			dispatch_busy)
+	//RH_KABI_EXTEND(int			dispatch_busy)
+	//应该是表示硬件队列繁忙
+	int			dispatch_busy;
 };
 
 #ifdef __GENKSYMS__
@@ -153,7 +160,7 @@ struct blk_mq_queue_data {
  * scheduler, blk-stat and so on.
  */
 struct request_aux {
-	int internal_tag;
+	int internal_tag;//__blk_mq_alloc_request中赋值，tag编号
 	struct blk_issue_stat issue_stat;
 }____cacheline_aligned_in_smp;
 
@@ -204,7 +211,7 @@ struct blk_mq_ops {
 	/*
 	 * Queue request
 	 */
-	queue_rq_fn		*queue_rq;
+	queue_rq_fn		*queue_rq;//nvme_queue_rq
 
 	/*
 	 * Map to specific hardware queue
@@ -314,6 +321,7 @@ bool blk_mq_can_queue(struct blk_mq_hw_ctx *);
 
 enum {
 	BLK_MQ_REQ_NOWAIT	= (1 << 0), /* return when out of requests */
+    //判断tag是否是预留的，blk_mq_get_driver_tag()中设置
 	BLK_MQ_REQ_RESERVED	= (1 << 1), /* allocate from reserved pool */
 	//blk_mq_sched_get_request()有调度器设置BLK_MQ_REQ_INTERNAL
 	BLK_MQ_REQ_INTERNAL	= (1 << 2), /* allocate internal/sched tag */

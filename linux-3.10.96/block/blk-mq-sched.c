@@ -100,7 +100,8 @@ static bool blk_mq_sched_restart_hctx(struct blk_mq_hw_ctx *hctx)
 
 	return blk_mq_run_hw_queue(hctx, true);
 }
-
+//从硬件队列有关的blk_mq_tags结构体的static_rqs[]数组里得到空闲的request。获取失败则启动硬件IO数据派发，
+//之后再尝试从blk_mq_tags结构体的static_rqs[]数组里得到空闲的request并返回。
 struct request *blk_mq_sched_get_request(struct request_queue *q,
 					 struct bio *bio,
 					 unsigned int op,
@@ -130,8 +131,12 @@ struct request *blk_mq_sched_get_request(struct request_queue *q,
 			if (rq)
 				rq->cmd_flags |= REQ_QUEUED;
 		} else
+		    //从硬件队列有关的blk_mq_tags结构体的static_rqs[]数组里得到空闲的request。获取失败则启动硬件IO数据派发，
+            //之后再尝试从blk_mq_tags结构体的static_rqs[]数组里得到空闲的request并返回。
 			rq = __blk_mq_alloc_request(data, op);
-	} else {
+	} else {//无调度器
+	
+        //同理
 		rq = __blk_mq_alloc_request(data, op);
 	}
 
@@ -189,7 +194,7 @@ static void blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 		if (!blk_mq_get_dispatch_budget(hctx))
 			break;
 
-		rq = e->aux->ops.mq.dispatch_request(hctx);
+		rq = e->aux->ops.mq.dispatch_request(hctx);//dd_dispatch_request
 		if (!rq) {
 			blk_mq_put_dispatch_budget(hctx);
 			break;
@@ -385,7 +390,9 @@ bool __blk_mq_sched_bio_merge(struct request_queue *q, struct bio *bio)
 
 	return false;
 }
-
+//首先尝试将rq后项合并到q->last_merge，再尝试将rq后项合并到hash队列的某一个__rq，合并规则是rq的扇区起始地址等于q->last_merge或__rq
+//的扇区结束地址，都是调用blk_attempt_req_merge()进行合并。并更新IO使用率等数据。如果使用了deadline调度算法，更新合并后的req在
+//hash队列中的位置。还会从fifo队列剔除掉rq，更新dd->next_rq[]赋值rq的下一个req。
 bool blk_mq_sched_try_insert_merge(struct request_queue *q, struct request *rq)
 {
 	return rq_mergeable(rq) && elv_attempt_insert_merge(q, rq);
@@ -512,30 +519,45 @@ run:
 	if (run_queue)
 		blk_mq_run_hw_queue(hctx, async);
 }
-
+//如果有IO调度算法，则把plug->mq_list链表上的req插入elv的hash队列，mq-deadline算法的还要插入红黑树和fifo队列。如果没有IO调度算法，在硬件队列
+//空闲时，尝试把plug->mq_list链表的上的req建立与硬件队列hctx的联系，还会把req插入到硬件队列hctx->dispatch队列，执行blk_mq_run_hw_queue
+//间接启动req硬件派发。如果硬件队列容纳的req达到上限，硬件队列变忙，则把剩余的plug->mq_list链表的上的req插入到软件队列ctx->rq_list链表上。
 void blk_mq_sched_insert_requests(struct request_queue *q,
 				  struct blk_mq_ctx *ctx,
-				  struct list_head *list, bool run_queue_async)
+				  struct list_head *list, bool run_queue_async)//list临时保存了当前进程plug->mq_list链表上的部分req
 {
+    //找到ctx->cpu这个CPU编号对应的硬件队列结构
 	struct blk_mq_hw_ctx *hctx = blk_mq_map_queue(q, ctx->cpu);
-	struct elevator_queue *e = hctx->queue->elevator;
+	struct elevator_queue *e = hctx->queue->elevator;//IO调度算法调度器
 
 	if (e && e->aux->ops.mq.insert_requests)
-		e->aux->ops.mq.insert_requests(hctx, list, false);
-	else {
+        //尝试将req合并到q->last_merg或者调度算法的hash队列的临近req。合并不了的话，把req插入到deadline调度算法的红黑树和fifo队列，
+        //设置req在fifo队列的超时时间。还插入elv调度算法的hash队列。注意，hash队列不是deadline调度算法独有的。
+		e->aux->ops.mq.insert_requests(hctx, list, false);//mq-deadline调度算法的走这里dd_insert_requests
+
+	else {//NONE没有调度算法的走这里
 		/*
 		 * try to issue requests directly if the hw queue isn't
 		 * busy in case of 'none' scheduler, and this way may save
 		 * us one extra enqueue & dequeue to sw queue.
 		 */
+		//硬件队列不能忙，没有IO调度算法，不能异步处理，if才成立。尤其是硬件队列繁忙时，就执行下边的代码:list上的req插入到软件队列
 		if (!hctx->dispatch_busy && !e && !run_queue_async) {
+        //依次遍历当前进程plug->mq_list链表上的req，建立req和硬件队列hctx的联系，还会启动nvme硬件传输，req传输完成则统计IO使用率等数据
+        //队列忙的话，则把req添加到硬件队列hctx->dispatch队列，执行blk_mq_run_hw_queue间接启动req硬件派发
 			blk_mq_try_issue_list_directly(hctx, list);
+            //list临时保存了当前进程plug->mq_list链表上的req，如果list空，应该说明所有的req都派发硬件队列，然后硬件把这些req都传输完成了吧?????
 			if (list_empty(list))
 				return;
 		}
+        //到这里，说明list链表上还有剩余的req没有派发硬件队列传输。这是要把硬件队列没有处理的req插入软件队列呀!
+        
+        //把list链表的成员插入到到ctx->rq_list链表后边，然后对list清0，这个list链表源自当前进程的plug链表。每一个req在分配时，
+        //req->mq_ctx会指向当前CPU的软件队列，但是真正把req插入到软件队列，看着得执行blk_mq_insert_requests才行呀
 		blk_mq_insert_requests(hctx, ctx, list);
 	}
-
+    
+    //启动硬件IO数据派发，又一个重点函数
 	blk_mq_run_hw_queue(hctx, run_queue_async);
 }
 

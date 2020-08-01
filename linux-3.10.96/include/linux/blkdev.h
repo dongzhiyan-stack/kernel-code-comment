@@ -104,7 +104,8 @@ enum rq_cmd_type_bits {
 struct request {
 #ifdef __GENKSYMS__
 	union {
-	    //deadline调度算法，应该就是该算法的fifo调度队列，req在该队列中先进先出，还有个超时时间
+	    //deadline调度算法，应该就是靠这个添加到算法的fifo调度队列，req在该队列中先进先出，还有个超时时间
+	    //mq多队列时代，靠这个添加到硬件队列的hctx->dispatch派发队列，见blk_mq_request_bypass_insert
 		struct list_head queuelist;
 		struct llist_node ll_list;
 	};
@@ -112,14 +113,17 @@ struct request {
 	struct list_head queuelist;
 #endif
 	union {
-	    //deadline调度算法，应该记录了rq的超时时间，看deadline_merged_requests()
+	    //deadline调度算法，应该记录了req的超时时间，看deadline_merged_requests()
 		struct call_single_data csd;
-		RH_KABI_REPLACE(struct work_struct mq_flush_work,
-			        unsigned long fifo_time)
+		//RH_KABI_REPLACE(struct work_struct mq_flush_work,
+		//	        unsigned long fifo_time)
+		struct work_struct mq_flush_work;
+        //设置req超时时间 dd_insert_request
+        unsigned long fifo_time;
 	};
 
 	struct request_queue *q;//
-	struct blk_mq_ctx *mq_ctx;//rq的软件队列
+	struct blk_mq_ctx *mq_ctx;//req的软件队列，blk_mq_rq_ctx_init中赋值,req在分配后就会初始化指向当前CPU的软件队列
     struct blk_mq_hw_ctx *mq_hctx;//rq的硬件队列
         
 	u64 cmd_flags;
@@ -130,13 +134,14 @@ struct request {
 	int cpu;
 
 	/* the following two fields are internal, NEVER access directly */
-    //req代表的磁盘空间大小
+    //req代表的磁盘空间大小,blk_rq_bio_prep中赋值rq->__data_len = bio->bi_size
 	unsigned int __data_len;	/* total data len */
     //req代表的磁盘范围起始扇区
 	sector_t __sector;		/* sector cursor *///struct bio
-    
-	struct bio *bio;//req上的第一个bio吧，一个req可能合并了多个bio，bio的bi_next链表挂着其他bio
-	struct bio *biotail;//在把bio合并到rq时，也是执行新加入的bio，奇怪，看ll_back_merge_fn()和bio_attempt_back_merge()和attempt_merge
+
+    //req上的第一个bio吧，一个req可能合并了多个bio，bio的bi_next链表挂着其他bio。如果第一个bio传输完，会指向下一个bio,见blk_update_request和blk_rq_bio_prep
+	struct bio *bio;
+	struct bio *biotail;//在把bio合并到rq时，也是执行新加入的bio，奇怪，看ll_back_merge_fn()和bio_attempt_back_merge()和attempt_merge、blk_rq_bio_prep
 
 #ifdef __GENKSYMS__
     //新的req靠这个hash添加到IO调度算法的hash链表里,elv_rqhash_add(),做hash索引是为了在IO算法队列里搜索可以合并的req时，提高搜索速度
@@ -203,9 +208,10 @@ struct request {
 	unsigned short ioprio;
 
 	void *special;		/* opaque pointer available for LLD use */
-	char *buffer;		/* kaddr of the current segment if available *///该bio对应的bh的内存page地址,还考虑了页内offset
+    //该req对应的bh的内存page地址,还考虑了页内offset，看blk_update_request()后半段
+	char *buffer;		/* kaddr of the current segment if available */
 
-	int tag;
+	int tag;//__blk_mq_alloc_request()中赋值为空闲req在blk_mq_tags结构体的static_rqs[]数组的下标
 	int errors;
 
 	/*
@@ -221,7 +227,7 @@ struct request {
 	void *sense;
 
 	unsigned long deadline;
-	struct list_head timeout_list;
+	struct list_head timeout_list;//blk_add_timer中把req添加到q->timeout_list链表
 	unsigned int timeout;
 	int retries;
 
@@ -1253,8 +1259,9 @@ static inline void blk_post_runtime_resume(struct request_queue *q, int err) {}
  */
 struct blk_plug {
 	unsigned long magic; /* detect uninitialized use-cases */
-    //每个进车独有的blk_plug，每个进程的bio就是先添加到blk_plug链表上
+    //单通道时代，每个进程独有的blk_plug，每个进程的bio就是先添加到blk_plug链表上,blk_flush_plug_list()会对该链表上的req排序
 	struct list_head list; /* requests */
+    //mq多队列时代，新分配的req添加到plug->mq_list链表上，看blk_mq_make_request()
 	struct list_head mq_list; /* blk-mq requests */
 	struct list_head cb_list; /* md requires an unplug callback */
 };

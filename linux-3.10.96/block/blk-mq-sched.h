@@ -86,7 +86,7 @@ static inline void blk_mq_sched_started_request(struct request *rq)
 	struct request_queue *q = rq->q;
 	struct elevator_queue *e = q->elevator;
 
-	if (e && e->aux->ops.mq.started_request)
+	if (e && e->aux->ops.mq.started_request)//no
 		e->aux->ops.mq.started_request(rq);
 }
 

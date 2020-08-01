@@ -188,12 +188,16 @@ struct request *elv_rqhash_find(struct request_queue *q, sector_t offset);
 /*
  * each queue has an elevator_queue associated with it
  */
-//IO调度
+ 
+/*到这里，我觉得很奇怪，deadline调度算法，看着有3个队列呀，两个是struct elevator_queue里struct deadline_data
+  的struct rb_root sort_list[2]红黑树队列和struct list_head fifo_list[2]fifo队列，还有一个struct elevator_queue
+  里的hash队列。hash队列是每个调度算法都有的，fifo和红黑树队列是deadline独有的*/
+//调度算法队列
 struct elevator_queue
 {
     //IO调度算法总代表
 	struct elevator_type *type;
-    //IO调度算法私有数据，如deadline的是struct deadline_data
+    //IO调度算法私有数据，如deadline和mq-deadline的都是struct deadline_data
 	void *elevator_data;
 	struct kobject kobj;
 	struct mutex sysfs_lock;

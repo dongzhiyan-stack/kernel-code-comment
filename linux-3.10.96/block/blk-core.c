@@ -162,6 +162,7 @@ void blk_rq_init(struct request_queue *q, struct request *rq)
 }
 EXPORT_SYMBOL(blk_rq_init);
 
+//传输完了bytes大小数据，更新bio->bi_sector、bio->bi_size、bio->bi_idx、bio_vec中的数据，执行bio传输前注册的回调函数
 static void req_bio_endio(struct request *rq, struct bio *bio,
 			  unsigned int nbytes, int error)
 {
@@ -173,8 +174,10 @@ static void req_bio_endio(struct request *rq, struct bio *bio,
 	if (unlikely(rq->cmd_flags & REQ_QUIET))
 		set_bit(BIO_QUIET, &bio->bi_flags);
 
+    //传输完了bytes大小数据，更新bio->bi_sector、bio->bi_size、bio->bi_idx、bio_vec中的数据
 	bio_advance(bio, nbytes);
 
+    //执行bio传输前注册的回调函数，如ext4_end_bio，bio->bi_size为0才会执行
 	/* don't actually finish bio if it's part of flush sequence */
 	if (bio->bi_size == 0 && !(rq->cmd_flags & REQ_FLUSH_SEQ))
 		bio_endio(bio, error);
@@ -1475,7 +1478,7 @@ static bool attempt_plug_merge(struct request_queue *q, struct bio *bio,
 out:
 	return ret;
 }
-
+//req->__sector = bio->bi_sector，rq->__data_len = bio->bi_size，rq->bio = rq->biotail = bio,req->cmd_type = REQ_TYPE_FS
 void init_request_from_bio(struct request *req, struct bio *bio)
 {
 	req->cmd_type = REQ_TYPE_FS;
@@ -1485,8 +1488,10 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 		req->cmd_flags |= REQ_FAILFAST_MASK;
 
 	req->errors = 0;
+    //赋值req扇区起始地址，rq->bio = rq->biotail=bio，req->cmd_type = REQ_TYPE_FS
 	req->__sector = bio->bi_sector;
 	req->ioprio = bio_prio(bio);
+    //rq->__data_len = bio->bi_size 和 rq->bio = rq->biotail = bio
 	blk_rq_bio_prep(req->q, req, bio);
 }
 
@@ -1588,6 +1593,7 @@ get_rq:
 	 * We don't worry about that case for efficiency. It won't happen
 	 * often, and the elevators are able to handle it.
 	 */
+	//req->__sector = bio->bi_sector，rq->__data_len = bio->bi_size，rq->bio = rq->biotail = bio,req->cmd_type = REQ_TYPE_FS
 	init_request_from_bio(req, bio);
 
 	if (test_bit(QUEUE_FLAG_SAME_COMP, &q->queue_flags))
@@ -2096,11 +2102,12 @@ static void blk_account_io_completion(struct request *req, unsigned int bytes)
 
 		cpu = part_stat_lock();
 		part = req->part;
+        //增加sectors IO使用计数，即传输的扇区数
 		part_stat_add(cpu, part, sectors[rw], bytes >> 9);
 		part_stat_unlock();
 	}
 }
-
+//有req传输完成了，增加ios、ticks、time_in_queue、io_ticks、flight等使用计数
 static void blk_account_io_done(struct request *req)
 {
 	/*
@@ -2116,10 +2123,13 @@ static void blk_account_io_done(struct request *req)
 
 		cpu = part_stat_lock();
 		part = req->part;
-
+        //增加ios计数
 		part_stat_inc(cpu, part, ios[rw]);
+        //增加ticks计数
 		part_stat_add(cpu, part, ticks[rw], duration);
+        //更新主块设备和块设备分区的time_in_queue和io_ticks数据
 		part_round_stats(cpu, part);
+        //有一个req从队列中移除了，减1，减少req计数
 		part_dec_in_flight(part, rw);
 
 		hd_struct_put(part);
@@ -2355,7 +2365,10 @@ EXPORT_SYMBOL(blk_fetch_request);
  *     %false - this request doesn't have any more data
  *     %true  - this request has more data
  **/
-bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
+ 
+/* 1 增加sectors IO使用计数，即传输的扇区数。更新req->__data_len和req->buffer
+   2 依次取出req->bio链表上所有req对应的bio,一个一个更新bio结构体成员数据，执行bio的回调函数*/
+bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)//nr_bytes来自blk_rq_bytes(rq)
 {
 	int total_bytes;
 
@@ -2401,18 +2414,23 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 
 	}
 
+    //增加sectors IO使用计数，即传输的扇区数
 	blk_account_io_completion(req, nr_bytes);
 
 	total_bytes = 0;
+    //神奇的事情发生了，这里取出req对应的bio开始处理了，其实我一直也很好奇，req传输完成后，对原来的bio是怎么处理的?????
+    //这个循环会依次取出req->bio链表上所有req对应的bio,一个一个更新bio结构体成员数据，执行bio的回调函数
 	while (req->bio) {
 		struct bio *bio = req->bio;
 		unsigned bio_bytes = min(bio->bi_size, nr_bytes);
 
 		if (bio_bytes == bio->bi_size)
-			req->bio = bio->bi_next;
+			req->bio = bio->bi_next;//req->bio指向下一个bio
 
+        //传输完了bio_bytes大小数据，更新bio->bi_sector、bio->bi_size、bio->bi_idx、bio_vec中的数据，执行bio传输前注册的回调函数
 		req_bio_endio(req, bio, bio_bytes, error);
 
+        //total_bytes代表req上的已经传输完的bio总的字节数
 		total_bytes += bio_bytes;
 		nr_bytes -= bio_bytes;
 
@@ -2423,7 +2441,7 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 	/*
 	 * completely done
 	 */
-	if (!req->bio) {
+	if (!req->bio) {//为NULL，说明req对应的所有bio的磁盘数据都传输完了
 		/*
 		 * Reset counters so that the request stacking driver
 		 * can find how many bytes remain in the request
@@ -2432,8 +2450,10 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 		req->__data_len = 0;
 		return false;
 	}
-
+    //到这里，说明req对应的bio没有传输完，则更新 req->__data_len减少已经传输完的字节数
 	req->__data_len -= total_bytes;
+    //req->buffer向后偏移bio_data(req->bio)，对了，我突然有个感想，req里的bio的磁盘地址是连续的，但是bio对应的文件页数据保存
+    //的内存页page，内存地址可不一定连续呀，所以才会用bio_vec来单独描述bio对应的内存页page
 	req->buffer = bio_data(req->bio);
 
 	/* update sector only for requests with clear definition of sector */
@@ -2454,7 +2474,7 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 		blk_dump_rq_flags(req, "request botched");
 		req->__data_len = blk_rq_cur_bytes(req);
 	}
-
+    //统计rq->nr_phys_segments
 	/* recalculate the number of segments */
 	blk_recalc_rq_segments(req);
 
@@ -2757,7 +2777,9 @@ void blk_rq_bio_prep(struct request_queue *q, struct request *rq,
 		rq->nr_phys_segments = bio_phys_segments(q, bio);
 		rq->buffer = bio_data(bio);
 	}
+    //rq->__data_len = bio->bi_size
 	rq->__data_len = bio->bi_size;
+    //req->bio赋值bio
 	rq->bio = rq->biotail = bio;
 
 	if (bio->bi_bdev)
@@ -3027,7 +3049,7 @@ struct blk_plug_cb *blk_check_plugged(blk_plug_cb_fn unplug, void *data,
 }
 EXPORT_SYMBOL(blk_check_plugged);
 //把进程plug链表上的req依次插入IO调度算法队列上，然后唤醒emmc或者磁盘读写操作内核线程，开始执行底层驱动函数，启动emmc或者磁盘数据传输
-void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
+void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)//from_schedule从blk_finish_plug和blk_mq_make_request过来的是false
 {
 	struct request_queue *q;
 	unsigned long flags;
@@ -3038,6 +3060,18 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 	BUG_ON(plug->magic != PLUG_MAGIC);
 
 	flush_plug_callbacks(plug, from_schedule);
+
+    
+/*取出当前进程plug->mq_list链表上的req，如果有IO调度算法，则把req插入elv的hash队列，
+mq-deadline算法的还要插入红黑树和fifo队列。如果没有IO调度算法，在硬件队列空闲时，尝试把plug->mq_list链表的上的req建立与
+硬件队列hctx的联系，还会把req插入到硬件队列hctx->dispatch队列，执行blk_mq_run_hw_queue间接启动req硬件派发。
+如果硬件队列容纳的req达到上限，硬件队列变忙，则把剩余的plug->mq_list链表的上的req插入到软件队列ctx->rq_list链表上。
+这个过程涉及到了plug->mq_list链表上的req插入硬件队列和软件队列的诸多细节处理。*/
+    //3.10.0.957.27内核增加的多队列处理代码，这是与老的单队列代码的明显区别
+    if (!list_empty(&plug->mq_list))
+		blk_mq_flush_plug_list(plug, from_schedule);
+
+    //mq多通道不用plug->list，所以mq多通道这里直接返回，单通道才会继续执行下去
 	if (list_empty(&plug->list))
 		return;
 
@@ -3083,7 +3117,7 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 		 * rq is already accounted, so use raw insert
 		 */
 		if (rq->cmd_flags & (REQ_FLUSH | REQ_FUA))
-			__elv_add_request(q, rq, ELEVATOR_INSERT_FLUSH);
+			__elv_add_request(q, rq, ELEVATOR_INSERT_FLUSH);//flush操作??????
 		else//在这里把req插入到IO调度算法队列里
 			__elv_add_request(q, rq, ELEVATOR_INSERT_SORT_MERGE);
 

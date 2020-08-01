@@ -398,8 +398,9 @@ static inline void free_part_stats(struct hd_struct *part)
 //有一个新的req加入队列了，增加req计数
 static inline void part_inc_in_flight(struct hd_struct *part, int rw)
 {
+    //当前块设备分区的
 	atomic_inc(&part->in_flight[rw]);
-	if (part->partno)
+	if (part->partno)//主块设备的
 		atomic_inc(&part_to_disk(part)->part0.in_flight[rw]);
 }
 //有一个req从队列中移除了，减1，减少req计数

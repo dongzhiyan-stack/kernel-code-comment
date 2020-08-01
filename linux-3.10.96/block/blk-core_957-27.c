@@ -1877,7 +1877,7 @@ unsigned int blk_plug_queued_count(struct request_queue *q)
 		plug_list = &plug->mq_list;
 	else
 		plug_list = &plug->list;
-
+    //统计当前进程的plug_list链表上的req数据量
 	list_for_each_entry(rq, plug_list, queuelist) {
 		if (rq->q == q)
 			ret++;

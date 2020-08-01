@@ -89,15 +89,17 @@ deadline_add_rq_rb(struct deadline_data *dd, struct request *rq)
     //按照req的磁盘起始地址把req添加到红黑树队列里，这个红黑树里req的排列规则是，谁的磁盘起始地址小谁靠左
 	elv_rb_add(root, rq);
 }
-
+//给dd->next_rq[]赋值req的下一个req，下一次从红黑树选择req发给驱动时用到。并且把req从红黑树中剔除
 static inline void
 deadline_del_rq_rb(struct deadline_data *dd, struct request *rq)
 {
 	const int data_dir = rq_data_dir(rq);
 
-	if (dd->next_rq[data_dir] == rq)
+    //给dd->next_rq[]赋值req的下一个req,下一次从红黑树选择req发给驱动时，直接使用这个nedd->next_rq[]xt_rq
+    if (dd->next_rq[data_dir] == rq)
 		dd->next_rq[data_dir] = deadline_latter_request(rq);
-
+    
+    //deadline_rb_root(dd, rq)是取出调度算法的读或者写红黑树队列头rb_root，然后把req从这个红黑树队列剔除掉
 	elv_rb_del(deadline_rb_root(dd, rq), rq);
 }
 
@@ -134,7 +136,7 @@ static void dd_request_merged(struct request_queue *q, struct request *req,
 		deadline_add_rq_rb(dd, req);
 	}
 }
-
+//在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,还更新dd->next_rq[]赋值next的下一个req
 static void dd_merged_requests(struct request_queue *q, struct request *req,
 			       struct request *next)
 {
@@ -142,10 +144,13 @@ static void dd_merged_requests(struct request_queue *q, struct request *req,
 	 * if next expires before rq, assign its expire time to rq
 	 * and move into next position (next will be deleted) in fifo
 	 */
+	//如果next的超时时间早于req，更新到req超时时间里
 	if (!list_empty(&req->queuelist) && !list_empty(&next->queuelist)) {
 		if (time_before((unsigned long)next->fifo_time,
 				(unsigned long)req->fifo_time)) {
+		    //把req移动到next节点的位置，这个链表是fifo队列
 			list_move(&req->queuelist, &next->queuelist);
+            //更新req的超时时间
 			req->fifo_time = next->fifo_time;
 		}
 	}
@@ -153,6 +158,7 @@ static void dd_merged_requests(struct request_queue *q, struct request *req,
 	/*
 	 * kill knowledge of next, this one is a goner
 	 */
+	//从fifo队列剔除next,从红黑树剔除next。给dd->next_rq[]赋值next的下一个req，下一次从红黑树选择req发给驱动时用到
 	deadline_remove_request(q, next);
 }
 
@@ -392,52 +398,66 @@ static bool dd_bio_merge(struct blk_mq_hw_ctx *hctx, struct bio *bio)
 /*
  * add rq to rbtree and fifo
  */
+//尝试将req合并到q->last_merg或者调度算法的hash队列的临近req。合并不了的话，把req插入到deadline调度算法的红黑树和fifo队列，
+//设置req在fifo队列的超时时间。还插入elv调度算法的hash队列。注意，hash队列不是deadline调度算法独有的。
 static void dd_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
-			      bool at_head)
+			      bool at_head)//at_head:false
 {
 	struct request_queue *q = hctx->queue;
 	struct deadline_data *dd = q->elevator->elevator_data;
 	const int data_dir = rq_data_dir(rq);
 
+    //首先尝试将rq后项合并到q->last_merge，再尝试将rq后项合并到hash队列的某一个__rq，合并规则是rq的扇区起始地址等于q->last_merge或__rq
+    //的扇区结束地址，都是调用blk_attempt_req_merge()进行合并。并更新IO使用率等数据。如果使用了deadline调度算法，更新合并后的req在
+    //hash队列中的位置。还会从fifo队列剔除掉rq，更新dd->next_rq[]赋值rq的下一个req。
 	if (blk_mq_sched_try_insert_merge(q, rq))
 		return;
 
 	blk_mq_sched_request_inserted(rq);
 
-	if (at_head || rq->cmd_type != REQ_TYPE_FS) {
+	if (at_head || rq->cmd_type != REQ_TYPE_FS) {//no,一般req都是REQ_TYPE_FS
 		if (at_head)
 			list_add(&rq->queuelist, &dd->dispatch);
 		else
 			list_add_tail(&rq->queuelist, &dd->dispatch);
 	} else {
+	    //按照req的磁盘起始地址把req添加到红黑树队列里，这个红黑树里req的排列规则是，谁的磁盘起始地址小谁靠左
 		deadline_add_rq_rb(dd, rq);
 
-		if (rq_mergeable(rq)) {
+		if (rq_mergeable(rq)) {//yes
+            //req根据扇区结束地址rq_hash_key(rq)添加到IO调度算法的hash链表里，做hash索引是为了在IO算法队列里搜索可以合并的req时，提高搜索速度
 			elv_rqhash_add(q, rq);
 			if (!q->last_merge)
 				q->last_merge = rq;
 		}
-
+		/*到这里，我觉得很奇怪，deadline调度算法，看着有3个队列呀，两个是struct elevator_queue里struct deadline_data
+		  的struct rb_root sort_list[2]红黑树队列和struct list_head fifo_list[2]fifo队列，还有一个struct elevator_queue
+		  里的hash队列。hash队列是每个调度算法都有的，fifo和红黑树队列是deadline独有的*/
+		
 		/*
 		 * set expire time and add to fifo list
 		 */
+		//设置req在fifo队列的超时时间
 		rq->fifo_time = jiffies + dd->fifo_expire[data_dir];
+        //把req插入fifo队列里
 		list_add_tail(&rq->queuelist, &dd->fifo_list[data_dir]);
 	}
 }
 
 static void dd_insert_requests(struct blk_mq_hw_ctx *hctx,
-			       struct list_head *list, bool at_head)
+			       struct list_head *list, bool at_head)//at_head:false
 {
 	struct request_queue *q = hctx->queue;
 	struct deadline_data *dd = q->elevator->elevator_data;
 
 	spin_lock(&dd->lock);
+    //依次遍历当前进程plug->mq_list链表上的req,
 	while (!list_empty(list)) {
 		struct request *rq;
-
+        //req从原来的mq_list链表上删除掉
 		rq = list_first_entry(list, struct request, queuelist);
 		list_del_init(&rq->queuelist);
+        //把req插入到IO调度算法的fifo和红黑树队列
 		dd_insert_request(hctx, rq, at_head);
 	}
 	spin_unlock(&dd->lock);

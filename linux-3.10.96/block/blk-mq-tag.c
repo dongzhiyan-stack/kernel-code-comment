@@ -89,7 +89,8 @@ static inline bool hctx_may_queue(struct blk_mq_hw_ctx *hctx,
 	depth = max((bt->sb.depth + users - 1) / users, 4U);
 	return atomic_read(&hctx->nr_active) < depth;
 }
-
+//根据sbitmap_queue得到blk_mq_tags结构体的static_rqs[]数组里空闲的request的数组下标，返回这个下标，实际这个下标不是static_rqs[]
+//真正的数组下标，加一个偏移值才是
 static int __blk_mq_get_tag(struct blk_mq_alloc_data *data,
 			    struct sbitmap_queue *bt)
 {
@@ -101,7 +102,8 @@ static int __blk_mq_get_tag(struct blk_mq_alloc_data *data,
 	else
 		return __sbitmap_queue_get(bt);
 }
-
+//从硬件队列有关的blk_mq_tags结构体的static_rqs[]数组里得到空闲的request。获取失败则启动硬件IO数据派发，
+//之后再尝试从blk_mq_tags结构体的static_rqs[]数组里得到空闲的request
 unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 {
     //有调度器时返回硬件队列的hctx->sched_tags，无调度器时返回硬件队列的hctx->tags
@@ -123,9 +125,13 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 	} else {
 	    //返回blk_mq_tags的bitmap_tags
 		bt = &tags->bitmap_tags;
+        //应该是static_rqs[]里空闲的request的数组下标偏移，见该函数最后
 		tag_offset = tags->nr_reserved_tags;
 	}
-
+    
+//根据sbitmap_queue得到blk_mq_tags结构体的static_rqs[]数组里空闲的request的数组下标。返回这个下标，实际这个下标不是static_rqs[]
+//真正的数组下标，加一个偏移值tags->nr_reserved_tags才是。返回-1说明没有空闲request。注意，这个request就是从硬件队列有关的blk_mq_tags
+//结构static_rqs[]里分配的req。如果static_rqs[]没有空闲的request，就会执行下边的循环，启动硬件nmve传输，以腾出空闲的request
 	tag = __blk_mq_get_tag(data, bt);
 	if (tag != -1)
 		goto found_tag;
@@ -133,13 +139,15 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 	if (data->flags & BLK_MQ_REQ_NOWAIT)
 		return BLK_MQ_TAG_FAIL;
 
+    //走到这一步，说明硬件队列有关的blk_mq_tags里没有空闲的request可分配，那就会陷入休眠等待，并且执行blk_mq_run_hw_queue
+    //启动IO 数据传输，传输完成后可以释放出request，达到分配request的目的
 	ws = bt_wait_ptr(bt, data->hctx);
 	drop_ctx = data->ctx == NULL;
 	do {
 		struct sbitmap_queue *bt_prev;
 
 		prepare_to_wait(&ws->wait, &wait, TASK_UNINTERRUPTIBLE);
-
+        //再次尝试从blk_mq_tags结构体里static_rqs[]数组里得到空闲的request
 		tag = __blk_mq_get_tag(data, bt);
 		if (tag != -1)
 			break;
@@ -149,12 +157,14 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 		 * pending IO submits before going to sleep waiting for
 		 * some to complete.
 		 */
+		//启动nvme硬件IO数据派发，流程也是相当复杂
 		blk_mq_run_hw_queue(data->hctx, false);
 
 		/*
 		 * Retry tag allocation after running the hardware queue,
 		 * as running the queue may also have found completions.
 		 */
+		//再次尝试从blk_mq_tags结构体里static_rqs[]数组里得到空闲的request
 		tag = __blk_mq_get_tag(data, bt);
 		if (tag != -1)
 			break;
@@ -163,14 +173,17 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 			blk_mq_put_ctx(data->ctx);
 
 		bt_prev = bt;
+        //休眠调度
 		io_schedule();
 
+        //奇怪，再次获取软件队列和硬件队列，为什么????????????????????????难道是上边启动了硬件IO数据派发，有些req会传输完成?????
 		data->ctx = blk_mq_get_ctx(data->q);
 		data->hctx = blk_mq_map_queue(data->q, data->ctx->cpu);
+        //有调度器时返回硬件队列的hctx->sched_tags，无调度器时返回硬件队列的hctx->tags
 		tags = blk_mq_tags_from_data(data);
 		if (data->flags & BLK_MQ_REQ_RESERVED)
 			bt = &tags->breserved_tags;
-		else
+		else//再次获取bitmap_tags，流程跟前边一模一样
 			bt = &tags->bitmap_tags;
 
 		finish_wait(&ws->wait, &wait);
@@ -192,6 +205,7 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 	finish_wait(&ws->wait, &wait);
 
 found_tag:
+    //看到没有，tag+tag_offset才是空闲quest在static_rqs[]数组的真正下标
 	return tag + tag_offset;
 }
 

@@ -48,13 +48,14 @@ struct bio {
 						 */
 
 	unsigned short		bi_vcnt;	/* how many bio_vec's */
+    //bio_advance中增加
 	unsigned short		bi_idx;		/* current index into bvl_vec */
 
 	/* Number of segments in this BIO after
 	 * physical address coalescing is performed.
 	 */
 	unsigned int		bi_phys_segments;
-
+    //bio传输的字节数吧
 	unsigned int		bi_size;	/* residual I/O count */
 
 	/*
@@ -86,7 +87,9 @@ struct bio {
 	unsigned int		bi_max_vecs;	/* max bvl_vecs we can hold */
 
 	atomic_t		bi_cnt;		/* pin count */
-    //以该成员bv_offset和bv_len描述的是page cache的一片内存吧，这片数据要写入磁盘
+    //以该成员bv_offset和bv_len描述的是page cache的一片内存吧，这片数据要写入磁盘，一个bio对应了多个bio_vec
+    //突然有个感想，req里的bio的磁盘地址是连续的，但是bio对应的文件页数据保存
+    //的内存页page，内存地址可不一定连续呀，所以才会用bio_vec来单独描述bio对应的内存页page
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
 
 	struct bio_set		*bi_pool;

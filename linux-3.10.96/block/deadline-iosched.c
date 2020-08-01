@@ -22,7 +22,7 @@ static const int write_expire = 5 * HZ; /* ditto for writes, these limits are SO
 static const int writes_starved = 2;    /* max times reads can starve a write */
 static const int fifo_batch = 16;       /* # of sequential requests treated as one
 				     by the above parameters. For throughput. */
-
+//IO调度算法结构体dd
 struct deadline_data {
 	/*
 	 * run time data
@@ -44,17 +44,19 @@ struct deadline_data {
 	  blk_mq_sched_try_merge->elv_merged_request->elv_rqhash_reposition重新排序。对后项合并后的req进行一次重新排序
 	*/
 	
-	//插入req的红黑树队列的头结点，两个成员分为读和写.红黑树队列中的req排序的规则是req的磁盘起始扇区，
+	//deadline调度算法，插入req的红黑树队列的头结点，两个成员分为读和写.红黑树队列中的req排序的规则是req的磁盘起始扇区，
 	//可以认为是按照磁盘起始扇区从小到大排列的吧，见deadline_add_request()->deadline_add_rq_rb。
 	struct rb_root sort_list[2];
-    //保存rq的fifo队列，两个成员分为读和写,见deadline_add_request()，这个队列里的req是按照入队的先后时间排列的
+    //deadline调度算法，保存req的fifo队列，两个成员分为读和写,见deadline_add_request()和dd_insert_request，
+    //这个队列里的req是按照入队的先后时间排列的
 	struct list_head fifo_list[2];
 
 	/*
 	 * next in sort order. read, write or both are NULL
 	 */
-	//每次从红黑树选取一个req发给驱动传输，这个req的下一个req保存在next_rq
-	//下次deadline_dispatch_requests()选择req发给驱动时，直接使用这个next_rq
+	//每次从红黑树选取一个req发给驱动传输，这个req的下一个req保存在next_rq。
+	//elv_merge_requests->dd_merged_requests->deadline_remove_request->deadline_del_rq_rb 中赋值也赋值dd->next_rq[]。
+	//下次deadline_dispatch_requests()选择req发给驱动时，直接使用这个next_rq。赋值见deadline_del_rq_rb
 	struct request *next_rq[2];
     //如果batching大于等于fifo_batch，不再使用next_rq，否则会一直只向后使用红黑树队列的req向驱动发送传输，队列前边的req得不到发送
     //见deadline_dispatch_requests()
@@ -144,13 +146,13 @@ deadline_add_request(struct request_queue *q, struct request *rq)
 /*
  * remove rq from rbtree and fifo.
  */
-//从fifo队列剔除rq,从红黑树剔除rq
+//从fifo队列剔除rq,从红黑树剔除rq。给dd->next_rq[]赋值req的下一个req，下一次从红黑树选择req发给驱动时用到
 static void deadline_remove_request(struct request_queue *q, struct request *rq)
 {
 	struct deadline_data *dd = q->elevator->elevator_data;
     //从fifo队列剔除rq
 	rq_fifo_clear(rq);
-    //从红黑树剔除rq
+    //给dd->next_rq[]赋值req的下一个req，下一次从红黑树选择req发给驱动时用到。并且把req从红黑树中剔除
 	deadline_del_rq_rb(dd, rq);
 }
 
@@ -203,7 +205,7 @@ static void deadline_merged_request(struct request_queue *q,
 		deadline_add_rq_rb(dd, req);
 	}
 }
-//剔除next，并做一些删除req的后续处理
+//在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,还更新dd->next_rq[]赋值next的下一个req
 static void
 deadline_merged_requests(struct request_queue *q, struct request *req,
 			 struct request *next)
@@ -212,10 +214,10 @@ deadline_merged_requests(struct request_queue *q, struct request *req,
 	 * if next expires before rq, assign its expire time to rq
 	 * and move into next position (next will be deleted) in fifo
 	 */
-	//如果next的超时时间早于rq，更新到rq超时时间里
+	//如果next的超时时间早于req，更新到rq超时时间里
 	if (!list_empty(&req->queuelist) && !list_empty(&next->queuelist)) {
 		if (time_before(rq_fifo_time(next), rq_fifo_time(req))) {
-            //在fifo队里里，把req移动到next的位置后边
+            //在fifo队里，把req移动到next的位置后边
 			list_move(&req->queuelist, &next->queuelist);
             //设置req的超时时间
 			rq_set_fifo_time(req, rq_fifo_time(next));
@@ -225,7 +227,7 @@ deadline_merged_requests(struct request_queue *q, struct request *req,
 	/*
 	 * kill knowledge of next, this one is a goner
 	 */
-	//从红黑树和fifo队列剔除next
+	//从fifo队列和红黑树剔除next,还更新dd->next_rq[]赋值next的下一个req
 	deadline_remove_request(q, next);
 }
 
