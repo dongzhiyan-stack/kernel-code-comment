@@ -1,0 +1,197 @@
+blk_queue_bio->attempt_plug_merge
+
+blk_mq_init_queue->blk_mq_init_allocated_queue->blk_queue_make_request
+
+cfq_merge deadline_merge
+
+cfq_merged_requests deadline_merged_requests noop_merged_requests
+
+blk_mq_init_queue->blk_mq_init_allocated_queue->blk_mq_add_queue_tag_set
+
+elv_rb_latter_request、
+
+blk_account_io_completion
+
+//统计合并的IO数据
+blk_account_io_merge
+
+cfq_merged_request deadline_merged_request
+
+elv_rb_latter_request noop_latter_request
+
+//这里也会增加IO使用计数呀
+blk_queue_bio->attempt_back_merge->attempt_merge->blk_account_io_merge
+
+elv_rb_former_request noop_former_request
+
+static struct request *
+noop_latter_request(struct request_queue *q, struct request *rq)
+{
+	struct noop_data *nd = q->elevator->elevator_data;
+
+	if (rq->queuelist.next == &nd->queue)
+		return NULL;
+	return list_entry(rq->queuelist.next, struct request, queuelist);
+}
+
+static void drive_stat_acct(struct request *rq, int new_io)
+{
+	    //更新主块设备和块设备分区的time_in_queue和io_ticks数据
+		part_round_stats(cpu, part);
+        //有一个新的req加入队列了，增加req计数
+		part_inc_in_flight(part, rw);
+}
+
+static void
+deadline_add_request(struct request_queue *q, struct request *rq)
+{
+	struct deadline_data *dd = q->elevator->elevator_data;
+	const int data_dir = rq_data_dir(rq);
+    //rq添加到红黑树队列里
+	deadline_add_rq_rb(dd, rq);
+
+	//设置req超时时间
+	rq_set_fifo_time(rq, jiffies + dd->fifo_expire[data_dir]);
+    //req插入到fifo队列
+	list_add_tail(&rq->queuelist, &dd->fifo_list[data_dir]);
+}
+
+block 层IO调度算法深入注释，emmc或者sata盘
+
+blk_queue_bio->drive_stat_acct
+
+submit_bio->generic_make_request->blk_mq_make_request->blk_mq_bio_to_request->blk_account_io_start->part_round_stats->part_round_stats_single
+handle_irq_event_percpu->nvme_irq->nvme_process_cq->blk_mq_end_request->blk_account_io_done->part_round_stats->part_round_stats_single
+
+__elv_add_request->elv_drain_elevator->deadline_dispatch_requests->deadline_move_request->deadline_move_to_dispatch->elv_dispatch_add_tail
+
+__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn->blk_fetch_request->blk_peek_request->__elv_next_request
+
+blk_finish_plug->queue_unplugged->__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn 发送emmc命令给emmc控制器
+
+noop_dispatch  deadline_dispatch_requests  cfq_dispatch_requests
+
+inflight[1]代表主磁盘分区，比如sda；inflight[0]代表当前块设备的磁盘分区，比如sda2
+
+
+part_round_stats->part_in_flight->blk_mq_in_flight->blk_mq_check_inflight
+
+nvme_queue_rq->blk_mq_start_request->set_bit(REQ_ATOM_STARTED, &rq->atomic_flags);
+
+cfq_insert_request deadline_add_request noop_add_request
+
+增加block层代码注释，涉及到nvme，增加了3.10.0.957.27 内核的几个block mq文件
+
+
+IO进入block层需要转换为rq，获取rq时根据当前是否指定了调度器，选择从*tags 或者 *sched_tags中获取rq。
+
+
+&/nvme bio 多通道内核源码能看懂，我最大的感触是，开始想一口吃个大胖子，结果看不懂。然后我从初始化代码一点一点写注释，每个结构体都写，竟然感觉也太简单了
+&/大脑认知规律，循循渐进，但是我总是想违反这个规律
+&/nvme bio 的学习过程，我很震撼，我就是一点一点从基础的初始化过程开始啃代码，竟然就学会了，内核和docker其他知识按照这个规律去学习，还有什么是学不会的????????????????????
+
+nvme_dev_add->blk_mq_alloc_tag_set 分配和设置 blk_mq_tag_set
+nvme_dev_add->blk_mq_init_queue 
+
+nvme_dev_add->blk_mq_alloc_tag_set->blk_mq_alloc_rq_maps->__blk_mq_alloc_rq_maps->__blk_mq_alloc_rq_map->blk_mq_alloc_rq_map
+                                                                                           blk_mq_alloc_rqs
+
+nvme_alloc_admin_tags->blk_mq_init_queue->blk_mq_init_allocated_queue->blk_mq_map_swqueue
+nvme_fc_init_ctrl
+
+
+blk_mq_make_request->blk_mq_sched_bio_merge->__blk_mq_sched_bio_merge->blk_mq_map_queue
+					
+blk_mq_init_queue->blk_mq_init_allocated_queue->blk_mq_realloc_hw_ctxs->blk_mq_init_hctx->blk_mq_sched_init_hctx->blk_mq_sched_alloc_tags
+                                        
+blk_finish_plug->queue_unplugged->__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn 
+
+blk_mq_make_request->blk_mq_sched_get_request->__blk_mq_alloc_request->blk_mq_rq_ctx_init
+
+  blk_mq_get_driver_tag->blk_mq_tag_is_reserved
+  blk_mq_try_issue_list_directly->blk_mq_request_issue_directly->__blk_mq_try_issue_directly->__blk_mq_issue_directly->nvme_queue_rq->blk_mq_start_request->blk_add_timer
+  
+  blk_mq_try_issue_list_directly->blk_mq_end_request->blk_update_request->req_bio_endio
+                                                    ->__blk_mq_end_request
+  
+  blk_update_request->req_bio_endio->bio_advance
+
+deadline_add_request->deadline_add_rq_rb->elv_rb_add
+
+elv_merge->deadline_merge->elv_rb_find
+
+blk_mq_sched_try_merge->elv_merged_request->deadline_merged_request
+
+elv_add_request->__elv_add_request->elv_rqhash_add
+
+blk_queue_bio/blk_mq_make_request->add_acct_request->__elv_add_request->elv_rqhash_add
+
+blk_mq_make_request->blk_mq_merge_bio->blk_mq_attempt_merge
+
+//分配req的过程，获取tag
+blk_mq_sched_get_request->__blk_mq_alloc_request->blk_mq_get_tag->blk_mq_tags_from_data
+
+//req 与 硬件队列建立联系的过程，获取tag
+blk_mq_flush_plug_list->blk_mq_sched_insert_requests->blk_mq_try_issue_list_directly->blk_mq_request_issue_directly->__blk_mq_try_issue_directly->blk_mq_get_driver_tag->blk_mq_get_tag
+
+blk_mq_sched_insert_requests->blk_mq_insert_requests->list_splice_tail_init //把list链表的成员插入到到ctx->rq_list链表后边，然后对list清0
+
+blk_attempt_req_merge->attempt_merge->blk_account_io_merge//更新主块设备和块设备分区的time_in_queue和io_ticks IO使用计数,奇怪，没有更新合并的bio次数那个数据呀
+
+elv_merge_requests->dd_merged_requests->deadline_remove_request->deadline_del_rq_rb
+
+blk_flush_plug_list->blk_mq_flush_plug_list->blk_mq_sched_insert_requests->dd_insert_requests->dd_insert_request
+
+//启动硬件req传输过程，也会获取tag，我想不通，为什么在硬件传输时也要获取tag，难道此时获取的tag才会被nvme硬件传输，
+blk_mq_run_hw_queue->__blk_mq_delay_run_hw_queue->__blk_mq_run_hw_queue->blk_mq_sched_dispatch_requests->blk_mq_dispatch_rq_list->blk_mq_get_driver_tag->blk_mq_get_tag
+
+//统计磁盘使用率等数据
+blk_mq_make_request->blk_mq_bio_to_request->blk_account_io_start
+
+
+blk_mq_dispatch_rq_list->blk_mq_run_hw_queue      ->__blk_mq_delay_run_hw_queue->
+                       ->blk_mq_delay_run_hw_queue->__blk_mq_delay_run_hw_queue
+					   
+					  __blk_mq_run_hw_queue->blk_mq_sched_dispatch_requests->blk_mq_do_dispatch_sched->
+					                                                       ->blk_mq_do_dispatch_ctx  ->
+
+deadline_dispatch_requests->deadline_move_request
+
+//有req传输完成了，增加ios、ticks、time_in_queue、io_ticks、flight、sectors 扇区数等使用计数。
+blk_mq_end_request
+
+static struct elevator_mq_ops dd_ops = {
+	.insert_requests	= dd_insert_requests,
+	.dispatch_request	= dd_dispatch_request,
+	.next_request		= elv_rb_latter_request,
+	.former_request		= elv_rb_former_request,
+	.bio_merge		= dd_bio_merge,//合并
+	.request_merge		= dd_request_merge,
+	.requests_merged	= dd_merged_requests,
+	.request_merged		= dd_request_merged,
+	.has_work		= dd_has_work,
+	.init_sched		= dd_init_queue,
+	.exit_sched		= dd_exit_queue,
+};
+static struct elevator_type mq_deadline = {
+	.elevator_attrs = deadline_attrs,
+	.elevator_name = "mq-deadline",
+	.elevator_owner = THIS_MODULE,
+};
+static struct elevator_type iosched_deadline = {
+	.ops = {
+		.elevator_merge_fn = 		deadline_merge,
+		.elevator_merged_fn =		deadline_merged_request,
+		.elevator_merge_req_fn =	deadline_merged_requests,
+		.elevator_dispatch_fn =		deadline_dispatch_requests,
+		.elevator_add_req_fn =		deadline_add_request,
+		.elevator_former_req_fn =	elv_rb_former_request,
+		.elevator_latter_req_fn =	elv_rb_latter_request,
+		.elevator_init_fn =		deadline_init_queue,
+		.elevator_exit_fn =		deadline_exit_queue,
+	},
+
+	.elevator_attrs = deadline_attrs,
+	.elevator_name = "deadline",
+	.elevator_owner = THIS_MODULE,
+};
