@@ -43,13 +43,16 @@ struct deadline_data {
 	  blk_queue_bio->add_acct_request->__elv_add_request->elv_rqhash_add添加，elv_merge->elv_rqhash_find遍历
 	  blk_mq_sched_try_merge->elv_merged_request->elv_rqhash_reposition重新排序。对后项合并后的req进行一次重新排序
 	*/
-	
+
+    /*一直质疑为什么要有红黑树队列和fifo队列，deadline_dispatch_requests->deadline_move_request deadline核心派发函数可以解答疑问。
+    各有用处，派发req时主要是从红黑树队列寻找读写req和next req，fifo队列的一个作用是，防止某个req长时间得不到派发，每一个req有个
+    超时时间，在fifo队列超时时间到，会从队列头取出req传输。每次派发一个req，都会从fifo和红黑树队列中同时剔除，保证同步!!!!!!!!*/
 	//deadline调度算法，插入req的红黑树队列的头结点，两个成员分为读和写.红黑树队列中的req排序的规则是req的磁盘起始扇区，
 	//可以认为是按照磁盘起始扇区从小到大排列的吧，见deadline_add_request()->deadline_add_rq_rb。
-	struct rb_root sort_list[2];
+	struct rb_root sort_list[2];//红黑树队列
     //deadline调度算法，保存req的fifo队列，两个成员分为读和写,见deadline_add_request()和dd_insert_request，
     //这个队列里的req是按照入队的先后时间排列的
-	struct list_head fifo_list[2];
+	struct list_head fifo_list[2];//fifo队列
 
 	/*
 	 * next in sort order. read, write or both are NULL
@@ -57,7 +60,8 @@ struct deadline_data {
 	//每次从红黑树选取一个req发给驱动传输，这个req的下一个req保存在next_rq。
 	//elv_merge_requests->dd_merged_requests->deadline_remove_request->deadline_del_rq_rb 中赋值也赋值dd->next_rq[]。
 	//下次deadline_dispatch_requests()选择req发给驱动时，直接使用这个next_rq。赋值见deadline_del_rq_rb
-	struct request *next_rq[2];
+	struct request *next_rq[2];//两个成员，一个读一个写
+	
     //如果batching大于等于fifo_batch，不再使用next_rq，否则会一直只向后使用红黑树队列的req向驱动发送传输，队列前边的req得不到发送
     //见deadline_dispatch_requests()
 	unsigned int batching;		/* number of sequential requests made */
@@ -257,7 +261,7 @@ deadline_move_request(struct deadline_data *dd, struct request *rq)
 
 	dd->next_rq[READ] = NULL;
 	dd->next_rq[WRITE] = NULL;
-    ////从红黑树队列中取出req的下一个req作为next_rq，下次deadline_dispatch_requests选择派发给驱动的req时就可能是它了
+    //从红黑树队列中取出req的下一个req作为next_rq，下次deadline_dispatch_requests选择派发给驱动的req时就可能是它了
 	dd->next_rq[data_dir] = deadline_latter_request(rq);
     //req的磁盘空间end地址
 	dd->last_sector = rq_end_sector(rq);
@@ -295,8 +299,9 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
  * deadline_dispatch_requests selects the best request according to
  * read/write expire, fifo_batch, etc
  */
-//选的合适待派发给驱动传输的req,然后把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，将来磁盘驱动程序就是从queue_head链表取出req传输的
-//这个合适的req，来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，同手兼顾，有固定策略
+//选择合适待派发给驱动传输的req,然后把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
+//将来磁盘驱动程序就是从queue_head链表取出req传输的这个合适的req，
+//req来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，统筹兼顾，有固定策略
 static int deadline_dispatch_requests(struct request_queue *q, int force)
 {
 	struct deadline_data *dd = q->elevator->elevator_data;
@@ -325,12 +330,12 @@ static int deadline_dispatch_requests(struct request_queue *q, int force)
 	 * data direction (read / write)
 	 */
     //这应该是选择选择read或write req，因为一直选择read req给驱动传输，那write req就starve饿死了
-    //fifo队列有read req
+    //fifo队列有read req，fifo队列有write req要传送给驱动，错了，fifo和红黑树是一体的，只是用处不一样
 	if (reads) {
 		BUG_ON(RB_EMPTY_ROOT(&dd->sort_list[READ]));
-        //fifo队列有write req要传送给驱动，并且write req被饥饿次数达到上限，就强制选择跳转选择write req
-        //防止一直选择read req给驱动传输，write req得不到选择而starve饥饿，每次write req得不到选择而饥饿
-        //则starved++,writes_starved是饥饿的次数上限，starved大于writes_starved，就强制选择write req
+        //有write req要传送给驱动，并且write req被饥饿次数达到上限，就强制选择跳转选择write req
+        //防止一直选择read req给驱动传输，write req得不到选择而starve饥饿，每次write req得不到选择而饥饿则starved++，
+        //writes_starved是饥饿的次数上限，starved大于writes_starved，就强制选择write req
 		if (writes && (dd->starved++ >= dd->writes_starved))
 			goto dispatch_writes;
 
@@ -347,7 +352,7 @@ static int deadline_dispatch_requests(struct request_queue *q, int force)
 	if (writes) {
 dispatch_writes:
 		BUG_ON(RB_EMPTY_ROOT(&dd->sort_list[WRITE]));
-
+        //dd->starved清0
 		dd->starved = 0;
         //下面选择write req，就一个赋值操作
 		data_dir = WRITE;
@@ -361,14 +366,14 @@ dispatch_find_request:
 	/*
 	 * we are not running a batch, find best request for selected data_dir
 	 */
-	//deadline_check_fifo如果deadline fifo队列有超时的req要传输返回1，next_rq没有暂存req，两个条件if都成立
+	//deadline_check_fifo如果deadline fifo队列有超时的req要传输返回1，或者next_rq没有暂存req，那就从fifo队列头取出req
 	if (deadline_check_fifo(dd, data_dir) || !dd->next_rq[data_dir]) {
 		/*
 		 * A deadline has expired, the last request was in the other
 		 * direction, or we have run out of higher-sectored requests.
 		 * Start again from the request with the earliest expiry time.
 		 */
-		//取出fifo队列头的req，最早入fifo队列的req
+		//取出fifo队列头的req，最早入fifo队列的req，最早入队的req当然更容易超时
 		rq = rq_entry_fifo(dd->fifo_list[data_dir].next);
 	} else {
 		/*
@@ -387,7 +392,8 @@ dispatch_request://调到这里，req直接来自next_rq或者fifo队列，这个req就要被发给驱
 	 */
 	//batching加1
 	dd->batching++;
-    //把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，将来磁盘驱动程序就是从queue_head链表取出req传输的
+    //把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
+    //将来磁盘驱动程序就是从queue_head链表取出req传输的
 	deadline_move_request(dd, rq);
 
 	return 1;

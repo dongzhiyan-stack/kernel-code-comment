@@ -208,7 +208,7 @@ found_tag:
     //看到没有，tag+tag_offset才是空闲quest在static_rqs[]数组的真正下标
 	return tag + tag_offset;
 }
-
+//tags->bitmap_tags中按照req->tag这个tag编号释放tag
 void blk_mq_put_tag(struct blk_mq_hw_ctx *hctx, struct blk_mq_tags *tags,
 		    struct blk_mq_ctx *ctx, unsigned int tag)
 {

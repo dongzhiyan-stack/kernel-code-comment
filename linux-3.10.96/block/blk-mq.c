@@ -501,7 +501,7 @@ inline void __blk_mq_end_request(struct request *rq, int error)
 }
 EXPORT_SYMBOL(__blk_mq_end_request);
 //ÓĞreq´«ÊäÍê³ÉÁË£¬Ôö¼Óios¡¢ticks¡¢time_in_queue¡¢io_ticks¡¢flight¡¢sectorsÉÈÇøÊıµÈÊ¹ÓÃ¼ÆÊı¡£
-//ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı.»¹¸üĞÂeq->__data_lenºÍreq->buffer¡£
+//ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı.»¹¸üĞÂreq->__data_lenºÍreq->buffer¡£
 void blk_mq_end_request(struct request *rq, int error)
 {
     /* 1 Ôö¼ÓsectorsÉÈÇøÊıIOÊ¹ÓÃ¼ÆÊı£¬¼´´«ÊäµÄÉÈÇøÊı¡£¸üĞÂreq->__data_lenºÍreq->buffer
@@ -686,7 +686,7 @@ EXPORT_SYMBOL(blk_mq_start_request);
 static void __blk_mq_requeue_request(struct request *rq)
 {
 	struct request_queue *q = rq->q;
-
+    //tags->bitmap_tagsÖĞ°´ÕÕreq->tagÕâ¸ötag±àºÅÊÍ·Åtag
 	blk_mq_put_driver_tag(rq);
 
 	trace_block_rq_requeue(q, rq);
@@ -963,6 +963,7 @@ static bool flush_busy_ctx(struct sbitmap *sb, unsigned int bitnr, void *data)
 	struct blk_mq_ctx *ctx = hctx->ctxs[bitnr];
 
 	spin_lock(&ctx->lock);
+    //°Ñhctx->ctxs[[bitnr]]Õâ¸öÈí¼ş¶ÓÁĞÉÏµÄctx->rq_listÁ´±íÉÏreq×ªÒÆµ½flush_data->listÁ´±íÎ²²¿£¬È»ºóÇå¿Õctx->rq_listÁ´±í
 	list_splice_tail_init(&ctx->rq_list, flush_data->list);
 	sbitmap_clear_bit(sb, bitnr);
 	spin_unlock(&ctx->lock);
@@ -979,7 +980,9 @@ void blk_mq_flush_busy_ctxs(struct blk_mq_hw_ctx *hctx, struct list_head *list)
 		.hctx = hctx,
 		.list = list,
 	};
-
+    
+   //flush_busy_ctx:°ÑÓ²¼ş¶ÓÁĞhctx¹ØÁªµÄÈí¼ş¶ÓÁĞÉÏµÄctx->rq_listÁ´±íÉÏreq×ªÒÆµ½´«ÈëµÄlistÁ´±íÎ²²¿£¬È»ºóÇå¿Õctx->rq_listÁ´±í
+   //ÕâÑùÃ²ËÆÊÇ°ÑÓ²¼ş¶ÓÁĞhctx¹ØÁªµÄËùÓĞÈí¼ş¶ÓÁĞctx->rq_listÁ´±íÉÏµÄreqÈ«²¿ÒÆ¶¯µ½listÁ´±íÎ²²¿
 	sbitmap_for_each_set(&hctx->ctx_map, flush_busy_ctx, &data);
 }
 EXPORT_SYMBOL_GPL(blk_mq_flush_busy_ctxs);
@@ -988,7 +991,7 @@ struct dispatch_rq_data {
 	struct blk_mq_hw_ctx *hctx;
 	struct request *rq;
 };
-
+//´ÓÈí¼şctx->rq_listÈ¡³öreq£¬È»ºó´ÓÈí¼ş¶ÓÁĞÖĞÌŞ³ıreq£¬½Ó×ÅÇå³ıhctx->ctx_mapÖĞÈí¼ş¶ÓÁĞ¶ÔÓ¦µÄ±êÖ¾Î»???????
 static bool dispatch_rq_from_ctx(struct sbitmap *sb, unsigned int bitnr,
 		void *data)
 {
@@ -998,8 +1001,11 @@ static bool dispatch_rq_from_ctx(struct sbitmap *sb, unsigned int bitnr,
 
 	spin_lock(&ctx->lock);
 	if (unlikely(!list_empty(&ctx->rq_list))) {
+        //´ÓÈí¼şctxÈ¡³öreq
 		dispatch_data->rq = list_entry_rq(ctx->rq_list.next);
+        //´ÓÈí¼ş¶ÓÁĞÖĞÌŞ³ıreq
 		list_del_init(&dispatch_data->rq->queuelist);
+        //Çå³ıhctx->ctx_mapÖĞÈí¼ş¶ÓÁĞ¶ÔÓ¦µÄ±êÖ¾Î»
 		if (list_empty(&ctx->rq_list))
 			sbitmap_clear_bit(sb, bitnr);
 	}
@@ -1016,7 +1022,7 @@ struct request *blk_mq_dequeue_from_ctx(struct blk_mq_hw_ctx *hctx,
 		.hctx = hctx,
 		.rq   = NULL,
 	};
-
+    //´ÓÈí¼şctx->rq_listÈ¡³öreq£¬È»ºó´ÓÈí¼ş¶ÓÁĞÖĞÌŞ³ıreq£¬½Ó×ÅÇå³ıhctx->ctx_mapÖĞÈí¼ş¶ÓÁĞ¶ÔÓ¦µÄ±êÖ¾Î»???????
 	__sbitmap_for_each_set(&hctx->ctx_map, off,
 			       dispatch_rq_from_ctx, &data);
 
@@ -1031,10 +1037,11 @@ static inline unsigned int queued_to_index(unsigned int queued)
 	return min(BLK_MQ_MAX_DISPATCH_ORDER - 1, ilog2(queued) + 1);
 }
 //´ÓÓ²¼ş¶ÓÁĞhctxÓĞ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓĞ¿ÕÏĞÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬Ôòhctx->tags->rqs[rq->tag]=rq£¬
-//rq¼´reqÀ´×Ôµ±Ç°½ø³ÌµÄplug->mq_listÁ´±í£¬ÏÖÔÚ¸³Öµµ½ÁËÓ²¼ş¶ÓÁĞhctx->tags->rqs[rq->tag]
-//½á¹¹£¬¾Í½¨Á¢ÁËreqÓëÓ²¼ş¶ÓÁĞµÄ¹ØÏµ°É
+//rq¼´reqÀ´×Ôµ±Ç°½ø³ÌµÄplug->mq_listÁ´±í»òÕßÆäËûÁ´±í£¬ÏÖÔÚ¸³Öµµ½ÁËÓ²¼ş¶ÓÁĞhctx->tags->rqs[rq->tag]½á¹¹¡£Õâ¸ö¹ı³Ì½Ğ×ö¸øreqÔÚ
+//blk_mq_tagsÀï·ÖÅäÒ»¸ö¿ÕÏĞtag£¬½¨Á¢reqÓëÓ²¼ş¶ÓÁĞµÄ¹ØÏµ°É¡£Ã¿Ò»¸öreqÆô¶¯Ó²¼ş´«ÊäÇ°Ã²ËÆ¶¼µÃ´Óblk_mq_tagsÀï·ÖÅäÒ»¸ö¿ÕÏĞtag!!!!!
 bool blk_mq_get_driver_tag(struct request *rq, struct blk_mq_hw_ctx **hctx,
-			   bool wait)//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í
+			   bool wait)//reqÒ»ÖÖÇé¿öÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í£¬Ò²ÓĞhctx->dispatchÁ´±í
+			   //wait Îªfalse¼´±ã»ñÈ¡tagÊ§°ÜÒ²²»»áĞİÃß
 {
 	struct blk_mq_alloc_data data = {
 		.q = rq->q,
@@ -1049,14 +1056,14 @@ bool blk_mq_get_driver_tag(struct request *rq, struct blk_mq_hw_ctx **hctx,
 		data.flags |= BLK_MQ_REQ_RESERVED;
 
     //´ÓÓ²¼ş¶ÓÁĞÓĞ¹ØµÄblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êı×éÀïµÃµ½¿ÕÏĞµÄrequest¡£»ñÈ¡Ê§°ÜÔòÆô¶¯Ó²¼şIOÊı¾İÅÉ·¢£¬
-   //Ö®ºóÔÙ³¢ÊÔ´Óblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êı×éÀïµÃµ½¿ÕÏĞµÄrequest
+    //Ö®ºóÔÙ³¢ÊÔ´Óblk_mq_tags½á¹¹ÌåµÄstatic_rqs[]Êı×éÀïµÃµ½¿ÕÏĞµÄrequest
 	rq->tag = blk_mq_get_tag(&data);
 	if (rq->tag >= 0) {
 		if (blk_mq_tag_busy(data.hctx)) {
 			rq->cmd_flags |= REQ_MQ_INFLIGHT;
 			atomic_inc(&data.hctx->nr_active);
 		}
-        //¶Ôblk_mq_tagsµÄrqs[rq->tag]¸³Öµ
+        //¶Ôhctx->tags->rqs[rq->tag]¸³Öµ
 		data.hctx->tags->rqs[rq->tag] = rq;
 	}
 
@@ -1125,6 +1132,7 @@ static bool blk_mq_mark_tag_wait(struct blk_mq_hw_ctx **hctx,
 	 * allocation failure and adding the hardware queue to the wait
 	 * queue.
 	 */
+	//blk_mq_get_driver_tagÀï»ñÈ¡tagÊ§°Ü¾Í»áĞİÃß
 	ret = blk_mq_get_driver_tag(rq, hctx, false);
 
 	if (!ret) {
@@ -1178,8 +1186,11 @@ static void blk_mq_update_dispatch_busy(struct blk_mq_hw_ctx *hctx, bool busy)
 /*
  * Returns true if we did some work AND can potentially do more.
  */
+//listÀ´×Ôhctx->dispatchÓ²¼şÅÉ·¢¶ÓÁĞ»òÕßÆäËûµÄ£¬±éÀúlistÉÏµÄreq£¬ÏÈ¸øreqÔÚÓ²¼ş¶ÓÁĞhctxµÄblk_mq_tagsÀï·ÖÅäÒ»¸ö¿ÕÏĞtag£¬¾ÍÊÇ
+//½¨Á¢reqÓëÓ²¼ş¶ÓÁĞµÄÁªÏµ°É£¬È»ºóÖ±½ÓÆô¶¯nvmeÓ²¼ş´«Êä¡£¿´×ÅÈÎÒ»¸öreqÒªÆô¶¯Ó²¼ş´«Êä£¬¶¼Òª´Óblk_mq_tags½á¹¹ÀïµÃµ½Ò»¸ö¿ÕÏĞµÄtag¡£
+//Èç¹ûnvmeÓ²¼ş¶ÓÁĞ·±Ã¦£¬»¹Òª°ÑlistÊ£ÓàµÄreq×ªÒÆµ½hctx->dispatch¶ÓÁĞ£¬È»ºóÆô¶¯nvmeÒì²½´«Êä
 bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
-			     bool got_budget)
+			     bool got_budget)//listÀ´×Ôhctx->dispatchÓ²¼şÅÉ·¢¶ÓÁĞ»òÕßÆäËû¶ÓÁĞ
 {
 	struct blk_mq_hw_ctx *hctx;
 	bool no_tag = false;
@@ -1205,13 +1216,16 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 	errors = queued = 0;
 	do {
 		struct blk_mq_queue_data bd;
-
+        //hctx->dispatchÓ²¼şÅÉ·¢¶ÓÁĞÉÏµÄreq
 		rq = list_first_entry(list, struct request, queuelist);
-
+        //ÏÈ¸ù¾İrq->mq_ctx->cpuÕâ¸öCPU±àºÅ´Óq->mq_map[cpu]ÕÒµ½Ó²¼ş¶ÓÁĞ±àºÅ£¬ÔÙq->queue_hw_ctx[Ó²¼ş¶ÓÁĞ±àºÅ]·µ»Ø
+        //Ó²¼ş¶ÓÁĞÎ¨Ò»µÄblk_mq_hw_ctx½á¹¹Ìå,Ã¿¸öCPU¶¼¶ÔÓ¦ÁËÎ¨Ò»µÄÓ²¼ş¶ÓÁĞ
 		hctx = blk_mq_map_queue(rq->q, rq->mq_ctx->cpu);
 		if (!got_budget && !blk_mq_get_dispatch_budget(hctx))
 			break;
 
+        //´ÓÓ²¼ş¶ÓÁĞhctxÓĞ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓĞ¿ÕÏĞÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬Ôòhctx->tags->rqs[rq->tag]=rq£¬
+        //rq¼´reqÀ´×Ôhctx->dispatchµ±Ç°½ø³ÌµÄÁ´±í£¬ÏÖÔÚ¸³Öµµ½ÁËÓ²¼ş¶ÓÁĞhctx->tags->rqs[rq->tag]½á¹¹£¬¾Í½¨Á¢ÁËreqÓëÓ²¼ş¶ÓÁĞµÄ¹ØÏµ°É
 		if (!blk_mq_get_driver_tag(rq, NULL, false)) {
 			/*
 			 * The initial allocation attempt failed, so we need to
@@ -1220,20 +1234,22 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 			 * before we add this entry back on the dispatch list,
 			 * we'll re-run it below.
 			 */
+			//»ñÈ¡tagÊ§°Ü£¬ÔòÒª³¢ÊÔ¿ªÊ¼ĞİÃßÁË,º¯Êı·µ»ØÊ±»ñÈ¡tag¾Í³É¹¦ÁË
 			if (!blk_mq_mark_tag_wait(&hctx, rq)) {
 				blk_mq_put_dispatch_budget(hctx);
 				/*
 				 * For non-shared tags, the RESTART check
 				 * will suffice.
 				 */
+				//¹²Ïítag?????
 				if (hctx->flags & BLK_MQ_F_TAG_SHARED)
 					no_tag = true;
 				break;
 			}
 		}
-
+        //´ÓlistÁ´±íÌŞ³ıreq
 		list_del_init(&rq->queuelist);
-
+        //bd.rq±£´æÒª´«ÊäµÄreq
 		bd.rq = rq;
 		bd.list = dptr;
 
@@ -1242,15 +1258,18 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 		 * but can't assign a driver tag to it.
 		 */
 		if (list_empty(list))
-			bd.last = true;
+			bd.last = true;//listÁ´±í¿Õbd.lastÉèÎªTRUE
 		else {
+            //»ñÈ¡Á´±íµÚÒ»¸öreqÓÚnxt£¬Èç¹ûÕâ¸öreq»ñÈ¡²»µ½tag£¬bd.lastÖÃÎªTRUE£¬ÕâÓĞÉ¶ÓÃ
 			nxt = list_first_entry(list, struct request, queuelist);
 			bd.last = !blk_mq_get_driver_tag(nxt, NULL, false);
 		}
 
+        //¸ù¾İreqÉèÖÃnvme_command,°ÑreqÌí¼Óµ½q->timeout_list£¬²¢ÇÒÆô¶¯q->timeout,°ÑĞÂµÄnvme cmd¸´ÖÆµ½nvmeq->sq_cmds[]¶ÓÁĞ
+        //Æô¶¯Ó²¼şnvmeÓ²¼ş´«Êä
 		ret = q->mq_ops->queue_rq(hctx, &bd);//nvme_queue_rq
 		switch (ret) {
-		case BLK_MQ_RQ_QUEUE_OK:
+		case BLK_MQ_RQ_QUEUE_OK://´«ÊäÍê³É£¬queued++±íÊ¾´«ÊäÍê³ÉµÄreq
 			queued++;
 			break;
 		case BLK_MQ_RQ_QUEUE_BUSY:
@@ -1263,7 +1282,9 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 				nxt = list_first_entry(list, struct request, queuelist);
 				blk_mq_put_driver_tag(nxt);
 			}
+            //nvmeÓ²¼ş¶ÓÁĞ·±Ã¦µÄ»°£¬»¹Òª°ÑreqÔÙÌí¼Ó»álistÁ´±í
 			list_add(&rq->queuelist, list);
+            //tags->bitmap_tagsÖĞ°´ÕÕreq->tagÕâ¸ötag±àºÅÊÍ·Åtag,Óëblk_mq_get_driver_tag()»ñÈ¡tagÏà·´
 			__blk_mq_requeue_request(rq);
 			break;
 		default:
@@ -1275,6 +1296,7 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 			break;
 		}
 
+        //Èç¹ûnvmeÓ²¼ş¶ÓÁĞ·±Ã¦£¬breakÌø³ö
 		if (ret == BLK_MQ_RQ_QUEUE_BUSY || ret == BLK_MQ_RQ_QUEUE_DEV_BUSY)
 			break;
 
@@ -1284,18 +1306,22 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 		 */
 		if (!dptr && list->next != list->prev)
 			dptr = &driver_list;
-	} while (!list_empty(list));
+	}
+    while (!list_empty(list));
 
+    //ÕâÊÇÊ²Ã´²Ù×÷?????´«ÊäÍê³ÉÒ»¸öreq¼Ó1??????
 	hctx->dispatched[queued_to_index(queued)]++;
 
 	/*
 	 * Any items that need requeuing? Stuff them into hctx->dispatch,
 	 * that is where we will continue on next queue run.
 	 */
+	//listÁ´±í²»¿Õ£¬ËµÃ÷nvmeÓ²¼ş¶ÓÁĞÃ¦£¬ÓĞ²¿·ÖreqÃ»ÓĞ´«Êä
 	if (!list_empty(list)) {
 		bool needs_restart;
 
 		spin_lock(&hctx->lock);
+        //ÕâÀïÊÇ°ÑlistÁ´±íÉÏÃ»ÓĞ´«ÊäµÄreqÒÆ¶¯µ½hctx->dispatchÁ´±í
 		list_splice_init(list, &hctx->dispatch);
 		spin_unlock(&hctx->lock);
 
@@ -1320,16 +1346,24 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 		 * bit is set, run queue after a delay to avoid IO stalls
 		 * that could otherwise occur if the queue is idle.
 		 */
+		//²âÊÔhctx->stateÊÇ·ñÉèÖÃÁËBLK_MQ_S_SCHED_RESTARTÎ»£¬blk_mq_sched_dispatch_requests()¾Í»áÉèÖÃÕâ¸ö±êÖ¾Î»
 		needs_restart = blk_mq_sched_needs_restart(hctx);
-		if (!needs_restart ||
-		    (no_tag && list_empty_careful(&hctx->dispatch_wait.task_list)))
+		if (!needs_restart ||(no_tag && list_empty_careful(&hctx->dispatch_wait.task_list)))
+		    //ÔÙ´Îµ÷ÓÃblk_mq_run_hw_queue(),true±íÊ¾ÔÊĞíÒì²½
 			blk_mq_run_hw_queue(hctx, true);
+        
+	    //Èç¹ûÉèÖÃÁËBLK_MQ_S_SCHED_RESTART±êÖ¾Î»£¬²¢ÇÒÓ²¼ş¶ÓÁĞ·±Ã¦µ¼ÖÂÁË²¿·ÖreqÃ»ÓĞÀ´µÃ¼°´«ÊäÍê
 		else if (needs_restart && (ret == BLK_MQ_RQ_QUEUE_BUSY))
+            //ÔÙ´Îµ÷ÓÃblk_mq_delay_run_hw_queue£¬µ«Õâ´ÎÊÇÒì²½´«Êä£¬¼´¿ªÆôkblockd_workqueueÄÚºËÏß³Ì´«Êä
 			blk_mq_delay_run_hw_queue(hctx, BLK_MQ_RESOURCE_DELAY);
-
+        
+        //¸üĞÂhctx->dispatch_busy
 		blk_mq_update_dispatch_busy(hctx, true);
+
+        //·µ»Øfalse£¬ËµÃ÷Ó²¼ş¶ÓÁĞ·±Ã¦
 		return false;
-	} else
+	}
+    else
 		blk_mq_update_dispatch_busy(hctx, false);
 
 	/*
@@ -1352,6 +1386,9 @@ static void __blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx)
 	might_sleep_if(hctx->flags & BLK_MQ_F_BLOCKING);
 
 	hctx_lock(hctx, &srcu_idx);
+//¸÷ÖÖ¸÷Ñù³¡¾°µÄreqÅÉ·¢£¬hctx->dispatchÓ²¼ş¶ÓÁĞdispatchÁ´±íÉÏµÄreqÅÉ·¢;ÓĞdeadlineµ÷¶ÈËã·¨Ê±ºìºÚÊ÷»òÕßfifoµ÷¶È¶ÓÁĞÉÏµÄreqÅÉ·¢£¬
+//ÎŞIOµ÷¶ÈËã·¨Ê±£¬Ó²¼ş¶ÓÁĞ¹ØÁªµÄËùÓĞÈí¼ş¶ÓÁĞctx->rq_listÉÏµÄreqµÄÅÉ·¢µÈµÈ¡£ÅÉ·¢¹ı³ÌÓ¦¸Ã¶¼ÊÇµ÷ÓÃblk_mq_dispatch_rq_list()£¬
+//nvmeÓ²¼ş¶ÓÁĞ²»Ã¦Ö±½ÓÆô¶¯req´«Êä£¬·±Ã¦µÄ»°Ôò°ÑÊ£ÓàµÄreq×ªÒÆµ½hctx->dispatch¶ÓÁĞ£¬È»ºóÆô¶¯nvmeÒì²½´«Êä
 	blk_mq_sched_dispatch_requests(hctx);
 	hctx_unlock(hctx, srcu_idx);
 }
@@ -1387,10 +1424,13 @@ static void __blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async,
 	if (unlikely(blk_mq_hctx_stopped(hctx) ||
 		     !blk_mq_hw_queue_mapped(hctx)))
 		return;
-
+    //Í¬²½´«Êä
 	if (!async && !(hctx->flags & BLK_MQ_F_BLOCKING)) {
 		int cpu = get_cpu();
 		if (cpumask_test_cpu(cpu, hctx->cpumask)) {
+//¸÷ÖÖ¸÷Ñù³¡¾°µÄreqÅÉ·¢£¬hctx->dispatchÓ²¼ş¶ÓÁĞdispatchÁ´±íÉÏµÄreqÅÉ·¢;ÓĞdeadlineµ÷¶ÈËã·¨Ê±ºìºÚÊ÷»òÕßfifoµ÷¶È¶ÓÁĞÉÏµÄreqÅÉ·¢£¬
+//ÎŞIOµ÷¶ÈËã·¨Ê±£¬Ó²¼ş¶ÓÁĞ¹ØÁªµÄËùÓĞÈí¼ş¶ÓÁĞctx->rq_listÉÏµÄreqµÄÅÉ·¢µÈµÈ¡£ÅÉ·¢¹ı³ÌÓ¦¸Ã¶¼ÊÇµ÷ÓÃblk_mq_dispatch_rq_list()£¬
+//nvmeÓ²¼ş¶ÓÁĞ²»Ã¦Ö±½ÓÆô¶¯req´«Êä£¬·±Ã¦µÄ»°Ôò°ÑÊ£ÓàµÄreq×ªÒÆµ½hctx->dispatch¶ÓÁĞ£¬È»ºóÆô¶¯nvmeÒì²½´«Êä
 			__blk_mq_run_hw_queue(hctx);
 			put_cpu();
 			return;
@@ -1398,7 +1438,9 @@ static void __blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async,
 
 		put_cpu();
 	}
-
+    //ÏÔÈ»ÕâÊÇÆô¶¯Òì²½´«Êä£¬¿ªÆôkblockd_workqueueÄÚºËÏß³Ìworkqueue£¬Òì²½Ö´ĞĞhctx->run_work¶ÔÓ¦µÄworkº¯Êıblk_mq_run_work_fn
+    //Êµ¼Êblk_mq_run_work_fnÀïÖ´ĞĞµÄ»¹ÊÇ__blk_mq_run_hw_queue£¬¹À¼ÆÊÇÑÓ³ÙmsecsÊ±¼äÔÙÖ´ĞĞÒ»±é__blk_mq_run_hw_queue£¬nvmeÓ²¼ş
+    //¶ÓÁĞ¾Í²»ÔÙ·±Ã¦ÁË°É??????ÍòÒ»´ËÊ±»¹ÊÇ·±Ã¦ÔõÃ´°ì???????ÊÇ·ñÓĞ¿ÉÄÜÕâÖÖ³¡¾°ÏÂ»¹ÊÇ»ánvmeÓ²¼ş¶ÓÁĞ·±Ã¦?????????????????????
 	kblockd_mod_delayed_work_on(blk_mq_hctx_next_cpu(hctx), &hctx->run_work,
 				    msecs_to_jiffies(msecs));
 }
@@ -1410,7 +1452,7 @@ void blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs)
 EXPORT_SYMBOL(blk_mq_delay_run_hw_queue);
 
 //Æô¶¯Ó²¼ş¶ÓÁĞÉÏµÄreqÅÉ·¢
-bool blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async)
+bool blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async)//async:true»òÕßfalse¶¼ÓĞ
 {
 	int srcu_idx;
 	bool need_run;
@@ -1428,6 +1470,7 @@ bool blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async)
 		blk_mq_hctx_has_pending(hctx);
 	hctx_unlock(hctx, srcu_idx);
 
+    //ÓĞreqĞèÒªÓ²¼ş´«Êä
 	if (need_run) {
 		__blk_mq_delay_run_hw_queue(hctx, async, 0);
 		return true;
@@ -1545,7 +1588,9 @@ static void blk_mq_run_work_fn(struct work_struct *work)
 	struct blk_mq_hw_ctx *hctx;
 
 	hctx = container_of(work, struct blk_mq_hw_ctx, run_work.work);
-
+//¸÷ÖÖ¸÷Ñù³¡¾°µÄreqÅÉ·¢£¬hctx->dispatchÓ²¼ş¶ÓÁĞdispatchÁ´±íÉÏµÄreqÅÉ·¢;ÓĞdeadlineµ÷¶ÈËã·¨Ê±ºìºÚÊ÷»òÕßfifoµ÷¶È¶ÓÁĞÉÏµÄreqÅÉ·¢£¬
+//ÎŞIOµ÷¶ÈËã·¨Ê±£¬Ó²¼ş¶ÓÁĞ¹ØÁªµÄËùÓĞÈí¼ş¶ÓÁĞctx->rq_listÉÏµÄreqµÄÅÉ·¢µÈµÈ¡£ÅÉ·¢¹ı³ÌÓ¦¸Ã¶¼ÊÇµ÷ÓÃblk_mq_dispatch_rq_list()£¬
+//nvmeÓ²¼ş¶ÓÁĞ²»Ã¦Ö±½ÓÆô¶¯req´«Êä£¬·±Ã¦µÄ»°Ôò°ÑÊ£ÓàµÄreq×ªÒÆµ½hctx->dispatch¶ÓÁĞ£¬È»ºóÆô¶¯nvmeÒì²½´«Êä
 	__blk_mq_run_hw_queue(hctx);
 }
 
@@ -1707,6 +1752,7 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 	}
 }
 
+//¸³ÖµreqÉÈÇøÆğÊ¼µØÖ·£¬req½áÊøµØÖ·£¬rq->bio = rq->biotail=bio£¬Í³¼Æ´ÅÅÌÊ¹ÓÃÂÊµÈÊı¾İ
 static void blk_mq_bio_to_request(struct request *rq, struct bio *bio)
 {
     //¸³ÖµreqÉÈÇøÆğÊ¼µØÖ·£¬req½áÊøµØÖ·£¬rq->bio = rq->biotail=bio
@@ -1749,8 +1795,8 @@ static inline void blk_mq_queue_io(struct blk_mq_hw_ctx *hctx,
 	spin_unlock(&ctx->lock);
 }
 
-static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *rq)//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í
-{
+static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *rq)
+{//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í£¬ÓĞÊ±ÊÇ¸Õ·ÖÅäµÄĞÂreq
 	struct request_queue *q = rq->q;
 	struct blk_mq_queue_data bd = {
 		.rq = rq,
@@ -1786,7 +1832,7 @@ static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *r
 //½¨Á¢reqºÍÓ²¼ş¶ÓÁĞhctxµÄÁªÏµ¡£È»ºóµ÷ÓÃnvme_queue_rq£¬¸ù¾İreqÉèÖÃnvme command£¬Æô¶¯q->timeout¶¨Ê±Æ÷µÈµÈ,Õâ¿´×ÅÊÇreq
 //Ö±½Ó·¢¸ønvmeÓ²¼ş´«ÊäÁË¡£Èç¹û²»ÄÜÖ±½Ó·¢¸ønvmeÓ²¼ş´«Êä£¬Ôò°ÑreqÌí¼Óµ½Ó²¼ş¶ÓÁĞhctx->dispatch¶ÓÁĞ£¬¼ä½ÓÆô¶¯reqÓ²¼şÅÉ·¢
 static int __blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
-						struct request *rq,//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í
+						struct request *rq,//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í£¬ÓĞÊ±ÊÇ¸Õ·ÖÅäµÄĞÂreq
 						bool bypass_insert)
 {
 	struct request_queue *q = rq->q;
@@ -1812,15 +1858,15 @@ static int __blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 		goto insert;
 
     //´ÓÓ²¼ş¶ÓÁĞhctxÓĞ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓĞ¿ÕÏĞÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬
-    //½Ó×Åhctx->tags->rqs[rq->tag]=rq£¬rq»òÕßreqÀ´×Ôµ±Ç°½ø³ÌµÄplug->mq_listÁ´±í£¬ÏÖÔÚ¸³Öµµ½ÁËÓ²¼ş¶ÓÁĞhctx->tags->rqs[rq->tag]
-    //½á¹¹£¬¾Í½¨Á¢ÁËreqÓëÓ²¼ş¶ÓÁĞµÄ¹ØÏµ¡£Èç¹û´Óblk_mq_tagsµÃµ½¿ÕÏĞµÄreq³É¹¦£¬if³ÉÁ¢
+    //½Ó×Åhctx->tags->rqs[rq->tag]=rq£¬ÏÖÔÚ¸³Öµµ½ÁËÓ²¼ş¶ÓÁĞhctx->tags->rqs[rq->tag]
+    //½á¹¹£¬¾Í½¨Á¢ÁËreqÓëÓ²¼ş¶ÓÁĞµÄ¹ØÏµ¡£Èç¹û´Óblk_mq_tagsÃ»ÓĞµÃµ½¿ÕÏĞµÄreq³É¹¦£¬if²Å³ÉÁ¢
 	if (!blk_mq_get_driver_tag(rq, NULL, false)) {
 		blk_mq_put_dispatch_budget(hctx);//Ã»É¶ÊµÖÊ²Ù×÷
 		goto insert;
 	}
     
     //µ÷ÓÃnvme_queue_rq£¬¸ù¾İreqÉèÖÃnvme command,°ÑreqÌí¼Óµ½q->timeout_list£¬²¢ÇÒÆô¶¯q->timeout¶¨Ê±Æ÷,°ÑĞÂµÄnvme command
-    //¸´ÖÆµ½nvmeq->sq_cmds[]¶ÓÁĞ£¬Õâ¿´×ÅÊÇreqÖ±½Ó·¢¸ønvmeÓ²¼ş´«ÊäÁË
+    //¸´ÖÆµ½nvmeq->sq_cmds[]¶ÓÁĞ£¬Õâ¿´×ÅÊÇreqÖ±½Ó·¢¸ønvmeÓ²¼ş´«ÊäÁË¡£ÕâÑùÖ±½Ó´«Êäreq£¬²»ºÏ²¢req£¬ÊÇ²»ÊÇĞ§ÂÊ»áºÜµÍÑ½????????
 	return __blk_mq_issue_directly(hctx, rq);
     
 insert:
@@ -1828,11 +1874,11 @@ insert:
 		return BLK_MQ_RQ_QUEUE_BUSY;
 
     //Ö´ĞĞÕâ¸öº¯Êı£¬ËµÃ÷reqÃ»ÓĞÖ±½Ó·¢ËÍ¸ønvmeÓ²¼ş¡£
-    //°ÑreqÌí¼Óµ½Ó²¼ş¶ÓÁĞhctx->dispatch¶ÓÁĞ£¬¼ä½ÓÆô¶¯reqÓ²¼şÅÉ·¢
+    //°ÑreqÌí¼Óµ½Ó²¼ş¶ÓÁĞhctx->dispatch¶ÓÁĞ£¬¼ä½ÓÆô¶¯reqÓ²¼şÅÉ·¢£¬Àï±ß»áÖ´ĞĞblk_mq_run_hw_queue()
 	blk_mq_request_bypass_insert(rq, run_queue);
 	return BLK_MQ_RQ_QUEUE_OK;
 }
-
+//
 static void blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 				      struct request *rq)
 {
@@ -1841,16 +1887,23 @@ static void blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 
 	might_sleep_if(hctx->flags & BLK_MQ_F_BLOCKING);
 	hctx_lock(hctx, &srcu_idx);
+    
+//´ÓÓ²¼ş¶ÓÁĞhctxÓĞ¹ØµÄblk_mq_tags½á¹¹ÌåÀïµÃµ½µÄreqÒ»Ï¯Ö®µØ£¬ÓĞ¿ÕÏĞÎ»ÖÃ¿ÉÒÔ¸øreqÊ±£¬Ôòhctx->tags->rqs[rq->tag]=rq
+//½¨Á¢reqºÍÓ²¼ş¶ÓÁĞhctxµÄÁªÏµ¡£È»ºóµ÷ÓÃnvme_queue_rq£¬¸ù¾İreqÉèÖÃnvme command£¬Æô¶¯q->timeout¶¨Ê±Æ÷µÈµÈ,Õâ¿´×ÅÊÇreq
+//Ö±½Ó·¢¸ønvmeÓ²¼ş´«ÊäÁË¡£Èç¹û²»ÄÜÖ±½Ó·¢¸ønvmeÓ²¼ş´«Êä£¬Ôò°ÑreqÌí¼Óµ½Ó²¼ş¶ÓÁĞhctx->dispatch¶ÓÁĞ£¬¼ä½ÓÆô¶¯reqÓ²¼şÅÉ·¢
 	ret = __blk_mq_try_issue_directly(hctx, rq, false);
+    //Èç¹ûÓ²¼ş¶ÓÁĞÃ¦£¬°ÑreqÌí¼Óµ½Ó²¼ş¶ÓÁĞhctx->dispatch¶ÓÁĞ£¬¼ä½ÓÆô¶¯reqÓ²¼şÅÉ·¢
 	if (ret == BLK_MQ_RQ_QUEUE_BUSY || ret == BLK_MQ_RQ_QUEUE_DEV_BUSY)
 		blk_mq_request_bypass_insert(rq, true);
+//ÓĞreq´«ÊäÍê³ÉÁË£¬Ôö¼Óios¡¢ticks¡¢time_in_queue¡¢io_ticks¡¢flight¡¢sectorsÉÈÇøÊıµÈÊ¹ÓÃ¼ÆÊı¡£
+//ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı.»¹¸üĞÂreq->__data_lenºÍreq->buffer¡
 	else if (ret != BLK_MQ_RQ_QUEUE_OK)
 		blk_mq_end_request(rq, ret);
 
 	hctx_unlock(hctx, srcu_idx);
 }
 
-int blk_mq_request_issue_directly(struct request *rq)//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í
+int blk_mq_request_issue_directly(struct request *rq)//reqÀ´×Ôµ±Ç°½ø³Ìplug->mq_listÁ´±í£¬ÓĞÊ±ÊÇ¸Õ·ÖÅäµÄĞÂreq
 {
 	int ret;
 	int srcu_idx;
@@ -1976,7 +2029,7 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
 			trace_block_plug(q);
 		else
 			last = list_entry_rq(plug->mq_list.prev);
-        //µ±Ç°½ø³ÌµÄplug_listÁ´±íÉÏµÄreqÊı¾İÁ¿´óÓÚBLK_MAX_REQUEST_COUNT£¬Ç¿ÖÆ°ÑreqË¢µ½´ÅÅÌ
+        //µ±Ç°½ø³ÌµÄplug_listÁ´±íÉÏµÄreqÊı¾İÁ¿´óÓÚBLK_MAX_REQUEST_COUNT£¬Ö´ĞĞblk_flush_plug_listÇ¿ÖÆ°ÑreqË¢µ½´ÅÅÌ
 		if (request_count >= BLK_MAX_REQUEST_COUNT || (last &&
 		    blk_rq_bytes(last) >= BLK_PLUG_FLUSH_SIZE)) {
 			blk_flush_plug_list(plug, false);
@@ -1985,7 +2038,9 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
         //°ÑreqÌí¼Óµ½plug->mq_listÁ´±íÉÏ
 		list_add_tail(&rq->queuelist, &plug->mq_list);
 	}
-    else if (plug && !blk_queue_nomerges(q)) {
+    else if (plug && !blk_queue_nomerges(q)) {//NONE Ã»ÓĞIOµ÷¶ÈËã·¨µÄ×ßÕâÀï
+        
+        //¸³ÖµreqÉÈÇøÆğÊ¼µØÖ·£¬req½áÊøµØÖ·£¬rq->bio = rq->biotail=bio£¬Í³¼Æ´ÅÅÌÊ¹ÓÃÂÊµÈÊı¾İ
 		blk_mq_bio_to_request(rq, bio);
 
 		/*
@@ -2009,6 +2064,7 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
 			blk_mq_try_issue_directly(data.hctx, same_queue_rq);
 		}
 	}
+    //mq-deadlineÓ²¼ş¶ÓÁĞÊı´óÓÚ1£¬²¢ÇÒwriteÊÇsync²Ù×÷
     else if ((q->nr_hw_queues > 1 && is_sync) || (!q->elevator &&
 			!data.hctx->dispatch_busy)) {
 		blk_mq_put_ctx(data.ctx);
@@ -2540,6 +2596,7 @@ static void blk_mq_map_swqueue(struct request_queue *q,
  * Caller needs to ensure that we're either frozen/quiesced, or that
  * the queue isn't live yet.
  */
+//¹²Ïítag£¬ÉèÖÃµÄ»°£¬ÔÚblk_mq_dispatch_rq_list()Æô¶¯req nvmeÓ²¼ş´«ÊäÇ°»ñÈ¡tagÊ±£¬¼´±ã·ÖÅä²»µ½tagÒ²²»»áÊ§°Ü£¬ÒòÎª¹²Ïítag
 static void queue_set_hctx_shared(struct request_queue *q, bool shared)
 {
 	struct blk_mq_hw_ctx *hctx;

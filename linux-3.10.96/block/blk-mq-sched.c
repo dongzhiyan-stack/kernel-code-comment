@@ -71,6 +71,7 @@ static void blk_mq_sched_assign_ioc(struct request_queue *q,
  * Mark a hardware queue as needing a restart. For shared queues, maintain
  * a count of how many hardware queues are marked for restart.
  */
+//标记hctx->state的BLK_MQ_S_SCHED_RESTART标志位
 static void blk_mq_sched_mark_restart_hctx(struct blk_mq_hw_ctx *hctx)
 {
 	if (test_bit(BLK_MQ_S_SCHED_RESTART, &hctx->state))
@@ -178,6 +179,9 @@ void blk_mq_sched_put_request(struct request *rq)
  * its queue by itself in its completion handler, so we don't need to
  * restart queue if .get_budget() returns BLK_STS_NO_RESOURCE.
  */
+//执行deadline算法派发函数，循环从fifo或者红黑树队列选择待派发给传输的req，然后给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，
+//就是建立req与硬件队列的联系吧。然后直接启动nvme硬件传输。如果nvme硬件队列繁忙，则把req转移到hctx->dispatch队列，然后启动nvme异步
+//传输。硬件队列繁忙或者deadline算法队列没有req了则跳出循环。
 static void blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 {
 	struct request_queue *q = hctx->queue;
@@ -188,12 +192,14 @@ static void blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 		struct request *rq;
 
 		if (e->aux->ops.mq.has_work &&
-				!e->aux->ops.mq.has_work(hctx))
+				!e->aux->ops.mq.has_work(hctx))//dd_has_work，判断有req要传输吧，无则break
 			break;
 
 		if (!blk_mq_get_dispatch_budget(hctx))
 			break;
 
+ //执行deadline算法派发函数，从fifo或者红黑树队列选择待派发的req返回。然后设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
+ //req来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，统筹兼顾，有固定策略
 		rq = e->aux->ops.mq.dispatch_request(hctx);//dd_dispatch_request
 		if (!rq) {
 			blk_mq_put_dispatch_budget(hctx);
@@ -205,18 +211,29 @@ static void blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 		 * if this rq won't be queued to driver via .queue_rq()
 		 * in blk_mq_dispatch_rq_list().
 		 */
+		//把选择出来派发的req加入局部变量rq_list链表
 		list_add(&rq->queuelist, &rq_list);
-	} while (blk_mq_dispatch_rq_list(q, &rq_list, true));
+
+//blk_mq_dispatch_rq_list作用:遍历rq_list上的req，先给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，就是
+//建立req与硬件队列的联系吧，然后直接启动nvme硬件传输。看着任一个req要启动硬件传输，都要从blk_mq_tags结构里得到一个空闲的tag。
+//如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输。硬件队列繁忙返回flase!!!!!!
+
+//这个设计我觉得有问题，rq_list链表有啥用?每次dd_dispatch_request从算法队列里取出一个待派发的req，放到rq_list，接着就执行
+//blk_mq_dispatch_rq_list启动req传输，rq_list只有一个req呀，为什么不多积攒几个req到rq_list再执行blk_mq_dispatch_rq_list呢??????????
+	}while (blk_mq_dispatch_rq_list(q, &rq_list, true));//硬件队列繁忙或者rq_list链表空则返回flase，跳出循环
+    
 }
 
 static struct blk_mq_ctx *blk_mq_next_ctx(struct blk_mq_hw_ctx *hctx,
 					  struct blk_mq_ctx *ctx)
 {
+    //硬件队列hctx关联的第ctx->index_hw个软件队列是ctx
 	unsigned idx = ctx->index_hw;
 
+    //显然达到硬件队列关联的最大软件队列数，则从关联的0号软件队列开始
 	if (++idx == hctx->nr_ctx)
 		idx = 0;
-
+    //返回硬件队列关联的第idx的软件队列
 	return hctx->ctxs[idx];
 }
 
@@ -225,48 +242,70 @@ static struct blk_mq_ctx *blk_mq_next_ctx(struct blk_mq_hw_ctx *hctx,
  * its queue by itself in its completion handler, so we don't need to
  * restart queue if .get_budget() returns BLK_STS_NO_RESOURCE.
  */
+//依次循环遍历hctx硬件队列关联的所有软件队列，依次取出一个软件队列ctx->rq_list上的req加入rq_list局部链表，执行blk_mq_dispatch_rq_list()硬件派发req。
+//如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输。循环退出条件是，nvme硬件队列繁忙
+//或者hctx硬件队列关联的所有软件队列上的req全都派发完。有个疑问，如果是nvme硬件队列繁忙，那有可能有些软件队列上的req还没来得及派发呀?????????????
 static void blk_mq_do_dispatch_ctx(struct blk_mq_hw_ctx *hctx)
 {
 	struct request_queue *q = hctx->queue;
 	LIST_HEAD(rq_list);
 	struct blk_mq_ctx *ctx = READ_ONCE(hctx->dispatch_from);
 
+    //依次遍历hctx硬件队列关联的所有软件队列
 	do {
 		struct request *rq;
 
+        //这应该是检测硬件队列关联的软件队列有没有待传输的req吧???????
 		if (!sbitmap_any_bit_set(&hctx->ctx_map))
 			break;
 
 		if (!blk_mq_get_dispatch_budget(hctx))
 			break;
-
+        
+        //从软件ctx->rq_list取出req，然后从软件队列中剔除req。接着清除hctx->ctx_map中软件队列对应的标志位???????
 		rq = blk_mq_dequeue_from_ctx(hctx, ctx);
 		if (!rq) {
 			blk_mq_put_dispatch_budget(hctx);
 			break;
 		}
+    /*这个软件队列上的req的派发，我看着更迷，一次只从软件队列取出一个req，然后给送blk_mq_dispatch_rq_list硬件派发，
+      然后就取出硬件队列关联的下一个软件队列，再取出这个软件队列上的req派发??????为什么要这样折腾呀，把一个软件队列上
+      的req全部派发完，再处理下一个软件队列上的req不行吗?循环处理直到所有ctx软件上的所有req都处理完退出循环，硬件队列忙也会退出
+      我还是觉得有点扯淡，一次处理一个软件队列上的一个req，然后就切换到下一个软件队列，循环，这样做的意义是什么呢?虽说这样也会
+      遍历完软件队列上的req??????不对呀，如果nvme硬件队列繁忙，blk_mq_dispatch_rq_list返回false，就退出循环了，这样有可能有的
+      软件队列上上的req没有来得及处理呀，就跳出这个循环了?????????????针对这种情况，到底是怎么处理的???????????
+    */
 
 		/*
 		 * Now this rq owns the budget which has to be released
 		 * if this rq won't be queued to driver via .queue_rq()
 		 * in blk_mq_dispatch_rq_list().
 		 */
+		//req加入到rq_list
 		list_add(&rq->queuelist, &rq_list);
 
 		/* round robin for fair dispatch */
+        //取出硬件队列关联的下一个软件队列
 		ctx = blk_mq_next_ctx(hctx, rq->mq_ctx);
 
-	} while (blk_mq_dispatch_rq_list(q, &rq_list, true));
+    //遍历rq_list上的req，先给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，就是
+    //建立req与硬件队列的联系吧，然后直接启动nvme硬件传输。看着任一个req要启动硬件传输，都要从blk_mq_tags结构里得到一个空闲的tag。
+    //如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输
+	} while (blk_mq_dispatch_rq_list(q, &rq_list, true));//硬件队列繁忙或者rq_list链表空则返回flase，跳出循环
 
+    //赋值hctx->dispatch_from = ctx
 	WRITE_ONCE(hctx->dispatch_from, ctx);
 }
 
 /* return true if hw queue need to be run again */
+//各种各样场景的req派发，hctx->dispatch硬件队列dispatch链表上的req派发;有deadline调度算法时红黑树或者fifo调度队列上的req派发，
+//无IO调度算法时，硬件队列关联的所有软件队列ctx->rq_list上的req的派发等等。派发过程应该都是调用blk_mq_dispatch_rq_list()，
+//nvme硬件队列不忙直接启动req传输，繁忙的话则把剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输
 void blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 {
 	struct request_queue *q = hctx->queue;
 	struct elevator_queue *e = q->elevator;
-	const bool has_sched_dispatch = e && e->aux->ops.mq.dispatch_request;
+	const bool has_sched_dispatch = e && e->aux->ops.mq.dispatch_request;//有IO调度算法时是__dd_dispatch_request
 	LIST_HEAD(rq_list);
 
 	/* RCU or SRCU read lock is needed before checking quiesced flag */
@@ -279,8 +318,10 @@ void blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 	 * If we have previous entries on our dispatch list, grab them first for
 	 * more fair dispatch.
 	 */
+	//如果hctx->dispatch上有req要派发，
 	if (!list_empty_careful(&hctx->dispatch)) {
 		spin_lock(&hctx->lock);
+        //把hctx->dispatch链表上的req转移到rq_list
 		if (!list_empty(&hctx->dispatch))
 			list_splice_init(&hctx->dispatch, &rq_list);
 		spin_unlock(&hctx->lock);
@@ -299,21 +340,43 @@ void blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 	 * on the dispatch list or we were able to dispatch from the
 	 * dispatch list.
 	 */
+	//如果hctx->dispatch上有req要派发
 	if (!list_empty(&rq_list)) {
+        //标记hctx->state的BLK_MQ_S_SCHED_RESTART标志位
 		blk_mq_sched_mark_restart_hctx(hctx);
+
+        //list来自hctx->dispatch硬件派发队列，遍历list上的req，先给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，就是建立req与
+        //硬件队列的联系吧，然后直接启动nvme硬件传输。看着任一个req要启动硬件传输，都要从blk_mq_tags结构里得到一个空闲的tag。
+        //如果nvme硬件队列繁忙，还要把list剩余的req转移到hctx->dispatch，启动异步传输
 		if (blk_mq_dispatch_rq_list(q, &rq_list, false)) {
-			if (has_sched_dispatch)
+			if (has_sched_dispatch)//有调度算法
+ //执行deadline算法派发函数，循环从fifo或者红黑树队列选择待派发给传输的req，然后给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，
+ //就是建立req与硬件队列的联系吧。然后直接启动nvme硬件传输。如果nvme硬件队列繁忙，则把req转移到hctx->dispatch队列，然后启动nvme异步
+ //传输。硬件队列繁忙或者deadline算法队列没有req了则跳出循环。
 				blk_mq_do_dispatch_sched(hctx);
-			else
+			else//无调度算法
+  //依次循环遍历hctx硬件队列关联的所有软件队列，依次取出一个软件队列ctx->rq_list上的req加入rq_list局部链表，执行blk_mq_dispatch_rq_list()硬件派发req。
+  //如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输。循环退出条件是，nvme硬件队列繁忙
+  //或者hctx硬件队列关联的所有软件队列上的req全都派发完。有个疑问，如果是nvme硬件队列繁忙，那有可能有些软件队列上的req还没来得及派发呀?????????????
 				blk_mq_do_dispatch_ctx(hctx);
 		}
-	} else if (has_sched_dispatch) {
+	}
+    //如果hctx->dispatch上没有req要派发,但是有调度算法
+    else if (has_sched_dispatch) {
+    //与上边一样，执行blk_mq_do_dispatch_sched(),执行deadline算法派发函数，循环从fifo或者红黑树队列选择待派发给传输的req去派发
 		blk_mq_do_dispatch_sched(hctx);
+    //硬件队列繁忙
 	} else if (hctx->dispatch_busy) {
 		/* dequeue request one by one from sw queue if queue is busy */
+    //与上边一样，依次循环遍历hctx硬件队列关联的所有软件队列，取出一个软件队列上的req去派发
 		blk_mq_do_dispatch_ctx(hctx);
 	} else {
+	  //把硬件队列hctx关联的软件队列上的ctx->rq_list链表上req转移到传入的rq_list链表尾部，然后清空ctx->rq_list链表。
+      //这样貌似是把硬件队列hctx关联的所有软件队列ctx->rq_list链表上的req全部移动到rq_list链表尾部呀
 		blk_mq_flush_busy_ctxs(hctx, &rq_list);
+      //遍历rq_list上的req，先给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，就是
+      //建立req与硬件队列的联系吧，然后直接启动nvme硬件传输。看着任一个req要启动硬件传输，都要从blk_mq_tags结构里得到一个空闲的tag。
+      //如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输
 		blk_mq_dispatch_rq_list(q, &rq_list, false);
 	}
 }

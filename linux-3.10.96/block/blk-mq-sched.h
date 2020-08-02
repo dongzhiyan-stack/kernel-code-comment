@@ -108,7 +108,7 @@ static inline bool blk_mq_sched_has_work(struct blk_mq_hw_ctx *hctx)
 
 	return false;
 }
-
+//测试hctx->state是否设置了BLK_MQ_S_SCHED_RESTART位
 static inline bool blk_mq_sched_needs_restart(struct blk_mq_hw_ctx *hctx)
 {
 	return test_bit(BLK_MQ_S_SCHED_RESTART, &hctx->state);

@@ -320,11 +320,12 @@ static inline void list_splice_tail(struct list_head *list,
  *
  * The list at @list is reinitialised
  */
+//把list链表上的成员转移到head后边，并list链表清空
 static inline void list_splice_init(struct list_head *list,
 				    struct list_head *head)
 {
 	if (!list_empty(list)) {
-        //把list链表的成员插入到到head和head->next节点的中间，head和head->next两个节点挨着，list插入到head后边
+        //把list链表的成员插入到到head和head->next节点的中间，head和head->next两个节点挨着，list链表的成员插入到head后边
 		__list_splice(list, head, head->next);
         //list链表清0，没有成员了
 		INIT_LIST_HEAD(list);

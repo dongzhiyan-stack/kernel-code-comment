@@ -22,11 +22,11 @@ struct blk_mq_ctxmap {
 };
 //代表硬件队列结构
 struct blk_mq_hw_ctx {
-	struct {
+	//struct {----影响代码阅读，先注释掉
 		spinlock_t		lock;
         //待派发的req放到这个队列，见blk_mq_request_bypass_insert()
 		struct list_head	dispatch;//硬件队列与磁盘打交道，这个队列上的rq就是马上发给磁盘的吧????
-	} ____cacheline_aligned_in_smp;
+	//} ____cacheline_aligned_in_smp;
 
 	unsigned long		state;		/* BLK_MQ_S_* flags */
 
@@ -52,7 +52,7 @@ struct blk_mq_hw_ctx {
 
 	//RH_KABI_REPLACE(unsigned long		*ctx_map,
 	//		unsigned long		*padding1)
-	//blk_mq_insert_requests->blk_mq_hctx_mark_pending中，软件队列插入req了，然后把软件队列对应的ctx_map的bit置1，激活
+	//blk_mq_insert_requests->blk_mq_hctx_mark_pending中，软件队列插入req了，然后把软件队列对应的ctx_map的bit置1，激活。清0在blk_mq_dequeue_from_ctx
     unsigned long		*ctx_map;
     unsigned long		*padding1;
     
@@ -77,7 +77,10 @@ struct blk_mq_hw_ctx {
 	struct blk_mq_cpu_notifier	cpu_notifier;
 	struct kobject		kobj;
 
-	RH_KABI_EXTEND(struct delayed_work	run_work)
+	//RH_KABI_EXTEND(struct delayed_work	run_work)
+	//硬件队列异步传输时，见__blk_mq_delay_run_hw_queue，把run_work添加到kblockd_workqueue这个workqueue头，之后被调度执行后，
+	//会从kblockd_workqueue取出run_work，然后执行对应的work函数blk_mq_run_work_fn
+	struct delayed_work	run_work;
 	//RH_KABI_EXTEND(cpumask_var_t		cpumask)
 	cpumask_var_t		cpumask;
 	//RH_KABI_EXTEND(int			next_cpu)
@@ -92,19 +95,22 @@ struct blk_mq_hw_ctx {
 
 	RH_KABI_EXTEND(struct blk_flush_queue	*fq)
 	RH_KABI_EXTEND(struct srcu_struct	queue_rq_srcu)
-	RH_KABI_EXTEND(wait_queue_t		dispatch_wait)
+	//RH_KABI_EXTEND(wait_queue_t		dispatch_wait)
+	wait_queue_t		dispatch_wait;
 	RH_KABI_EXTEND(void			*sched_data)
 	
 	//RH_KABI_EXTEND(struct blk_mq_tags	*sched_tags)
 	//blk_mq_sched_alloc_tags()中分配赋值，跟调度算法有关的blk_mq_tags
 	struct blk_mq_tags	*sched_tags;
-	RH_KABI_EXTEND(struct blk_mq_ctx	*dispatch_from)
+	//RH_KABI_EXTEND(struct blk_mq_ctx	*dispatch_from)
+	//blk_mq_do_dispatch_ctx()中从这个里取出待派发req的软件队列，也是在blk_mq_do_dispatch_ctx()中赋值
+	struct blk_mq_ctx	*dispatch_from;
 #ifdef CONFIG_BLK_DEBUG_FS
 	RH_KABI_EXTEND(struct dentry		*debugfs_dir)
 	RH_KABI_EXTEND(struct dentry		*sched_debugfs_dir)
 #endif
 	//RH_KABI_EXTEND(int			dispatch_busy)
-	//应该是表示硬件队列繁忙
+	//应该是表示硬件队列繁忙，blk_mq_update_dispatch_busy()中设置繁忙
 	int			dispatch_busy;
 };
 
@@ -129,7 +135,7 @@ struct blk_mq_tag_set {
 	
 	//大爷的，本来迷糊以为queue_depth是支持的最大硬件队列数?不是的，应为是一个硬件队列中最多支持的req个数吧，所谓队列深度就是
 	//一个队里里对多容纳的成员个数吧，这里的成员应该就是req，见__blk_mq_alloc_rq_maps->__blk_mq_alloc_rq_map 根据队列深度设置
-	//一个硬件队列里的req
+	//一个硬件队列里的req。blk_mq_alloc_tag_set()里设置为10240
 	unsigned int		queue_depth;	/* max hw supported 队列深度 blk_mq_alloc_tag_set中有设置*/
 	unsigned int		reserved_tags;
 	unsigned int		cmd_size;	/* per-request extra data */
@@ -282,7 +288,8 @@ enum {
 
 	BLK_MQ_F_SHOULD_MERGE	= 1 << 0,
 	BLK_MQ_F_SHOULD_SORT	= 1 << 1,
-	BLK_MQ_F_TAG_SHARED	= 1 << 2,
+	//共享tag，设置的话，在blk_mq_dispatch_rq_list()启动req nvme硬件传输前获取tag时，即便分配不到tag也不会失败，因为共享tag
+	BLK_MQ_F_TAG_SHARED	= 1 << 2,//共享tag，req启动传输前分配tag，可以使用其他req的tag??????queue_set_hctx_shared()中设置
 	BLK_MQ_F_SG_MERGE	= 1 << 3,
 	BLK_MQ_F_BLOCKING	= 1 << 6,
 	BLK_MQ_F_NO_SCHED	= 1 << 7,
@@ -320,6 +327,7 @@ void blk_mq_free_request(struct request *rq);
 bool blk_mq_can_queue(struct blk_mq_hw_ctx *);
 
 enum {
+    //获取tag失败不休眠，见blk_mq_get_driver_tag
 	BLK_MQ_REQ_NOWAIT	= (1 << 0), /* return when out of requests */
     //判断tag是否是预留的，blk_mq_get_driver_tag()中设置
 	BLK_MQ_REQ_RESERVED	= (1 << 1), /* allocate from reserved pool */

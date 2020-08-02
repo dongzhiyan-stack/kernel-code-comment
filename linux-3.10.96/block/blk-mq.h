@@ -10,18 +10,18 @@ struct blk_mq_tag_set;
 
 //描述软件队列，每个CPU一个
 struct blk_mq_ctx {
-	struct {
+	//struct {----影响代码阅读，先注释掉
 		spinlock_t		lock;
-        //blk_mq_make_request->blk_mq_merge_bio->blk_mq_attempt_merge，就是依次遍历软件队列ctx->rq_list链表上的req，然后看req能否与bio前项或者后项合并
-        //blk_mq_sched_insert_requests->blk_mq_insert_requests把当前进程的plug链表上的req插入到软件队列rq_list上，这些req貌似是
-        //硬件队列没有来得及处理的入req，难道软件队列就是接盘硬件队列剩下的呀
+ //blk_mq_make_request->blk_mq_merge_bio->blk_mq_attempt_merge，就是依次遍历软件队列ctx->rq_list链表上的req，然后看req能否与bio前项或者后项合并
+ //blk_mq_sched_insert_requests->blk_mq_insert_requests把当前进程的plug链表上的req插入到软件队列rq_list上，这些req貌似是
+ //硬件队列没有来得及处理的入req，难道软件队列就是接盘硬件队列剩下的呀
         struct list_head	rq_list;//软件队列存放req的链表
-	}  ____cacheline_aligned_in_smp;
+	//}  ____cacheline_aligned_in_smp;
 
 	unsigned int		cpu;//对应的CPU编号，根据这个CPU编号去寻找硬件队列结构体，看blk_mq_make_request->blk_mq_sched_bio_merge->__blk_mq_sched_bio_merge->blk_mq_map_queue
 
     //硬件队列关联的第几个软件队列。硬件队列每关联一个软件队列，都hctx->ctxs[hctx->nr_ctx++] = ctx把软件队列结构保存到
-    //hctx->ctxs[hctx->nr_ctx++]硬件队列结构的hctx->ctxs[]数组，而ctx->index_hw会先保存hctx->nr_ctx。
+    //hctx->ctxs[hctx->nr_ctx++]，即硬件队列结构的hctx->ctxs[]数组，而index_hw会先保存hctx->nr_ctx。
     unsigned int		index_hw;//blk_mq_map_swqueue()中赋值
 
 	RH_KABI_DEPRECATE(unsigned int, ipi_redirect)
@@ -199,6 +199,7 @@ static inline bool blk_mq_get_dispatch_budget(struct blk_mq_hw_ctx *hctx)
 static inline void __blk_mq_put_driver_tag(struct blk_mq_hw_ctx *hctx,
 					   struct request *rq)
 {
+    //tags->bitmap_tags中按照req->tag这个tag编号释放tag
 	blk_mq_put_tag(hctx, hctx->tags, rq->mq_ctx, rq->tag);
 	rq->tag = -1;
 
@@ -213,7 +214,7 @@ static inline void blk_mq_put_driver_tag_hctx(struct blk_mq_hw_ctx *hctx,
 {
 	if (rq->tag == -1 || rq_aux(rq)->internal_tag == -1)
 		return;
-
+    //tags->bitmap_tags中按照req->tag这个tag编号释放tag
 	__blk_mq_put_driver_tag(hctx, rq);
 }
 
@@ -223,7 +224,7 @@ static inline void blk_mq_put_driver_tag(struct request *rq)
 
 	if (rq->tag == -1 || rq_aux(rq)->internal_tag == -1)
 		return;
-
+    //根据cpu编号找到硬件队列
 	hctx = blk_mq_map_queue(rq->q, rq->mq_ctx->cpu);
 	__blk_mq_put_driver_tag(hctx, rq);
 }

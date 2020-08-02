@@ -59,6 +59,7 @@ struct deadline_data {
 	int front_merges;
 
 	spinlock_t lock;
+    //dd_insert_request中，把req添加到该dispatch 队列
 	struct list_head dispatch;
 };
 
@@ -165,6 +166,7 @@ static void dd_merged_requests(struct request_queue *q, struct request *req,
 /*
  * move an entry to dispatch queue
  */
+//从红黑树中设置req的next req给dd->next_rq[data_dir],把req从fifo队列和红黑树队列剔除
 static void
 deadline_move_request(struct deadline_data *dd, struct request *rq)
 {
@@ -172,11 +174,13 @@ deadline_move_request(struct deadline_data *dd, struct request *rq)
 
 	dd->next_rq[READ] = NULL;
 	dd->next_rq[WRITE] = NULL;
+    //从红黑树中设置req的next req给dd->next_rq[data_dir]
 	dd->next_rq[data_dir] = deadline_latter_request(rq);
 
 	/*
 	 * take it off the sort and fifo list
 	 */
+	//只有把req从fifo队列和红黑树队列剔除
 	deadline_remove_request(rq->q, rq);
 }
 
@@ -201,6 +205,9 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
  * deadline_dispatch_requests selects the best request according to
  * read/write expire, fifo_batch, etc
  */
+//mq-deadline调度算法核心派发req函数，该函数与单通道deadline派发算法函数deadline_dispatch_requests原理基本一致。
+//执行deadline派发函数，从fifo或者红黑树队列选择待派发给驱动传输的req返回。然后设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
+//req来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，统筹兼顾，有固定策略
 static struct request *__dd_dispatch_request(struct blk_mq_hw_ctx *hctx)
 {
 	struct deadline_data *dd = hctx->queue->elevator->elevator_data;
@@ -209,22 +216,26 @@ static struct request *__dd_dispatch_request(struct blk_mq_hw_ctx *hctx)
 	int data_dir;
 
 	if (!list_empty(&dd->dispatch)) {
+        //如果dd->dispatch队列有req要派发，取出来直接后直接返回，我去，这个真简单
 		rq = list_first_entry(&dd->dispatch, struct request, queuelist);
 		list_del_init(&rq->queuelist);
 		goto done;
 	}
-
+    //deadline调度算法fifo读队列不空reads为1
 	reads = !list_empty(&dd->fifo_list[READ]);
+    //deadline调度算法fifo写队列不空writes为1
 	writes = !list_empty(&dd->fifo_list[WRITE]);
 
 	/*
 	 * batches are currently reads XOR writes
 	 */
+	//每次从红黑树选取一个req发给驱动传输，这个req的下一个req保存在next_rq，现在又向驱动发送req传输，先从next_rq取出req
 	if (dd->next_rq[WRITE])
 		rq = dd->next_rq[WRITE];
 	else
 		rq = dd->next_rq[READ];
 
+//如果dd->batching大于等于dd->fifo_batch，不再使用next_rq，否则会一直只向后使用红黑树队列的req向驱动发送传输，队列前边的req得不到发送
 	if (rq && dd->batching < dd->fifo_batch)
 		/* we have a next request are still entitled to batch */
 		goto dispatch_request;
@@ -233,13 +244,16 @@ static struct request *__dd_dispatch_request(struct blk_mq_hw_ctx *hctx)
 	 * at this point we are not running a batch. select the appropriate
 	 * data direction (read / write)
 	 */
-
+    //这应该是选择选择read或write req，因为一直选择read req给驱动传输，那write req就starve饿死了
 	if (reads) {
 		BUG_ON(RB_EMPTY_ROOT(&dd->sort_list[READ]));
-
+        //有write req要传送给驱动，并且write req被饥饿次数达到上限，就强制选择跳转选择write req
+        //防止一直选择read req给驱动传输，write req得不到选择而starve饥饿，每次write req得不到选择而饥饿则starved++，
+        //writes_starved是饥饿的次数上限，starved大于writes_starved，就强制选择write req
 		if (writes && (dd->starved++ >= dd->writes_starved))
 			goto dispatch_writes;
 
+         //否则下面选择read req
 		data_dir = READ;
 
 		goto dispatch_find_request;
@@ -252,9 +266,9 @@ static struct request *__dd_dispatch_request(struct blk_mq_hw_ctx *hctx)
 	if (writes) {
 dispatch_writes:
 		BUG_ON(RB_EMPTY_ROOT(&dd->sort_list[WRITE]));
-
+        //dd->starved清0
 		dd->starved = 0;
-
+        //下面选择write req，就一个赋值操作
 		data_dir = WRITE;
 
 		goto dispatch_find_request;
@@ -266,28 +280,34 @@ dispatch_find_request:
 	/*
 	 * we are not running a batch, find best request for selected data_dir
 	 */
+	//deadline_check_fifo如果deadline fifo队列有超时的req要传输返回1，或者next_rq没有暂存req，那就从fifo队列头取出req
 	if (deadline_check_fifo(dd, data_dir) || !dd->next_rq[data_dir]) {
 		/*
 		 * A deadline has expired, the last request was in the other
 		 * direction, or we have run out of higher-sectored requests.
 		 * Start again from the request with the earliest expiry time.
 		 */
+		//取出fifo队列头的req，最早入fifo队列的req，最早入队的req当然更容易超时
 		rq = rq_entry_fifo(dd->fifo_list[data_dir].next);
 	} else {
 		/*
 		 * The last req was the same dir and we have a next request in
 		 * sort order. No expired requests so continue on from here.
 		 */
+		//否则直接取出next_rq暂存的req，data_dir由前边赋值读或写
 		rq = dd->next_rq[data_dir];
 	}
 
 	dd->batching = 0;
 
-dispatch_request:
+dispatch_request://调到这里，req直接来自next_rq或者fifo队列，这个req就要被发给驱动传输了
 	/*
 	 * rq is the selected appropriate request.
 	 */
+	//batching加1
 	dd->batching++;
+
+    //从红黑树中设置req的next req给dd->next_rq[data_dir],把req从fifo队列和红黑树队列剔除
 	deadline_move_request(dd, rq);
 done:
 	rq->cmd_flags |= REQ_STARTED;
@@ -300,6 +320,9 @@ static struct request *dd_dispatch_request(struct blk_mq_hw_ctx *hctx)
 	struct request *rq;
 
 	spin_lock(&dd->lock);
+
+ //执行deadline算法派发函数，从fifo或者红黑树队列选择待派的req返回。然后设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
+ //req来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，统筹兼顾，有固定策略
 	rq = __dd_dispatch_request(hctx);
 	spin_unlock(&dd->lock);
 
@@ -416,6 +439,7 @@ static void dd_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 	blk_mq_sched_request_inserted(rq);
 
 	if (at_head || rq->cmd_type != REQ_TYPE_FS) {//no,一般req都是REQ_TYPE_FS
+	    //如果at_head为TRUE，则把req添加到调度算法的dd->dispatch队列
 		if (at_head)
 			list_add(&rq->queuelist, &dd->dispatch);
 		else
@@ -457,7 +481,8 @@ static void dd_insert_requests(struct blk_mq_hw_ctx *hctx,
         //req从原来的mq_list链表上删除掉
 		rq = list_first_entry(list, struct request, queuelist);
 		list_del_init(&rq->queuelist);
-        //把req插入到IO调度算法的fifo和红黑树队列
+     //尝试将req合并到q->last_merg或者调度算法的hash队列的临近req。合并不了的话，把req插入到deadline调度算法的红黑树和fifo队列，
+     //设置req在fifo队列的超时时间。还插入elv调度算法的hash队列。注意，hash队列不是deadline调度算法独有的。
 		dd_insert_request(hctx, rq, at_head);
 	}
 	spin_unlock(&dd->lock);
@@ -467,6 +492,7 @@ static bool dd_has_work(struct blk_mq_hw_ctx *hctx)
 {
 	struct deadline_data *dd = hctx->queue->elevator->elevator_data;
 
+    //有req要处理时，返回1
 	return !list_empty_careful(&dd->dispatch) ||
 		!list_empty_careful(&dd->fifo_list[0]) ||
 		!list_empty_careful(&dd->fifo_list[1]);

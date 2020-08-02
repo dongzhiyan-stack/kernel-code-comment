@@ -211,7 +211,9 @@ struct request {
     //该req对应的bh的内存page地址,还考虑了页内offset，看blk_update_request()后半段
 	char *buffer;		/* kaddr of the current segment if available */
 
-	int tag;//__blk_mq_alloc_request()中赋值为空闲req在blk_mq_tags结构体的static_rqs[]数组的下标
+    //__blk_mq_alloc_request()中赋值为空闲req在blk_mq_tags结构体的static_rqs[]数组的下标。或者说tag编号，req在blk_mq_tags中获取的tag
+    //的tag编号，
+	int tag;
 	int errors;
 
 	/*

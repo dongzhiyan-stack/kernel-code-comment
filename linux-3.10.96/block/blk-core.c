@@ -1612,6 +1612,7 @@ get_rq:
 			trace_block_plug(q);
 		else {
 			if (request_count >= BLK_MAX_REQUEST_COUNT) {
+                //把plug链表上的req全部刷入IO调度算法队列，强制启动硬件IO传输，把数据传入磁盘
 				blk_flush_plug_list(plug, false);
 				trace_block_plug(q);
 			}
