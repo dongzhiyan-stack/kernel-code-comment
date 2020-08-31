@@ -22,13 +22,13 @@ struct fs_struct;
  * As soon as a single namespace is cloned or unshared, the
  * nsproxy is copied.
  */
-struct nsproxy {
+struct nsproxy {//命名空间
 	atomic_t count;
-	struct uts_namespace *uts_ns;
-	struct ipc_namespace *ipc_ns;
-	struct mnt_namespace *mnt_ns;
-	struct pid_namespace *pid_ns;
-	struct net 	     *net_ns;
+	struct uts_namespace *uts_ns;//hostname
+	struct ipc_namespace *ipc_ns;//ipc
+	struct mnt_namespace *mnt_ns;//文件系统
+	struct pid_namespace *pid_ns;//进程ID
+	struct net 	     *net_ns;//网络
 };
 extern struct nsproxy init_nsproxy;
 

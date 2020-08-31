@@ -1235,8 +1235,8 @@ struct task_struct {
 	struct fs_struct *fs;
 /* open file information */
 	struct files_struct *files;
-/* namespaces */
-	struct nsproxy *nsproxy;
+/* namespaces struct nsproxy*/
+	struct nsproxy *nsproxy;//进程所属命名空间
 /* signal handlers */
 	struct signal_struct *signal;
 	struct sighand_struct *sighand;

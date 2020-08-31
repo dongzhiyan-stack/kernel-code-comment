@@ -5,8 +5,9 @@ struct dentry;
 struct vfsmount;
 
 struct path {
-	struct vfsmount *mnt;//path_init有赋值，包扣起mnt
-	//就是本次搜索到的目录或者文件的dentry
+    //本次搜索的文件或者目录所在的文件系统的mount结构里的vfsmount结构
+	struct vfsmount *mnt;
+	//就是本次搜索到的目录或者文件的dentry，在mount操作时，是挂载点目录的dentry
 	struct dentry *dentry;
 };
 

@@ -36,6 +36,7 @@ static DEFINE_SPINLOCK(mnt_id_lock);
 static int mnt_id_start = 0;
 static int mnt_group_start = 1;
 
+//__lookup_mnt()从mount_hashtable链表搜索mount
 static struct list_head *mount_hashtable __read_mostly;
 static struct list_head *mountpoint_hashtable __read_mostly;
 static struct kmem_cache *mnt_cache __read_mostly;
@@ -173,6 +174,7 @@ static struct mount *alloc_vfsmnt(const char *name)
 			goto out_free_cache;
 
 		if (name) {
+            //赋予mount的mnt_devname
 			mnt->mnt_devname = kstrdup(name, GFP_KERNEL);
 			if (!mnt->mnt_devname)
 				goto out_free_id;
@@ -554,19 +556,29 @@ static void free_vfsmnt(struct mount *mnt)
  * @dir. If @dir is set return the first mount else return the last mount.
  * vfsmount_lock must be held for read or write.
  */
+//在mount hash链表中找到mount的mnt_parent，如果这个parent mount与传入的vfsmount的mount是同一个，并且parent mount的mnt_mountpoint
+//与传入的挂载点目录dentry是同一个，那就返回这个parent mount
 struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry,
-			      int dir)
+			      int dir)//dir:__lookup_mnt()传进来是1
 {
+    //以vfsmount和挂载点目录dentry找到mount hash链表头，commit_tree()把mount加入该链表，
+    //用的键值也是(父mount结构的vfsmount成员+该mount的挂载点dentry),所以该函数传入的vfsmount，是父mount的vfsmount
 	struct list_head *head = mount_hashtable + hash(mnt, dentry);
 	struct list_head *tmp = head;
 	struct mount *p, *found = NULL;
 
 	for (;;) {
+        //如果dir为1，向链表后搜索，否则向链表前搜索
 		tmp = dir ? tmp->next : tmp->prev;
 		p = NULL;
+
+        //这里应该是找到链表尾了吧，没有找到匹配的
 		if (tmp == head)
 			break;
+        //由mnt_hash找到mount
 		p = list_entry(tmp, struct mount, mnt_hash);
+
+        //这是说hash链表上的mount的mnt_parent与当前传入的vfsmount的mount一致，并且这个mount的挂载点目录dentry与传入的一致
 		if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry) {
 			found = p;
 			break;
@@ -591,11 +603,16 @@ struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry,
  *
  * lookup_mnt takes a reference to the found vfsmount.
  */
+//比如本次mount /dev/sda0 /mnt,而之前已经有sda1、sda2、sda3挂载到了/mmt，__lookup_mnt()这里边依次找到sda1、sda2、sda3的mount并返回
+//给child_mnt,最后一次是返回NULL，此时才开始处理mount /dev/sda0 /mnt的mount
 struct vfsmount *lookup_mnt(struct path *path)
 {
 	struct mount *child_mnt;
 
 	br_read_lock(&vfsmount_lock);
+//在mount hash链表中找到mount的mnt_parent，如果这个parent mount与传入的path->mnt的mount是同一个，并且parent mount的mnt_mountpoint
+//与传入的挂载点目录path->dentry是同一个，那就返回这个parent mount。这样看来的话，搜索sda1、sda2、sda3挂载到/mnt/的mount结构
+//实际是搜索的mount hash链表中找到mount的mnt_parent呀
 	child_mnt = __lookup_mnt(path->mnt, path->dentry, 1);
 	if (child_mnt) {
 		mnt_add_count(child_mnt, 1);
@@ -612,8 +629,10 @@ static struct mountpoint *new_mountpoint(struct dentry *dentry)
     //显然，又是一个hash链表，基于挂载点目录dentry
 	struct list_head *chain = mountpoint_hashtable + hash(NULL, dentry);
 	struct mountpoint *mp;
-    //先在链表中查找mp
+    
+    //先在hash链表中查找已有的mountpoint，是否它的挂载点目录dentry与传入的dentry相等
 	list_for_each_entry(mp, chain, m_hash) {
+	    
 		if (mp->m_dentry == dentry) {
 			/* might be worth a WARN_ON() */
 			if (d_unlinked(dentry))
@@ -635,6 +654,7 @@ static struct mountpoint *new_mountpoint(struct dentry *dentry)
 	}
 	dentry->d_flags |= DCACHE_MOUNTED;
 	spin_unlock(&dentry->d_lock);
+    //挂载点目录dentry
 	mp->m_dentry = dentry;
 	mp->m_count = 1;
 	list_add(&mp->m_hash, chain);
@@ -698,20 +718,24 @@ static void detach_mnt(struct mount *mnt, struct path *old_path)
 /*
  * vfsmount lock must be held for write
  */
-void mnt_set_mountpoint(struct mount *mnt,
-			struct mountpoint *mp,
-			struct mount *child_mnt)
+void mnt_set_mountpoint(struct mount *mnt,//dest_mnt  挂载点目录所在的文件系统的mount结构
+			struct mountpoint *mp,//dest_mp
+			struct mount *child_mnt)//source_mnt 挂载源，就是本次mount新生成的
 {
 	mp->m_count++;
 	mnt_add_count(mnt, 1);	/* essentially, that's mntget */
+    //设置为挂载点目录dentry
 	child_mnt->mnt_mountpoint = dget(mp->m_dentry);
+    //mnt_parent竟然为挂点目录所在文件系统的mount
 	child_mnt->mnt_parent = mnt;
+    //设置为挂载点mountpoint
 	child_mnt->mnt_mp = mp;
 }
 
 /*
  * vfsmount lock must be held for write
  */
+//mnt作为挂载源，设置挂载点目录等等，并把mnt添加到mnt_hash，mnt_child链表
 static void attach_mnt(struct mount *mnt,
 			struct mount *parent,
 			struct mountpoint *mp)
@@ -725,30 +749,41 @@ static void attach_mnt(struct mount *mnt,
 /*
  * vfsmount lock must be held for write
  */
+//把mount结构添加到各个链表，设置mount的文件系统命名空间为父mount的命名空间
 static void commit_tree(struct mount *mnt)
 {
+    //mnt的父mount，这是mnt的挂载点目录所在的文件系统mount
 	struct mount *parent = mnt->mnt_parent;
 	struct mount *m;
 	LIST_HEAD(head);
+    //文件系统命名空间，来自父mount
 	struct mnt_namespace *n = parent->mnt_ns;
 
 	BUG_ON(parent == mnt);
-
+    //把mnt添加到head链表，
 	list_add_tail(&head, &mnt->mnt_list);
+    
+    //设置mount的命名空间，为什么要循环设置呢??????不就是一个mount结构?看这个循环的意思是，以该mount为链表头，有多个mount结构
+    //通过其mnt_list结构链入这个链表，这个循环是设置所有这个链表上的mount的命名空间为父mount的命名空间
 	list_for_each_entry(m, &head, mnt_list)
 		m->mnt_ns = n;
 
+    //把mount结构添加到父mount的mnt_ns的list链表，本次的mount结构在head链表上
 	list_splice(&head, n->list.prev);
 
+    //靠mnt_hash把当前的mount结构链入mount hash链表，并且链入hash表的键值是(父mount结构的vfsmount成员+该mount的挂载点dentry)
 	list_add_tail(&mnt->mnt_hash, mount_hashtable +
 				hash(&parent->mnt, mnt->mnt_mountpoint));
+    //靠mnt_child把mount结构添加到mount的mnt_parent的mnt_mounts链表
 	list_add_tail(&mnt->mnt_child, &parent->mnt_mounts);
 	touch_mnt_namespace(n);
 }
-
-static struct mount *next_mnt(struct mount *p, struct mount *root)
+//取出p->mnt_mounts链表上的下一个子mount结构
+static struct mount *next_mnt(struct mount *p, struct mount *root)//root:invent_group_ids传过来的是NULL
 {
+    //下一个mount
 	struct list_head *next = p->mnt_mounts.next;
+    //下一个mount和当前指向的mount结构是同一个??????这是啥意思，应该是特殊情况吧
 	if (next == &p->mnt_mounts) {
 		while (1) {
 			if (p == root)
@@ -756,9 +791,11 @@ static struct mount *next_mnt(struct mount *p, struct mount *root)
 			next = p->mnt_child.next;
 			if (next != &p->mnt_parent->mnt_mounts)
 				break;
+            //依次取出mnt_parent父mount
 			p = p->mnt_parent;
 		}
 	}
+    //根据next返回对应的mount结构
 	return list_entry(next, struct mount, mnt_child);
 }
 
@@ -819,13 +856,16 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 }
 EXPORT_SYMBOL_GPL(vfs_kern_mount);
 
+//创建新的mount并对大部分成员初始化，好多成员信息复制了old的。
+//old是/home/所在文件系统原先挂载生成的struct mount，old_path.dentry是/home挂载源的。如果/home/目录已经有块设备挂载了，
+//则要转换成之前挂载的块设备的根目录dentry保存到old_path.dentry。
 static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 					int flag)
 {
 	struct super_block *sb = old->mnt.mnt_sb;
 	struct mount *mnt;
 	int err;
-
+    //为本次挂载分配一个新的mount，并赋予mount的mnt_devname为old->mnt_devname
 	mnt = alloc_vfsmnt(old->mnt_devname);
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
@@ -861,25 +901,38 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 
 	atomic_inc(&sb->s_active);
 	mnt->mnt.mnt_sb = sb;
+    //本次挂载源的根目录dentry，mount --bind模式下，根目录可不一定是块设备的根目录，而是挂载源的那个目录。比如
+    //mount --bind  /home/test/test2  /home/test,此时挂载源的根目录dentry是/home/test/test2的.如果之前已经有块设备sda3挂载到/home/，
+    //此时的根目录实际是sda3文件系统里的/test/test2目录的dentry,这应该是就是cat /proc/self/mountinfo看到第4列的挂载源不是'/'的原因吧
 	mnt->mnt.mnt_root = dget(root);
 	mnt->mnt_mountpoint = mnt->mnt.mnt_root;
+    //mount这里的mnt_parent被赋值为自己
 	mnt->mnt_parent = mnt;
 	br_write_lock(&vfsmount_lock);
 	list_add_tail(&mnt->mnt_instance, &sb->s_mounts);
 	br_write_unlock(&vfsmount_lock);
 
+    //如果挂载有slave属性，
 	if ((flag & CL_SLAVE) ||
 	    ((flag & CL_SHARED_TO_SLAVE) && IS_MNT_SHARED(old))) {
 		list_add(&mnt->mnt_slave, &old->mnt_slave_list);
 		mnt->mnt_master = old;
 		CLEAR_MNT_SHARED(mnt);
+    //如果挂载没有private属性
 	} else if (!(flag & CL_PRIVATE)) {
+	    //如果本次挂载有make-shared属性，或者挂载源老的mount是shared属性
 		if ((flag & CL_MAKE_SHARED) || IS_MNT_SHARED(old))
-			list_add(&mnt->mnt_share, &old->mnt_share);
+			list_add(&mnt->mnt_share, &old->mnt_share);//把本次的mount链接到mnt_share链表
+        //挂载源老的mount是slave属性
 		if (IS_MNT_SLAVE(old))
-			list_add(&mnt->mnt_slave, &old->mnt_slave);
+			list_add(&mnt->mnt_slave, &old->mnt_slave);//把本次的mount链接到mnt_slave链表
+	    //设置为old->mnt_master
 		mnt->mnt_master = old->mnt_master;
+        /*显然本次的mount受了老的mount即old很大影响，mnt->mnt_share、mnt->mnt_slave、mnt->mnt_master都是。本次是
+         mount --bind /home/  /home/test，old是/home/所在文件系统的mount结构，现在新生成的mount结构mnt也是基于/home/生成的
+         ，所以mnt跟old有父子关系吧??????????????*/
 	}
+    //设置mount的shared属性
 	if (flag & CL_MAKE_SHARED)
 		set_mnt_shared(mnt);
 
@@ -1397,12 +1450,13 @@ static bool mnt_ns_loop(struct path *path)
 	ei = get_proc_ns(inode);
 	if (ei->ns_ops != &mntns_operations)
 		return false;
-
+    //当前文件的命名空间
 	mnt_ns = ei->ns;
+    //current->nsproxy->mnt_ns当前进程的命名空间
 	return current->nsproxy->mnt_ns->seq >= mnt_ns->seq;
 }
 
-struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
+struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,//mnt的挂载点目录dentry
 					int flag)
 {
 	struct mount *res, *p, *q, *r, *parent;
@@ -1410,34 +1464,47 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
 	if (!(flag & CL_COPY_ALL) && IS_MNT_UNBINDABLE(mnt))
 		return ERR_PTR(-EINVAL);
 
+    //创建新的mount并对大部分成员初始化并返回给res和p，好多成员信息复制了mnt的。
 	res = q = clone_mnt(mnt, dentry, flag);
 	if (IS_ERR(q))
 		return q;
-
+    //赋值挂载点dentry
 	q->mnt_mountpoint = mnt->mnt_mountpoint;
 
+    //p是最原始的
 	p = mnt;
+
+    //遍历mnt->mnt_mounts链表上的mounte结构，这个链表上的mount都是mnt的子mount结构
 	list_for_each_entry(r, &mnt->mnt_mounts, mnt_child) {
 		struct mount *s;
+        //is_subdir:判断r的挂载点目录是否是dentry的父目录，是则返回1
 		if (!is_subdir(r->mnt_mountpoint, dentry))
 			continue;
 
+        //以r为源头，遍历r->mnt_mounts链表上子mount结构
 		for (s = r; s; s = next_mnt(s, r)) {
+            //
 			if (!(flag & CL_COPY_ALL) && IS_MNT_UNBINDABLE(s)) {
 				s = skip_mnt_tree(s);
 				continue;
 			}
+            //
 			while (p != s->mnt_parent) {
 				p = p->mnt_parent;
 				q = q->mnt_parent;
 			}
 			p = s;
+            //显然parent本次for循环源头
 			parent = q;
+            
+            //创建新的mount并对大部分成员初始化并返回给q，好多成员信息复制了p的。
 			q = clone_mnt(p, p->mnt.mnt_root, flag);
 			if (IS_ERR(q))
 				goto out;
 			br_write_lock(&vfsmount_lock);
+            //创建的新mount即q靠mnt_list添加到该链表
 			list_add_tail(&q->mnt_list, &res->mnt_list);
+            //q作为挂载源，设置挂载点目录等等，并把q添加到mnt_hash，mnt_child链表
 			attach_mnt(q, parent, p->mnt_mp);
 			br_write_unlock(&vfsmount_lock);
 		}
@@ -1499,13 +1566,15 @@ static void cleanup_group_ids(struct mount *mnt, struct mount *end)
 			mnt_release_group_id(p);
 	}
 }
-
-static int invent_group_ids(struct mount *mnt, bool recurse)
+//遍历source_mnt树下的mount结构，如果这些mount不支持shared属性并且没有mount group id，那分配一个mount group id
+static int invent_group_ids(struct mount *mnt, bool recurse)//recurse:true
 {
 	struct mount *p;
-
+    //遍历mnt下mount树???
 	for (p = mnt; p; p = recurse ? next_mnt(p, mnt) : NULL) {
+        //如果p没有mount group id并且不支持共享
 		if (!p->mnt_group_id && !IS_MNT_SHARED(p)) {
+            //分配mount group id赋值给mnt->mnt_group_id
 			int err = mnt_alloc_group_id(p);
 			if (err) {
 				cleanup_group_ids(mnt, p);
@@ -1583,13 +1652,15 @@ static int invent_group_ids(struct mount *mnt, bool recurse)
 static int attach_recursive_mnt(struct mount *source_mnt,
 			struct mount *dest_mnt,
 			struct mountpoint *dest_mp,
-			struct path *parent_path)
+			struct path *parent_path)//一般parent_path为NULL
 {
+    //tree_list 链表
 	LIST_HEAD(tree_list);
 	struct mount *child, *p;
 	int err;
 
-	if (IS_MNT_SHARED(dest_mnt)) {
+	if (IS_MNT_SHARED(dest_mnt)) {//一般mount默认都是shared属性
+	    //遍历source_mnt树下的mount结构，如果这些mount不支持shared属性并且没有mount group id，那分配一个mount group id
 		err = invent_group_ids(source_mnt, true);
 		if (err)
 			goto out;
@@ -1604,17 +1675,20 @@ static int attach_recursive_mnt(struct mount *source_mnt,
 		for (p = source_mnt; p; p = next_mnt(p, source_mnt))
 			set_mnt_shared(p);
 	}
-	if (parent_path) {
+	if (parent_path) {//一般parent_path为NULL
 		detach_mnt(source_mnt, parent_path);
 		attach_mnt(source_mnt, dest_mnt, dest_mp);
 		touch_mnt_namespace(source_mnt->mnt_ns);
 	} else {
+	    //设置source_mnt的挂载点目录dentry、mnt_parent竟然为挂点目录所在文件系统的mount，即dest_mnt，还有设置mountpoint
 		mnt_set_mountpoint(dest_mnt, dest_mp, source_mnt);
+        //把source_mnt这个mount结构添加到各个链表，设置mount的文件系统命名空间为父mount的命名空间
 		commit_tree(source_mnt);
 	}
 
 	list_for_each_entry_safe(child, p, &tree_list, mnt_hash) {
 		list_del_init(&child->mnt_hash);
+        //把child这个mount结构添加到各个链表，设置mount的文件系统命名空间为父mount的命名空间
 		commit_tree(child);
 	}
 	br_write_unlock(&vfsmount_lock);
@@ -1627,7 +1701,9 @@ static int attach_recursive_mnt(struct mount *source_mnt,
  out:
 	return err;
 }
-
+//path代表了挂载点目录，比如本次/dev/sda0块设备要挂载到的/mnt目录，遍历/mnt获取挂载点目录的vfsmount和根目录dentry。
+//如果之前sda1，sda2，sda3陆续挂载到了/mnt，所以要遍历sda1、sda2、sda3找到最后一次挂载到/mnt的sda3块设备mount结构的vfsmount
+//和根目录dentry，然后赋予mountpoint并返回。如果/mnt目录之前没有挂载块设备，则是找到/mnt目录原始的dentry的赋予mountpoint并返回
 static struct mountpoint *lock_mount(struct path *path)
 {
 	struct vfsmount *mnt;
@@ -1640,10 +1716,13 @@ retry:
 		return ERR_PTR(-ENOENT);
 	}
 	namespace_lock();
-    //得到struct vfsmount *mnt
+//比如本次mount /dev/sda0 /mnt,而之前已经有sda1、sda2、sda3依次挂载到了/mmt，__lookup_mnt()这里边依次找到sda1、sda2、sda3的mount并返回
+//mount结构的vfsmount给mnt，这样下边执行goto retry接着循环，直到最后一次是返回NULL，此时才开始处理mount /dev/sda0 /mnt的mount
 	mnt = lookup_mnt(path);
+    //如果mnt不为NULL，下边会执行goto retry继续循环，直到lookup_mnt返回NULL if才成立
 	if (likely(!mnt)) {
-        //根据挂载点dentry得到或者分配新的mp
+        //为本次mount分配一个新的mountpoint，然后mp->m_dentry = dentry，如果/mnt目录之前没有挂载块设备，则dentry就是/mnt目录的
+        //现在sda1、sda2、sda3依次挂载到了/mmt，此时dentry是sda3块设备的根目录dentry
 		struct mountpoint *mp = new_mountpoint(dentry);
 		if (IS_ERR(mp)) {
 			namespace_unlock();
@@ -1655,8 +1734,11 @@ retry:
 	namespace_unlock();
 	mutex_unlock(&path->dentry->d_inode->i_mutex);
 	path_put(path);
+    //path->mnt依次保存sda1、sda2、sda3挂载到/mnt目录时的vfsmount
 	path->mnt = mnt;
+    //dentry和path->dentry都保存mnt->mnt_root，即依次是sda1、sda2、sda3块设备的根目录dentry,最后一次是sda3块设备的根目录dentry
 	dentry = path->dentry = dget(mnt->mnt_root);
+    //调到retry循环
 	goto retry;
 }
 
@@ -1735,6 +1817,7 @@ static int do_change_type(struct path *path, int flag)
 /*
  * do loopback mount.
  */
+//mount --bind /home/  /home/test  path代表/home/test挂载点目录 ，old_name是/home/ 挂载源目录
 static int do_loopback(struct path *path, const char *old_name,
 				int recurse)
 {
@@ -1744,20 +1827,24 @@ static int do_loopback(struct path *path, const char *old_name,
 	int err;
 	if (!old_name || !*old_name)
 		return -EINVAL;
+    //探测/home/挂载源，得到该目录的所在文件系统的vfsmount和目录dentry信息保存到old_path。如果/home/目录已经有块设备挂载了
+    //则要把vfsmount和dentry转成挂载的块设备文件系统的vfsmount和根目录dentry保存到old_path
 	err = kern_path(old_name, LOOKUP_FOLLOW|LOOKUP_AUTOMOUNT, &old_path);
 	if (err)
 		return err;
 
 	err = -EINVAL;
+    //比较命名空间
 	if (mnt_ns_loop(&old_path))
 		goto out; 
-
+    //遍历/home/test获取挂载点目录，由于该目录之前可能有其他块设备挂载，所以要遍历找到最后一次挂载的块设备的vfsmount和根目录dentry
 	mp = lock_mount(path);
 	err = PTR_ERR(mp);
 	if (IS_ERR(mp))
 		goto out;
-
+    // /home/ 挂载源目录所处文件系统的struct mount，这个mount是之前的挂载生成的
 	old = real_mount(old_path.mnt);
+    // /home/test 挂载点目录所处文件系统的struct mount，这个mount是之前的挂载生成的
 	parent = real_mount(path->mnt);
 
 	err = -EINVAL;
@@ -1769,14 +1856,16 @@ static int do_loopback(struct path *path, const char *old_name,
 
 	if (recurse)
 		mnt = copy_tree(old, old_path.dentry, 0);
-	else
+	else//创建新的mount并对大部分成员初始化，好多成员信息复制了old的。
+        //old是/home/所在文件系统原先挂载生成的struct mount，old_path.dentry是/home挂载源的。如果/home/目录已经有块设备挂载了，
+	    //则要转换成之前挂载的块设备的根目录dentry保存到old_path.dentry。
 		mnt = clone_mnt(old, old_path.dentry, 0);
 
 	if (IS_ERR(mnt)) {
 		err = PTR_ERR(mnt);
 		goto out2;
 	}
-
+    //mnt:本次mount操作创建source mount，parent dest mount，mp挂载点
 	err = graft_tree(mnt, parent, mp);
 	if (err) {
 		br_write_lock(&vfsmount_lock);

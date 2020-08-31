@@ -56,8 +56,9 @@ struct mnt_namespace;
 #define MNT_LOCK_NODEV		0x200000
 #define MNT_LOCK_READONLY	0x400000
 
+//每一个挂载的块设备都要生成一个mount结构体，顺带着就生成了vfsmount，每一次挂载都会生成的一个mount和vfsmount结构
 struct vfsmount {
-    //当前文件所处的文件系统的根目录dentry
+    //挂载的块设备的根目录dentry
 	struct dentry *mnt_root;	/* root of the mounted tree 源头块设备的根文件系统*/
 	struct super_block *mnt_sb;	/* pointer to superblock */
 	int mnt_flags;

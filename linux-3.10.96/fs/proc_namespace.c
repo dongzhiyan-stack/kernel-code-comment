@@ -222,6 +222,7 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 static int mounts_open_common(struct inode *inode, struct file *file,
 			      int (*show)(struct seq_file *, struct vfsmount *))
 {
+    //打开该文件的进程
 	struct task_struct *task = get_proc_task(inode);
 	struct nsproxy *nsp;
 	struct mnt_namespace *ns = NULL;
@@ -233,12 +234,14 @@ static int mounts_open_common(struct inode *inode, struct file *file,
 		goto err;
 
 	rcu_read_lock();
+    //获取进程命名空间struct nsproxy结构
 	nsp = task_nsproxy(task);
 	if (!nsp) {
 		rcu_read_unlock();
 		put_task_struct(task);
 		goto err;
 	}
+    //获取文件系统命名空间struct mnt_namespace
 	ns = nsp->mnt_ns;
 	if (!ns) {
 		rcu_read_unlock();
@@ -254,21 +257,25 @@ static int mounts_open_common(struct inode *inode, struct file *file,
 		ret = -ENOENT;
 		goto err_put_ns;
 	}
+    //获取当前文件系统根目录，不一定是根文件系统根目录
 	get_fs_root(task->fs, &root);
 	task_unlock(task);
 	put_task_struct(task);
 
 	ret = -ENOMEM;
+    //分配proc_mounts
 	p = kmalloc(sizeof(struct proc_mounts), GFP_KERNEL);
 	if (!p)
 		goto err_put_path;
 
 	file->private_data = &p->m;
+    //struct seq_operations赋值为mounts_op
 	ret = seq_open(file, &mounts_op);
 	if (ret)
 		goto err_free;
-
+    //当前进程所属的命名空间
 	p->ns = ns;
+    //指向当前进程所属的根文件系统
 	p->root = root;
 	p->m.poll_event = ns->event;
 	p->show = show;

@@ -2333,6 +2333,7 @@ EXPORT_SYMBOL(d_move);
  * Returns the ancestor dentry of p2 which is a child of p1, if p1 is
  * an ancestor of p2, else NULL.
  */
+//p1是父目录dentry，如果循环p1= p->d_parent依次找到p2的上一级父目录dentry，如果与p1相等，等p2是p1的子目录
 struct dentry *d_ancestor(struct dentry *p1, struct dentry *p2)
 {
 	struct dentry *p;
@@ -2920,6 +2921,7 @@ int is_subdir(struct dentry *new_dentry, struct dentry *old_dentry)
 		 * due to d_move
 		 */
 		rcu_read_lock();
+        //如果new_dentry是old_dentry的子目录，则返回1
 		if (d_ancestor(old_dentry, new_dentry))
 			result = 1;
 		else

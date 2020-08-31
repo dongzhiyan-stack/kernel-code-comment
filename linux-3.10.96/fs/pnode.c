@@ -14,7 +14,7 @@
 #include "pnode.h"
 
 /* return the next shared peer mount of @p */
-static inline struct mount *next_peer(struct mount *p)
+static inline struct mount *next_peer(struct mount *p)//返回peer group同一个mount组中的下一个mount
 {
 	return list_entry(p->mnt_share.next, struct mount, mnt_share);
 }
@@ -24,7 +24,7 @@ static inline struct mount *first_slave(struct mount *p)
 	return list_entry(p->mnt_slave_list.next, struct mount, mnt_slave);
 }
 
-static inline struct mount *next_slave(struct mount *p)
+static inline struct mount *next_slave(struct mount *p)//返回同是slave属性mount组的下一个mount
 {
 	return list_entry(p->mnt_slave.next, struct mount, mnt_slave);
 }
@@ -143,20 +143,24 @@ void change_mnt_propagation(struct mount *mnt, int type)
  * vfsmount found while iterating with propagation_next() is
  * a peer of one we'd found earlier.
  */
+//返回peer group即同是shared属性mount组中的下一个mount或者同是slave属性mount组的下一个mount。貌似所有父子mount结构有shared属性的mount
+//都靠其mnt_share成员构成一个单向链表。所有父子mount结构有slave属性的mount靠其mnt_slave成员构成一个单向链表。propagation_next()函数
+//貌似就是以本次mount命令的dest mount结构为开始，通过mount结构的mnt_share和mnt_slave成员，遍历所有同一个属性组所有的mount结构
 static struct mount *propagation_next(struct mount *m,
 					 struct mount *origin)
 {
 	/* are there any slaves of this mount? */
+    //mount有slave属性的mount????有则返回
 	if (!IS_MNT_NEW(m) && !list_empty(&m->mnt_slave_list))
 		return first_slave(m);
 
 	while (1) {
 		struct mount *master = m->mnt_master;
 
-		if (master == origin->mnt_master) {
+		if (master == origin->mnt_master) {//这个分支是peer group同步的mount
 			struct mount *next = next_peer(m);
 			return (next == origin) ? NULL : next;
-		} else if (m->mnt_slave.next != &master->mnt_slave_list)
+		} else if (m->mnt_slave.next != &master->mnt_slave_list)//这个分支是slave 分支
 			return next_slave(m);
 
 		/* back at master */
@@ -173,6 +177,7 @@ static struct mount *propagation_next(struct mount *m,
  * @type	return CL_SLAVE if the new mount has to be
  * 		cloned as a slave.
  */
+//如果mount结构都是shared 属性，
 static struct mount *get_source(struct mount *dest,
 				struct mount *last_dest,
 				struct mount *last_src,
@@ -180,6 +185,7 @@ static struct mount *get_source(struct mount *dest,
 {
 	struct mount *p_last_src = NULL;
 	struct mount *p_last_dest = NULL;
+
 
 	while (last_dest != dest->mnt_master) {
 		p_last_dest = last_dest;
@@ -229,11 +235,14 @@ int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
 	struct mount *prev_src_mnt  = source_mnt;
 	LIST_HEAD(tmp_list);
 
+//返回peer group即同是shared属性mount组中的下一个mount或者同是slave属性mount组的下一个mount。貌似所有父子mount结构有shared属性的mount
+//都靠其mnt_share成员构成一个单向链表。所有父子mount结构有slave属性的mount靠其mnt_slave成员构成一个单向链表。propagation_next()函数
+//貌似就是以本次mount命令的dest mount结构为开始，通过mount结构的mnt_share和mnt_slave成员，遍历所有同一个属性组所有的mount结构赋予m
 	for (m = propagation_next(dest_mnt, dest_mnt); m;
 			m = propagation_next(m, dest_mnt)) {
 		int type;
 		struct mount *source;
-
+        //正常从shared属性mount组或者slave属性mount组取出的mount结构不应该是新的mount
 		if (IS_MNT_NEW(m))
 			continue;
 
@@ -252,6 +261,7 @@ int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
 
 		if (is_subdir(dest_mp->m_dentry, m->mnt.mnt_root)) {
 			mnt_set_mountpoint(m, dest_mp, child);
+            //child添加到tree_list链表
 			list_add_tail(&child->mnt_hash, tree_list);
 		} else {
 			/*
@@ -260,7 +270,9 @@ int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
 			 */
 			list_add_tail(&child->mnt_hash, &tmp_list);
 		}
+        //上一个dest mount
 		prev_dest_mnt = m;
+        //上一个source mount
 		prev_src_mnt  = child;
 	}
 out:

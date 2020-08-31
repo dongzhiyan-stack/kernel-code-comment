@@ -24,7 +24,7 @@ struct seq_file {
 	loff_t read_pos;
 	u64 version;
 	struct mutex lock;
-	const struct seq_operations *op;
+	const struct seq_operations *op;//cat /proc/mounts时是mounts_op结构，mounts_open_common()->seq_open()中赋值
 	int poll_event;
 #ifdef CONFIG_USER_NS
 	struct user_namespace *user_ns;
