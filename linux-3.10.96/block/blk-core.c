@@ -68,7 +68,7 @@ struct kmem_cache *blk_requestq_cachep;
  */
 static struct workqueue_struct *kblockd_workqueue;
 
-static void drive_stat_acct(struct request *rq, int new_io)
+static void drive_stat_acct(struct request *rq, int new_io)//¸ß°æ±¾±äÎª blk_account_io_start
 {
 	struct hd_struct *part;
 	int rw = rq_data_dir(rq);
@@ -78,10 +78,10 @@ static void drive_stat_acct(struct request *rq, int new_io)
 		return;
 
 	cpu = part_stat_lock();
-
-	if (!new_io) {
+    
+	if (!new_io) {//ËµÃ÷Õâ¸öĞÂµÄbioºÏ²¢µ½ÁËrq
 		part = rq->part;
-		part_stat_inc(cpu, part, merges[rw]);
+		part_stat_inc(cpu, part, merges[rw]);//Ôö¼ÓºÏ²¢¼ÆÊı
 	} else {
 		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
 		if (!hd_struct_try_get(part)) {
@@ -322,7 +322,7 @@ inline void __blk_run_queue_uncond(struct request_queue *q)
 	 * can wait until all these request_fn calls have finished.
 	 */
 	q->request_fn_active++;
-	q->request_fn(q);//mmc_request_fn
+	q->request_fn(q);//mmc_request_fn  scsi_request_fn()
 	q->request_fn_active--;
 }
 
@@ -1242,17 +1242,25 @@ static void add_acct_request(struct request_queue *q, struct request *rq,
 	__elv_add_request(q, rq, where);
 }
 //Í³¼ÆIOÊ¹ÓÃÂÊÓĞ¹ØµÄtime_in_queueºÍio_ticksÊı¾İ
+/*ÕâÀïÓĞ¸öÎÊÌâ±ØĞëÒª¿¼ÂÇ£¬blk_account_io_start/blk_account_io_done/drive_stat_acct->part_round_stats->part_round_stats_single,
+Ê×ÏÈÒªnow != part->stamp£¬ÖÁÉÙÃ¿part_round_stats_singleº¯Êı±»Ö´ĞĞµÄÊ±¼äÒª´óÓÚÒ»¸öjiffies£¬²ÅÄÜÔö¼Óio_ticks¼ÆÊı£¬±¾ÉíÒ²ÊÇÒÔjiffiesÎªµ¥Î»¡£
+Í¬Ê±»¹Òªpart_in_flight(part)²»Îª0£¬²Å»áÖ´ĞĞÔö¼Óio_ticks¼ÆÊı¡£part_in_flight(part)²»Îª0£¬¾ÍÊÇpart->in_flight[0/1]²»Îª0£¬
+Õâ±íÊ¾¸Ã´ÅÅÌ·ÖÇøÓĞreqÒª´«Êä¡£Ã¿µ±Ö´ĞĞblk_account_io_start»òÕßdrive_stat_acctÆô¶¯req´«ÊäÊ±£¬Ö´ĞĞ
+part_inc_in_flight() Áîpart->in_flight[0/1]++¡£µ±req´«ÊäÍê³Éºó£¬Ö´ĞĞblk_account_io_done->part_dec_in_flightÁîpart->in_flight[0/1]--¡£*/
 static void part_round_stats_single(int cpu, struct hd_struct *part,
 				    unsigned long now)
 {
+    //Ê±¼ä²î±ØĞë´óÓÚÒ»¸öjiffies
 	if (now == part->stamp)
 		return;
 
+    //in_flight ²»Îª0£¬ËµÃ÷in flight¶ÓÁĞÓĞreq
 	if (part_in_flight(part)) {
 		__part_stat_add(cpu, part, time_in_queue,
 				part_in_flight(part) * (now - part->stamp));
 		__part_stat_add(cpu, part, io_ticks, (now - part->stamp));
 	}
+    //¸üĞÂpart->stamp Îªµ±Ç°Ê±¼ä
 	part->stamp = now;
 }
 
@@ -1272,14 +1280,15 @@ static void part_round_stats_single(int cpu, struct hd_struct *part,
  * /proc/diskstats.  This accounts immediately for all queue usage up to
  * the current jiffies and restarts the counters again.
  */
-//¸üĞÂÖ÷¿éÉè±¸ºÍ¿éÉè±¸·ÖÇøµÄtime_in_queueºÍio_ticksÊı¾İ
+//¸üĞÂÖ÷¿éÉè±¸ºÍ¿éÉè±¸·ÖÇøµÄtime_in_queueºÍio_ticksÊı¾İ£¬blk_account_io_done() req´«ÊäÍê³ÉÖ´ĞĞ
 void part_round_stats(int cpu, struct hd_struct *part)
 {
 	unsigned long now = jiffies;
 
-	if (part->partno)//Ö÷¿éÉè±¸µÄ
+	if (part->partno)//¸üĞÂÖ÷¿éÉè±¸µÄio_ticks£¬²¢¸üĞÂpart->stamp Îªµ±Ç°Ê±¼ä
 		part_round_stats_single(cpu, &part_to_disk(part)->part0, now);
-    //µ±Ç°¿éÉè±¸·ÖÇøµÄ
+    
+    //¸üĞÂµ±Ç°Éè±¸·ÖÇøµÄio_ticks£¬²¢¸üĞÂpart->stamp Îªµ±Ç°Ê±¼ä
 	part_round_stats_single(cpu, part, now);
 }
 EXPORT_SYMBOL_GPL(part_round_stats);
@@ -1526,7 +1535,7 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 * any locks.
 	 */
 	//ÒÀ´ÎÈ¡³ö½ø³Ìplug->listÁ´±íÉÏÒÑÓĞµÄrq,ÅĞ¶Ïrq´ú±íµÄ´ÅÅÌ·¶Î§ÊÇ·ñ°¤×Å±¾´ÎµÄbioµÄ·¶Î§£¬ÊÇÔò°ÑbioºÏ²¢µ½rq
-	//ºÏ²¢³É¹¦·µ»ØÕæ£¬Ö±½Óreturn·µ»Ø£¬·ñÔò
+	//ºÏ²¢³É¹¦·µ»ØÕæ£¬Ö±½Óreturn·µ»Ø
 	if (attempt_plug_merge(q, bio, &request_count))
 		return;
 
@@ -1534,6 +1543,7 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
      IOµ÷¶ÈËã·¨µÄ¶ÓÁĞ£¬»¹ºÏ²¢²»³É¾ÍÒª¶Ôbio·ÖÅäĞÂµÄreq*/
 	spin_lock_irq(q->queue_lock);
     //×ßµ½ÕâÀïËµÃ÷¸ÃbioÃ»ÓĞºÏ²¢µ½µ±Ç°½ø³ÌplugÁ´±í£¬ÄÇ¾ÍÒª³¢ÊÔÍ¨¹ıIOµ÷¶ÈËã·¨Ñ°ÕÒÊÇ·ñÓĞ¿ÉÒÔºÏ²¢bioµÄreq
+    /*Èç¹ûÃ»ÓĞÉèÖÃIOµ÷¶ÈËã·¨£¬ÏÂ±ßµÄelv_merge()Ö´ĞĞºó¾ÍÊÇÖ±½Ó·µ»ØELEVATOR_NO_MERGE°É????????????????*/
     
     //ÔÚelvµ÷¶ÈÆ÷Àï²éÕÒÊÇ·ñÓĞ¿ÉÒÔºÏ²¢µÄreq£¬ÕâÊÇºÏ²¢bioµÄreq,ÊÇµ÷ÓÃ¾ßÌåµÄIOµ÷¶ÈËã·¨º¯ÊıÑ°ÕÒ¿ÉÒÔºÏ²¢µÄreq¡£
     //ÕâĞ©reqËùÔÚµÄIOµ÷¶ÈËã·¨¶ÓÁĞÊÇ¶à½ø³Ì¹²ÏíµÄ£¬¾ÍÏñÉÏ±ßËùÊö£¬½ø³Ì·ÃÎÊÕâĞ©¶ÓÁĞÒª¼ÓËø£¬ÆäËû½ø³ÌÒªµÈ´ı¡£
@@ -1619,8 +1629,8 @@ get_rq:
 		}
         //ĞÂ·ÖÅäµÄrqÌí¼Óµ½plug->listÁ´±í,
 		list_add_tail(&req->queuelist, &plug->list);
-        //¸üĞÂÖ÷¿éÉè±¸ºÍ¿éÉè±¸·ÖÇøµÄtime_in_queueºÍio_ticksÊı¾İ£¬Ôö¼Ó¶ÓÁĞflightÖĞreq¼ÆÊı
-		drive_stat_acct(req, 1);
+        //¸üĞÂÖ÷¿éÉè±¸ºÍ¿éÉè±¸·ÖÇøµÄtime_in_queueºÍio_ticksÊı¾İ£¬Ôö¼Ó¶ÓÁĞflightÖĞreq¼ÆÊı£¬°Ñ
+		drive_stat_acct(req, 1);//¾ÍÊÇblk_account_io_start
 	}
     else
 	{//·ñÔò¾Í
@@ -2300,7 +2310,7 @@ void blk_dequeue_request(struct request *rq)
  * Context:
  *     queue_lock must be held.
  */
-void blk_start_request(struct request *req)
+void blk_start_request(struct request *req)//Æô¶¯µ×²ãÓ²¼ş´«Êä
 {
 	blk_dequeue_request(req);
 
@@ -2313,7 +2323,7 @@ void blk_start_request(struct request *req)
 		req->next_rq->resid_len = blk_rq_bytes(req->next_rq);
 
 	BUG_ON(test_bit(REQ_ATOM_COMPLETE, &req->atomic_flags));
-	blk_add_timer(req);
+	blk_add_timer(req);//Æô¶¯request_queue->timeout¶¨Ê±Æ÷
 }
 EXPORT_SYMBOL(blk_start_request);
 
@@ -2367,8 +2377,8 @@ EXPORT_SYMBOL(blk_fetch_request);
  *     %true  - this request has more data
  **/
  
-/* 1 Ôö¼Ósectors IOÊ¹ÓÃ¼ÆÊı£¬¼´´«ÊäµÄÉÈÇøÊı¡£¸üĞÂreq->__data_lenºÍreq->buffer
-   2 ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı*/
+/* 1 Ö´ĞĞblk_account_io_completionÔö¼Ósectors IOÊ¹ÓÃ¼ÆÊı£¬¼´´«ÊäµÄÉÈÇøÊı¡£¸üĞÂreq->__data_lenºÍreq->buffer
+   2 ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı£¬»½ĞÑĞİÃßµÄ½ø³Ì*/
 bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)//nr_bytesÀ´×Ôblk_rq_bytes(rq)
 {
 	int total_bytes;
@@ -2420,7 +2430,7 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)//
 
 	total_bytes = 0;
     //ÉñÆæµÄÊÂÇé·¢ÉúÁË£¬ÕâÀïÈ¡³öreq¶ÔÓ¦µÄbio¿ªÊ¼´¦ÀíÁË£¬ÆäÊµÎÒÒ»Ö±Ò²ºÜºÃÆæ£¬req´«ÊäÍê³Éºó£¬¶ÔÔ­À´µÄbioÊÇÔõÃ´´¦ÀíµÄ?????
-    //Õâ¸öÑ­»·»áÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı
+    //Õâ¸öÑ­»·»áÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı£¬»½ĞÑĞİÃßµÄ½ø³Ì
 	while (req->bio) {
 		struct bio *bio = req->bio;
 		unsigned bio_bytes = min(bio->bi_size, nr_bytes);
@@ -2451,6 +2461,7 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)//
 		req->__data_len = 0;
 		return false;
 	}
+    
     //µ½ÕâÀï£¬ËµÃ÷req¶ÔÓ¦µÄbioÃ»ÓĞ´«ÊäÍê£¬Ôò¸üĞÂ req->__data_len¼õÉÙÒÑ¾­´«ÊäÍêµÄ×Ö½ÚÊı
 	req->__data_len -= total_bytes;
     //req->bufferÏòºóÆ«ÒÆbio_data(req->bio)£¬¶ÔÁË£¬ÎÒÍ»È»ÓĞ¸ö¸ĞÏë£¬reqÀïµÄbioµÄ´ÅÅÌµØÖ·ÊÇÁ¬ĞøµÄ£¬µ«ÊÇbio¶ÔÓ¦µÄÎÄ¼şÒ³Êı¾İ±£´æ
@@ -2539,11 +2550,11 @@ static void blk_finish_request(struct request *req, int error)
 	if (req->cmd_flags & REQ_DONTPREP)
 		blk_unprep_request(req);
 
-
+    //ÓĞreq´«ÊäÍê³ÉÁË£¬Ôö¼Óios¡¢ticks¡¢time_in_queue¡¢io_ticks¡¢flightµÈÊ¹ÓÃ¼ÆÊı
 	blk_account_io_done(req);
 
 	if (req->end_io)
-		req->end_io(req, error);
+		req->end_io(req, error);//»Øµ÷º¯Êı
 	else {
 		if (blk_bidi_rq(req))
 			__blk_put_request(req->next_rq->q, req->next_rq);
@@ -3134,7 +3145,7 @@ mq-deadlineËã·¨µÄ»¹Òª²åÈëºìºÚÊ÷ºÍfifo¶ÓÁĞ¡£Èç¹ûÃ»ÓĞIOµ÷¶ÈËã·¨£¬ÔÚÓ²¼ş¶ÓÁĞ¿ÕÏĞÊ±£
 
 	local_irq_restore(flags);
 }
-//Õâ¸öº¯Êı blk_finish_plug->queue_unplugged->__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn ·¢ËÍemmcÃüÁî¸øemmc¿ØÖÆÆ÷
+//Õâ¸öº¯Êı blk_finish_plug->blk_flush_plug_list->queue_unplugged->__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn ·¢ËÍemmcÃüÁî¸øemmc¿ØÖÆÆ÷
 //ÕâÊÇ°Ñµ±Ç°½ø³Ìblk_plugÁ´±íÉÏµÄreqÈ«²¿Ë¢µ½IOµ÷¶ÈËã·¨¶ÓÁĞÉÏ£¬È»ºóÆô¶¯´ÅÅÌÊı¾İ´«Êä
 void blk_finish_plug(struct blk_plug *plug)
 {

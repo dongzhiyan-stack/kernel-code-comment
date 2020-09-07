@@ -384,7 +384,7 @@ void blk_rq_set_mixed_merge(struct request *rq)
 	}
 	rq->cmd_flags |= REQ_MIXED_MERGE;
 }
-//更新主块设备和块设备分区的time_in_queue和io_ticks数据,奇怪，没有更新合并的bio次数那个数据呀
+//next合并打了req，没用了，这个next从in flight队列剔除掉，顺便执行part_round_stats更新io_ticks IO使用率计数
 static void blk_account_io_merge(struct request *req)
 {
 	if (blk_do_io_stat(req)) {
@@ -395,6 +395,7 @@ static void blk_account_io_merge(struct request *req)
 		part = req->part;
         //更新主块设备和块设备分区的time_in_queue和io_ticks数据
 		part_round_stats(cpu, part);
+        //减少in flight队列的req计数
 		part_dec_in_flight(part, rq_data_dir(req));
 
 		hd_struct_put(part);
@@ -479,7 +480,7 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	/*
 	 * 'next' is going away, so update stats accordingly
 	 */
-	//更新主块设备和块设备分区的time_in_queue和io_ticks IO使用计数,奇怪，没有更新合并的bio次数那个数据呀
+	//next合并打了req，没用了，这个next从in flight队列剔除掉，顺便执行part_round_stats更新io_ticks IO使用率计数
 	blk_account_io_merge(next);
     
     //req优先级?????????????

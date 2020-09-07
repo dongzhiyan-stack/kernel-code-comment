@@ -480,8 +480,8 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 */
     
     if (e->uses_mq && e->aux->ops.mq.request_merge)
-          //dd_request_merge 和 deadline_merge的函数源码就是一样的，就是在调度算法的 读或写红黑树队列里，找到等于bio_end_sector(bio)的req
-          //找到说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并ELEVATOR_FRONT_MERGE
+       //dd_request_merge 和 deadline_merge的函数源码就是一样的，就是在调度算法的 读或写红黑树队列里，找到等于bio_end_sector(bio)的req
+       //找到说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并ELEVATOR_FRONT_MERGE
           return e->aux->ops.mq.request_merge(q, req, bio);//dd_request_merge
     else if (!e->uses_mq && e->aux->ops.sq.elevator_merge_fn)
     //具体IO调度算法函数cfq_merge或者deadline_merge，该函数是在调度算法的 读或写红黑树队列里，遍历req,找到req起始扇区地址

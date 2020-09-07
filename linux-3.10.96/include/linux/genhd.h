@@ -79,12 +79,12 @@ struct partition {
 } __attribute__((packed));
 
 struct disk_stats {
-	unsigned long sectors[2];	/* READs and WRITEs *///读写扇区总数
-	unsigned long ios[2];
-	unsigned long merges[2];//应该是合并bio个数
-	unsigned long ticks[2];//读和写req消耗的时间，是jiffes数据
-	unsigned long io_ticks;//每一个req消耗的时间，iostat 的util参数就是用的这个参数
-	unsigned long time_in_queue;
+	unsigned long sectors[2];	/* READs and WRITEs *///读写扇区总数，blk_account_io_completion()中更新，req的bio传输完成执行这个
+	unsigned long ios[2];//blk_account_io_done()中更新，IOPS
+	unsigned long merges[2];//应该是合并bio个数，drive_stat_acct/blk_account_io_start更新合并计数
+	unsigned long ticks[2];//blk_account_io_done()中更新，jiffies - req->start_time 就是每一个req传输耗时
+	unsigned long io_ticks;//iostat 的util参数就是用的这个参数，part_round_stats_single()更新
+	unsigned long time_in_queue;//part_round_stats_single中更新
 };
 
 #define PARTITION_META_INFO_VOLNAMELTH	64
@@ -118,7 +118,8 @@ struct hd_struct {
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 	int make_it_fail;
 #endif
-	unsigned long stamp;//统计util时，记录上一次的系统时间
+	unsigned long stamp;//统计IO使用率util时用到，记录上一次的系统时间，part_round_stats->part_round_stats_single中更新
+	
 	//保存待传输的rq个数,不对，应该是bio个数吧，part_dec_in_flight()和part_inc_in_flight()
 	//inflight[1]保存主磁盘分区，比如sda；inflight[0]保存当前块设备的磁盘分区，比如sda2
 	atomic_t in_flight[2];

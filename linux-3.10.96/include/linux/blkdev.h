@@ -122,7 +122,7 @@ struct request {
         unsigned long fifo_time;
 	};
 
-	struct request_queue *q;//
+	struct request_queue *q;//块设备运行队列
 	struct blk_mq_ctx *mq_ctx;//req的软件队列，blk_mq_rq_ctx_init中赋值,req在分配后就会初始化指向当前CPU的软件队列
     struct blk_mq_hw_ctx *mq_hctx;//rq的硬件队列
         
@@ -190,7 +190,10 @@ struct request {
 	};
 
 	struct gendisk *rq_disk;//代表的整个磁盘
-	struct hd_struct *part;//代表磁盘块设备的分区结构体struct hd_struct
+	struct hd_struct *part;//代表磁盘块设备的分区结构体struct hd_struct，drive_stat_acct/blk_account_io_start中更新
+	
+	//blk_start_request->blk_dequeue_request->set_io_start_time_ns 设置req启动传输时间
+	//blk_account_io_done中使用jiffies - req->start_time，相减计算每个req的传输耗时
 	unsigned long start_time;
 #ifdef CONFIG_BLK_CGROUP
 	struct request_list *rl;		/* rl this rq is alloced from */
@@ -388,7 +391,7 @@ struct request_queue {
 	struct request_list	root_rl;
     //mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue() 完成初始化赋值
     //blk_finish_plug->queue_unplugged->__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn  启动磁盘或者emmc数据传输
-	request_fn_proc		*request_fn;//mmc_request_fn()
+	request_fn_proc		*request_fn;//mmc_request_fn() scsi_request_fn()
 //mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue()->blk_queue_make_request()中赋值为blk_queue_bio()
 //nvme blk_mq_init_queue->blk_mq_init_allocated_queue->blk_queue_make_request 中赋值
 	make_request_fn		*make_request_fn;
@@ -495,7 +498,7 @@ struct request_queue {
 
 	struct blk_queue_tag	*queue_tags;
 	struct list_head	tag_busy_list;
-    //队列插入新的一个req加1，__elv_add_request(),elv_dispatch_add_tail()减1
+    //队列插入新的一个req加1，__elv_add_request(),elv_dispatch_add_tail()减1,blk_dequeue_request()中加1
 	unsigned int		nr_sorted;
 	unsigned int		in_flight[2];
 	/*
@@ -506,6 +509,7 @@ struct request_queue {
 	unsigned int		request_fn_active;
 
 	unsigned int		rq_timeout;
+    //blk_start_request->blk_add_timer()启动request_queue->timeout定时器
 	struct timer_list	timeout;//mmc的定时器函数是blk_rq_timed_out_timer(),blk_alloc_queue_node中赋值
 	struct list_head	timeout_list;
 

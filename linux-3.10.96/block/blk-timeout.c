@@ -193,6 +193,6 @@ void blk_add_timer(struct request *req)
 
 	if (!timer_pending(&q->timeout) ||
 	    time_before(expiry, q->timeout.expires))
-		mod_timer(&q->timeout, expiry);
+		mod_timer(&q->timeout, expiry);//blk_start_request->blk_add_timerÆô¶¯request_queue->timeout¶¨Ê±Æ÷
 }
 
