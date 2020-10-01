@@ -1603,6 +1603,7 @@ get_rq:
 	 * We don't worry about that case for efficiency. It won't happen
 	 * often, and the elevators are able to handle it.
 	 */
+	//req初始化
 	//req->__sector = bio->bi_sector，rq->__data_len = bio->bi_size，rq->bio = rq->biotail = bio,req->cmd_type = REQ_TYPE_FS
 	init_request_from_bio(req, bio);
 
@@ -1629,7 +1630,7 @@ get_rq:
 		}
         //新分配的rq添加到plug->list链表,
 		list_add_tail(&req->queuelist, &plug->list);
-        //更新主块设备和块设备分区的time_in_queue和io_ticks数据，增加队列flight中req计数，把
+        //更新主块设备和块设备分区的time_in_queue和io_ticks数据，增加队列flight中req计数
 		drive_stat_acct(req, 1);//就是blk_account_io_start
 	}
     else

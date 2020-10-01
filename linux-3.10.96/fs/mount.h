@@ -60,7 +60,7 @@ struct mount {
 	struct list_head mnt_slave_list;/* list of slave mounts */
     //clone_mnt()中，把本次挂载slave属性的mount结构链接到另一个mount的mnt_slave链表
 	struct list_head mnt_slave;	/* slave list entry */
-    //clone_mnt()中，被赋值为old->mnt_master
+    //clone_mnt()中，被赋值为old，即指向老的mount结构，应该就是父mount吧
 	struct mount *mnt_master;	/* slave is on master->mnt_slave_list */
     //mount所属命名空间，commit_tree()中把mount结构添加到父mount的mnt_ns的list链表
 	struct mnt_namespace *mnt_ns;	/* containing namespace */

@@ -237,7 +237,7 @@ int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
 
 //返回peer group即同是shared属性mount组中的下一个mount或者同是slave属性mount组的下一个mount。貌似所有父子mount结构有shared属性的mount
 //都靠其mnt_share成员构成一个单向链表。所有父子mount结构有slave属性的mount靠其mnt_slave成员构成一个单向链表。propagation_next()函数
-//貌似就是以本次mount命令的dest mount结构为开始，通过mount结构的mnt_share和mnt_slave成员，遍历所有同一个属性组所有的mount结构赋予m
+//貌似就是以本次mount命令的dest mount结构为开始，通过mount结构的mnt_share和mnt_slave成员，遍历所有同一个属性组所有的mount结构赋予m变量
 	for (m = propagation_next(dest_mnt, dest_mnt); m;
 			m = propagation_next(m, dest_mnt)) {
 		int type;
