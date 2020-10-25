@@ -1372,6 +1372,11 @@ static struct dentry *__lookup_hash(struct qstr *name,
  *  small and for now I'd prefer to have fast path as straight as possible.
  *  It _is_ time-critical.
  */
+//walk_component->lookup_fast。nd->path.dentry 是本次搜索的目录或者文件的父dentry，nd->last是本次搜索文件或目录名字的hash值
+//nd->path.mnt 是本次搜索文件或者目录的父目录的vfsmount。然后查找本次文件或者目录的dentry，如果查找的是目录，并且该目录是
+//挂载点，则要把dentry转换成挂载源的根目录dentry，然后path->dentry = dentry，并且把mnt转换成时挂载源文件系统的vfsmount
+//并且path->mnt = mnt。然后walk_component()函数最后，还要执行path_to_nameidata(),设置nd->path.mnt = path->mnt 
+//和 nd->path.dentry = path->dentry.所以nd->path的来源起始还是本次搜索的文件或者目录的dentry、所处文件系统的vfsmount
 static int lookup_fast(struct nameidata *nd,
 		       struct path *path, struct inode **inode)
 {
@@ -1553,6 +1558,8 @@ static inline int should_follow_link(struct inode *inode, int follow)
 	return 0;
 }
 //找到对应文件或者目录的inode、dentry、mnt给nd结构赋值
+//lookup_fast或者lookup_fast中，path->mnt = nd->path.mnt，然后探测到新的目录dentry，path->dentry = dentry
+//最后设置 nd->path.mnt = path->mnt 和 nd->path.dentry = path->dentry;
 static inline int walk_component(struct nameidata *nd, struct path *path,
 		int follow)
 {
@@ -1596,6 +1603,7 @@ static inline int walk_component(struct nameidata *nd, struct path *path,
 		BUG_ON(inode != path->dentry->d_inode);
 		return 1;
 	}
+    //在这里设置 nd->path.mnt = path->mnt 和 nd->path.dentry = path->dentry;
 	path_to_nameidata(path, nd);
 	nd->inode = inode;
 	return 0;
@@ -1938,7 +1946,7 @@ static int path_init(int dfd, const char *name, unsigned int flags,
         //记录为根目录
 		nd->path = nd->root;
 	}
-    //这表示基于当前目录下的pathname,./a.txt
+    //这表示基于当前目录下的pathname,即这种形式./a.txt
     else if (dfd == AT_FDCWD) {
 		if (flags & LOOKUP_RCU) {
 			struct fs_struct *fs = current->fs;
@@ -2038,6 +2046,7 @@ static int path_lookupat(int dfd, const char *name,
     /*由于此时设置了LOOKUP_PARENT标志位，if不成立，否则lookup_last会查找mmcblk0p5的dentry
       ，此时nd->last是mmcblk0p5的hash值，nd->path.dentry是父目录/dev的，符合查找条件。*/
 	if (!err && !(flags & LOOKUP_PARENT)) {
+        //这里最终查找文件的dentry，inode
 		err = lookup_last(nd, &path);
 		while (err > 0) {
 			void *cookie;

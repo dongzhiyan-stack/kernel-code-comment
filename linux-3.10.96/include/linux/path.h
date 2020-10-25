@@ -4,10 +4,12 @@
 struct dentry;
 struct vfsmount;
 
+//walk_component->lookup_fast()中有详细注释
 struct path {
-    //本次搜索的文件或者目录所在的文件系统的mount结构里的vfsmount结构
+    //本次搜索的文件或者目录所在的文件系统的mount结构里的vfsmount结构。
+    //mount操作时，会把挂载点目录转换成挂载源的，故此时是上次挂载源块设备文件系统的vfsmount
 	struct vfsmount *mnt;
-	//就是本次搜索到的目录或者文件的dentry，在mount操作时，是挂载点目录的dentry
+	//就是本次搜索到的目录或者文件的dentry。在mount操作时，会把挂载点目录转换成挂载源的，故此时挂载源块设备的根目录。
 	struct dentry *dentry;
 };
 

@@ -25,6 +25,9 @@ struct mountpoint {
 	struct dentry *m_dentry;//挂点点目录dentry
 	int m_count;
 };
+/*见attach_mnt().关于父子mount的理解，每一次挂载，都会针对挂载源生成一个mount结构，即source mount，而针对挂载点目录所处文件系统的
+dest mount，就是source mount的父mount。source mount是子mount,dest mount是父mount，source mnt->mnt_child链接到dest mount的parent->mnt_mounts。
+举例，dest mount是sda3 挂在到根目录'/'生成的，然后sda5挂载到/home目录，这次生成的mount，即souce mount，与sda3的dest mount是父子关系。 */
 
 //每一个挂载的块设备都要生成一个mount结构体，每一次挂载都会生成的一个mount结构
 struct mount {
@@ -32,7 +35,7 @@ struct mount {
     //mnt_hash把mount链入mount hash链表，并且链入hash表的键值是(父mount结构的vfsmount成员+该mount的挂载点dentry)
 	struct list_head mnt_hash;
     //父mount,attach_recursive_mnt->mnt_set_mountpoint(),竟然设置为挂点目录所在文件系统的mount，
-    //也说也是，父mount就应该是要挂在的目录所在的文件系统的mount结构
+    //也说也是，挂载源的mount的父mount是挂载点目录所在的文件系统的mount结构
 	struct mount *mnt_parent;
     //挂载点dentry，attach_recursive_mnt->mnt_set_mountpoint()设置为挂载点目录dentry
 	struct dentry *mnt_mountpoint;
@@ -51,7 +54,7 @@ struct mount {
 	struct list_head mnt_instance;	/* mount instance on sb->s_mounts */
    
 	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */
-    //copy_tree()创建的新mount并靠mnt_list添加到该链表
+    //copy_tree()创建的新mount并靠mnt_list添加到该链表，搞不懂有什么用?
 	struct list_head mnt_list;
 	struct list_head mnt_expire;	/* link in fs-specific expiry list */
     //clone_mnt()把本次挂载shared属性的的mount结构链接到另一个mount的mnt_share链表
@@ -72,7 +75,7 @@ struct mount {
 #endif
     //mount id
 	int mnt_id;			/* mount identifier */
-    //mount group id，一个mount组里，所有的mount结构的mnt_group_id一样
+    //mount group id，一个mount组里，所有的mount结构的mnt_group_id一样.就是靠这个判断两个mount是否属于同一个peer group
 	int mnt_group_id;		/* peer group identifier */
 	int mnt_expiry_mark;		/* true if marked for expiry */
 	int mnt_pinned;

@@ -1,0 +1,471 @@
+
+
+[   92.574742] do_mount dev_name:/dev/sdb dir_name:/mnt/ext4
+[   92.851956] alloc_vfsmnt 214 alloc mount:0xffff8971f75f1200  mount->mnt_devname:/dev/sdb
+[   92.891780] EXT4-fs (sdb): mounted filesystem with ordered data mode. Opts: (null)
+[   92.891789] lock_mount 2234 mountpoint 0xffff89726ff35ac0 mp->m_dentry:0xffff8971ec32aa80 mp->m_dentry->d_iname:ext4
+[   92.891792] attach_recursive_mnt 2119 source_mnt mount:0xffff8971f75f1200 mnt_parent:0xffff8971f75f1200 vfsmount:0xffff8971f75f1220 mnt_mountpoint dentry:0xffff89726e20e780 mnt_id:132 mnt_group_id:0 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[   92.891795] attach_recursive_mnt 2122 dest_mnt mount:0xffff897278074a80 mnt_parent:0xffff897278bb8000 vfsmount:0xffff897278074aa0 mnt_mountpoint dentry:0xffff897279c10000 mnt_id:40 mnt_group_id:1 mnt_ns:0xffff89727a154720 mnt_ns->root:0xffff897278bb8000 mnt_mp:0xffff897278022040 mnt_devname:/dev/mapper/centos-root mnt_master:0x          (null)
+[   92.891796] attach_recursive_mnt 2125 mountpoint 0xffff89726ff35ac0 m_dentry:0xffff8971ec32aa80 d_iname:ext4
+
+
+
+[   92.891799] propagate_mnt 362 slave next_group mount:0xffff897275b71680
+[   92.891801] propagate_mnt 365 m mount:0xffff897275b71680 mnt_parent:0xffff897275b72580 vfsmount:0xffff897275b716a0 mnt_mountpoint dentry:0xffff897279c10000 mnt_id:177 mnt_group_id:155 mnt_ns:0xffff89727760cc60  mnt_mp:0xffff897278022040 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.891803] propagate_one 235 last_dest:0xffff897278074a80 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1200 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.891804] propagate_one 236 m:0xffff897275b71680 mp->m_dentry:0xffff8971ec32aa80 is_subdir:1
+[   92.891805] propagate_one 255 p:0xffff897278074a80
+[   92.891805] propagate_one 255 p:0x          (null)
+[   92.891806] propagate_one 274 type = CL_SLAVE
+[   92.891807] propagate_one 279 type |= CL_MAKE_SHARED
+[   92.891808] propagate_one 289 last_source:0xffff8971f75f1200 last_source->mnt.mnt_root:0xffff89726e20e780
+[   92.891809] copy_tree line:1851  mount:0xffff8971f75f1200 dentry:0xffff89726e20e780  -->clone_mnt()
+//克隆的第1个mount 0xffff8971f75f1800
+[   92.891844] alloc_vfsmnt 214 alloc mount:0xffff8971f75f1800  mount->mnt_devname:/dev/sdb
+[   92.891847] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971f75f1800 old:0xffff8971f75f1200
+[   92.891866] clone_mnt 1097 mnt mount:0xffff8971f75f1800 mnt_parent:0xffff8971f75f1800 vfsmount:0xffff8971f75f1820 mnt_mountpoint dentry:0xffff89726e20e780 mnt_id:133 mnt_group_id:113 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[   92.891868] copy_tree 1861 p:0xffff8971f75f1200 mnt:0xffff8971f75f1200 q:0xffff8971f75f1800
+[   92.891870] copy_tree 1914 res mount:0xffff8971f75f1800 mnt_parent:0xffff8971f75f1800 vfsmount:0xffff8971f75f1820 mnt_mountpoint dentry:0xffff89726e20e780 mnt_id:133 mnt_group_id:113 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971f75f1200
+[   92.891871] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec32aa80 dentry_name:ext4 mnt:0xffff897275b71680 mnt_mp:0xffff89726ff35ac0 child_mount:0xffff8971f75f1800
+[   92.891872] propagate_one 300 last_dest:0xffff897275b71680 last_source:0xffff8971f75f1800 child:0xffff8971f75f1800
+
+
+[   92.891873] propagate_mnt 362 slave next_group mount:0xffff8971eecd1800
+[   92.891875] propagate_mnt 365 m mount:0xffff8971eecd1800 mnt_parent:0xffff897275b71680 vfsmount:0xffff8971eecd1820 mnt_mountpoint dentry:0xffff897170e04a80 mnt_id:210 mnt_group_id:188 mnt_ns:0xffff89727760cc60  mnt_mp:0xffff89727688c780 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+///这里发现了 last_source 的规律，就是上次克隆的 mount
+[   92.891877] propagate_one 235 last_dest:0xffff897275b71680 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1800 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.891878] propagate_one 236 m:0xffff8971eecd1800 mp->m_dentry:0xffff8971ec32aa80 is_subdir:0
+
+
+[   92.891879] propagate_mnt 362 slave next_group mount:0xffff8971eecd1680
+[   92.891881] propagate_mnt 365 m mount:0xffff8971eecd1680 mnt_parent:0xffff897275b71680 vfsmount:0xffff8971eecd16a0 mnt_mountpoint dentry:0xffff897170c38f00 mnt_id:209 mnt_group_id:187 mnt_ns:0xffff89727760cc60  mnt_mp:0xffff89727688c980 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.891882] propagate_one 235 last_dest:0xffff897275b71680 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1800 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.891883] propagate_one 236 m:0xffff8971eecd1680 mp->m_dentry:0xffff8971ec32aa80 is_subdir:0
+
+[   92.891884] propagate_mnt 362 slave next_group mount:0xffff8971f421eb80
+[   92.891886] propagate_mnt 365 m mount:0xffff8971f421eb80 mnt_parent:0xffff8971f421ea00 vfsmount:0xffff8971f421eba0 mnt_mountpoint dentry:0xffff897279c10000 mnt_id:97 mnt_group_id:77 mnt_ns:0xffff8971f9ded7e0  mnt_mp:0xffff897278022040 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.891888] propagate_one 235 last_dest:0xffff897275b71680 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1800 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.891889] propagate_one 236 m:0xffff8971f421eb80 mp->m_dentry:0xffff8971ec32aa80 is_subdir:1
+[   92.891905] propagate_one 255 p:0xffff897278074a80
+[   92.891906] propagate_one 268 last_source:0xffff8971f75f1200
+[   92.891907] propagate_one 274 type = CL_SLAVE
+[   92.891907] propagate_one 279 type |= CL_MAKE_SHARED
+[   92.891908] propagate_one 289 last_source:0xffff8971f75f1200 last_source->mnt.mnt_root:0xffff89726e20e780
+[   92.891910] copy_tree line:1851  mount:0xffff8971f75f1200 dentry:0xffff89726e20e780  -->clone_mnt()
+//克隆的第2个mount 0xffff8971f75f1980
+[   92.891930] alloc_vfsmnt 214 alloc mount:0xffff8971f75f1980  mount->mnt_devname:/dev/sdb
+[   92.891932] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971f75f1980 old:0xffff8971f75f1200
+[   92.891960] clone_mnt 1097 mnt mount:0xffff8971f75f1980 mnt_parent:0xffff8971f75f1980 vfsmount:0xffff8971f75f19a0 mnt_mountpoint dentry:0xffff89726e20e780 mnt_id:134 mnt_group_id:114 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[   92.891961] copy_tree 1861 p:0xffff8971f75f1200 mnt:0xffff8971f75f1200 q:0xffff8971f75f1980
+[   92.891963] copy_tree 1914 res mount:0xffff8971f75f1980 mnt_parent:0xffff8971f75f1980 vfsmount:0xffff8971f75f19a0 mnt_mountpoint dentry:0xffff89726e20e780 mnt_id:134 mnt_group_id:114 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971f75f1200
+[   92.891964] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec32aa80 dentry_name:ext4 mnt:0xffff8971f421eb80 mnt_mp:0xffff89726ff35ac0 child_mount:0xffff8971f75f1980
+[   92.891965] propagate_one 300 last_dest:0xffff8971f421eb80 last_source:0xffff8971f75f1980 child:0xffff8971f75f1980
+
+
+[   92.891966] propagate_mnt 362 slave next_group mount:0xffff8971f2985f80
+[   92.891968] propagate_mnt 365 m mount:0xffff8971f2985f80 mnt_parent:0xffff8971f421eb80 vfsmount:0xffff8971f2985fa0 mnt_mountpoint dentry:0xffff897277b54840 mnt_id:131 mnt_group_id:111 mnt_ns:0xffff8971f9ded7e0  mnt_mp:0xffff89727688c700 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.891970] propagate_one 235 last_dest:0xffff8971f421eb80 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1980 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.891971] propagate_one 236 m:0xffff8971f2985f80 mp->m_dentry:0xffff8971ec32aa80 is_subdir:0
+
+
+[   92.891971] propagate_mnt 362 slave next_group mount:0xffff8971f2985c80
+[   92.891974] propagate_mnt 365 m mount:0xffff8971f2985c80 mnt_parent:0xffff8971f421eb80 vfsmount:0xffff8971f2985ca0 mnt_mountpoint dentry:0xffff89726bd778c0 mnt_id:129 mnt_group_id:110 mnt_ns:0xffff8971f9ded7e0  mnt_mp:0xffff89727688c800 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.891975] propagate_one 235 last_dest:0xffff8971f421eb80 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1980 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.891976] propagate_one 236 m:0xffff8971f2985c80 mp->m_dentry:0xffff8971ec32aa80 is_subdir:0
+
+
+[   92.891977] propagate_mnt 362 slave next_group mount:0xffff8971f98d8f00
+[   92.891979] propagate_mnt 365 m mount:0xffff8971f98d8f00 mnt_parent:0xffff8971f98d8d80 vfsmount:0xffff8971f98d8f20 mnt_mountpoint dentry:0xffff897279c10000 mnt_id:50 mnt_group_id:31 mnt_ns:0xffff8971f9e05600  mnt_mp:0xffff897278022040 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.891980] propagate_one 235 last_dest:0xffff8971f421eb80 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1980 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.891981] propagate_one 236 m:0xffff8971f98d8f00 mp->m_dentry:0xffff8971ec32aa80 is_subdir:1
+[   92.891982] propagate_one 255 p:0xffff897278074a80
+[   92.891983] propagate_one 268 last_source:0xffff8971f75f1200
+[   92.891983] propagate_one 274 type = CL_SLAVE
+[   92.891984] propagate_one 279 type |= CL_MAKE_SHARED
+[   92.891985] propagate_one 289 last_source:0xffff8971f75f1200 last_source->mnt.mnt_root:0xffff89726e20e780
+[   92.891986] copy_tree line:1851  mount:0xffff8971f75f1200 dentry:0xffff89726e20e780  -->clone_mnt()
+//克隆的第3个mount 0xffff8971f75f1b00
+[   92.892005] alloc_vfsmnt 214 alloc mount:0xffff8971f75f1b00  mount->mnt_devname:/dev/sdb
+[   92.892008] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971f75f1b00 old:0xffff8971f75f1200
+[   92.892034] clone_mnt 1097 mnt mount:0xffff8971f75f1b00 mnt_parent:0xffff8971f75f1b00 vfsmount:0xffff8971f75f1b20 mnt_mountpoint dentry:0xffff89726e20e780 mnt_id:135 mnt_group_id:115 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[   92.892035] copy_tree 1861 p:0xffff8971f75f1200 mnt:0xffff8971f75f1200 q:0xffff8971f75f1b00
+[   92.892037] copy_tree 1914 res mount:0xffff8971f75f1b00 mnt_parent:0xffff8971f75f1b00 vfsmount:0xffff8971f75f1b20 mnt_mountpoint dentry:0xffff89726e20e780 mnt_id:135 mnt_group_id:115 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971f75f1200
+[   92.892039] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec32aa80 dentry_name:ext4 mnt:0xffff8971f98d8f00 mnt_mp:0xffff89726ff35ac0 child_mount:0xffff8971f75f1b00
+[   92.892040] propagate_one 300 last_dest:0xffff8971f98d8f00 last_source:0xffff8971f75f1b00 child:0xffff8971f75f1b00
+
+
+[   92.892041] propagate_mnt 362 slave next_group mount:0xffff897276fe8a80
+[   92.892043] propagate_mnt 365 m mount:0xffff897276fe8a80 mnt_parent:0xffff8971f98d8f00 vfsmount:0xffff897276fe8aa0 mnt_mountpoint dentry:0xffff897277b54840 mnt_id:91 mnt_group_id:72 mnt_ns:0xffff8971f9e05600  mnt_mp:0xffff89727688c700 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.892044] propagate_one 235 last_dest:0xffff8971f98d8f00 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1b00 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.892045] propagate_one 236 m:0xffff897276fe8a80 mp->m_dentry:0xffff8971ec32aa80 is_subdir:0
+
+
+[   92.892046] propagate_mnt 362 slave next_group mount:0xffff897276fe8900
+[   92.892048] propagate_mnt 365 m mount:0xffff897276fe8900 mnt_parent:0xffff8971f98d8f00 vfsmount:0xffff897276fe8920 mnt_mountpoint dentry:0xffff897140c02e40 mnt_id:90 mnt_group_id:71 mnt_ns:0xffff8971f9e05600  mnt_mp:0xffff89727688cc80 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.892049] propagate_one 235 last_dest:0xffff8971f98d8f00 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1b00 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.892050] propagate_one 236 m:0xffff897276fe8900 mp->m_dentry:0xffff8971ec32aa80 is_subdir:0
+
+
+[   92.892051] propagate_mnt 362 slave next_group mount:0xffff897276fe8780
+[   92.892053] propagate_mnt 365 m mount:0xffff897276fe8780 mnt_parent:0xffff8971f98d8f00 vfsmount:0xffff897276fe87a0 mnt_mountpoint dentry:0xffff897170e04a80 mnt_id:89 mnt_group_id:70 mnt_ns:0xffff8971f9e05600  mnt_mp:0xffff89727688c780 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.892054] propagate_one 235 last_dest:0xffff8971f98d8f00 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1b00 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.892055] propagate_one 236 m:0xffff897276fe8780 mp->m_dentry:0xffff8971ec32aa80 is_subdir:0
+
+
+[   92.892056] propagate_mnt 362 slave next_group mount:0xffff897276fe8600
+[   92.892058] propagate_mnt 365 m mount:0xffff897276fe8600 mnt_parent:0xffff8971f98d8f00 vfsmount:0xffff897276fe8620 mnt_mountpoint dentry:0xffff897170c38f00 mnt_id:88 mnt_group_id:69 mnt_ns:0xffff8971f9e05600  mnt_mp:0xffff89727688c980 mnt_devname:/dev/mapper/centos-root mnt_master:0xffff897278074a80
+[   92.892059] propagate_one 235 last_dest:0xffff8971f98d8f00 first_source:0xffff8971f75f1200 last_source:0xffff8971f75f1b00 dest_master:0x          (null) mp:0xffff89726ff35ac0
+[   92.892060] propagate_one 236 m:0xffff897276fe8600 mp->m_dentry:0xffff8971ec32aa80 is_subdir:0
+
+
+[   92.892061] attach_recursive_mnt 2154 set_mnt_shared source mnt p:0xffff8971f75f1200
+[   92.892062] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec32aa80 dentry_name:ext4 mnt:0xffff897278074a80 mnt_mp:0xffff89726ff35ac0 child_mount:0xffff8971f75f1200
+[   92.892063] commit_tree 944  mnt:0xffff8971f75f1200
+[   92.892064] commit_tree 950  mount:0xffff8971f75f1200
+[   92.892066] __attach_mnt 879 mnt:0xffff8971f75f1200--> parent:0xffff897278074a80
+
+[   92.892110] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[   92.892111] attach_recursive_mnt 2182 tree_list child:0xffff8971f75f1b00
+//克隆的第3个mount 0xffff8971f75f1b00
+[   92.892112] commit_tree 944  mnt:0xffff8971f75f1b00
+[   92.892113] commit_tree 950  mount:0xffff8971f75f1b00
+[   92.892114] __attach_mnt 879 mnt:0xffff8971f75f1b00--> parent:0xffff8971f98d8f00
+
+[   92.892115] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[   92.892116] attach_recursive_mnt 2182 tree_list child:0xffff8971f75f1980
+//克隆的第2个mount 0xffff8971f75f1980
+[   92.892117] commit_tree 944  mnt:0xffff8971f75f1980
+[   92.892118] commit_tree 950  mount:0xffff8971f75f1980
+[   92.892119] __attach_mnt 879 mnt:0xffff8971f75f1980--> parent:0xffff8971f421eb80
+
+
+[   92.892120] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[   92.892121] attach_recursive_mnt 2182 tree_list child:0xffff8971f75f1800
+//克隆的第1个mount 0xffff8971f75f1800
+[   92.892122] commit_tree 944  mnt:0xffff8971f75f1800
+[   92.892123] commit_tree 950  mount:0xffff8971f75f1800
+[   92.892124] __attach_mnt 879 mnt:0xffff8971f75f1800--> parent:0xffff897275b71680
+
+//mount /dev/sdb /home/test 生成的source mount 0xffff8971f75f1200 的 mnt_group_id 是112， 这个mount group id是什么是否设置的?????????????????
+[   92.892126] attach_recursive_mnt 2190 source_mnt mount:0xffff8971f75f1200 mnt_parent:0xffff897278074a80 vfsmount:0xffff8971f75f1220 mnt_mountpoint dentry:0xffff8971ec32aa80 dentryname:ext4 mnt_id:132 mnt_group_id:112 mnt_ns:0xffff89727a154720 mnt_ns->root:0xffff897278bb8000 mnt_mp:0xffff89726ff35ac0 mnt_devname:/dev/sdb mnt_master:0x          (null)
+
+
+
+
+
+
+
+//mount --bind /mnt/ext4/home/ /mnt/ext4/test
+[  146.656492] do_mount dev_name:/mnt/ext4/home dir_name:/mnt/ext4/test
+//old mount 就是上一个mount /dev/sdb /home/test 的原始source mount ，这是本次的mount源目录的信息， 0xffff8971ec2a80c0 是/mnt/ext4/home 目录的dentry
+[  146.656499] do_loopback 2357 old_path vfsmount:0xffff8971f75f1220 dentry:0xffff8971ec2a80c0 dentry.name:home vfsmount->mnt_root:0xffff89726e20e780 vfsmount->mnt_root->d_iname:/
+//这里lock mount是找到挂载点目录dentry，这里要注意，挂载点目录dentry要一直遍历，直到该dentry没有块设备挂载
+[  146.656502] lock_mount 2234 mountpoint 0xffff89726e569a80 mp->m_dentry:0xffff8971ec2a9980 mp->m_dentry->d_iname:test//挂载点目录"/mnt/ext4/test"的dentry 0xffff8971ec2a9980
+//这个source mount和dest mount 都是 0xffff8971f75f1200 ，是上一步mount /dev/sdb /home/test 生成的 mount
+[  146.656503] do_loopback 2372 source mount:0xffff8971f75f1200 dest mount:0xffff8971f75f1200 mountpoint:0xffff89726e569a80
+
+[  146.656506] alloc_vfsmnt 214 alloc mount:0xffff8971de1a0600  mount->mnt_devname:/dev/sdb
+//这是照着上次的mount /dev/sdb /home/test生成的mount 0xffff8971f75f1200(即父mount,本次的 dest mount)，克隆生成本次的mount 0xffff8971de1a0600(即本次的source mount)。mount bind的mount原来是克隆生成的mount.并且这里把mount bind的mount 和 父mount 建立shared关系
+[  146.656514] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971de1a0600 old:0xffff8971f75f1200
+//注意，本次mount bind生成的mount的mnt_group_id继承了mount /dev/sdb /home/test生成的mount  的mnt_group_id。
+[  146.656574] clone_mnt 1097 mnt mount:0xffff8971de1a0600 mnt_parent:0xffff8971de1a0600 vfsmount:0xffff8971de1a0620 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:49 mnt_group_id:112 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+
+//本次的source mount 0xffff8971de1a0600 ，竟然也是克隆 0xffff8971f75f1200 生成的
+[  146.656577] attach_recursive_mnt 2119 source_mnt mount:0xffff8971de1a0600 mnt_parent:0xffff8971de1a0600 vfsmount:0xffff8971de1a0620 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:49 mnt_group_id:112 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+//本次的 dest_mnt mount:0xffff8971f75f1200 ，是上一步mount /dev/sdb /home/test 生成的mount 
+[  146.656580] attach_recursive_mnt 2122 dest_mnt mount:0xffff8971f75f1200 mnt_parent:0xffff897278074a80 vfsmount:0xffff8971f75f1220 mnt_mountpoint dentry:0xffff8971ec32aa80 mnt_id:132 mnt_group_id:112 mnt_ns:0xffff89727a154720 mnt_ns->root:0xffff897278bb8000 mnt_mp:0xffff89726ff35ac0 mnt_devname:/dev/sdb mnt_master:0x          (null)
+[  146.656581] attach_recursive_mnt 2125 mountpoint 0xffff89726e569a80 m_dentry:0xffff8971ec2a9980 d_iname:test
+
+
+//这里遍历dest mount 0xffff8971f75f1200 同一个mount shared组的mount 0xffff8971de1a0600,0xffff8971de1a0600 在上边 的clone_mnt函数已经和 dest mount 0xffff8971f75f1200建立shared
+[  146.656583] propagate_mnt 348 n mount:0xffff8971de1a0600 mnt_parent:0xffff8971de1a0600 vfsmount:0xffff8971de1a0620 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:49 mnt_group_id:112 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[  146.656584] propagate_mnt 349 next_peer mount:0xffff8971de1a0600
+[  146.656586] propagate_one 235 last_dest:0xffff8971f75f1200 first_source:0xffff8971de1a0600 last_source:0xffff8971de1a0600 dest_master:0x          (null) mp:0xffff89726e569a80
+[  146.656595] propagate_one 236 m:0xffff8971de1a0600 mp->m_dentry:0xffff8971ec2a9980 is_subdir:0
+
+//这个同组mount slave 的mount 0xffff8971f75f1980 是上次mount /dev/sdb /home/test 时第2次克隆生成的mount
+[  146.656596] propagate_mnt 362 slave next_group mount:0xffff8971f75f1980
+[  146.656598] propagate_mnt 365 m mount:0xffff8971f75f1980 mnt_parent:0xffff8971f421eb80 vfsmount:0xffff8971f75f19a0 mnt_mountpoint dentry:0xffff8971ec32aa80 mnt_id:134 mnt_group_id:114 mnt_ns:0xffff8971f9ded7e0  mnt_mp:0xffff89726ff35ac0 mnt_devname:/dev/sdb mnt_master:0xffff8971f75f1200
+[  146.656599] propagate_one 235 last_dest:0xffff8971f75f1200 first_source:0xffff8971de1a0600 last_source:0xffff8971de1a0600 dest_master:0x          (null) mp:0xffff89726e569a80
+[  146.656600] propagate_one 236 m:0xffff8971f75f1980 mp->m_dentry:0xffff8971ec2a9980 is_subdir:1
+[  146.656601] propagate_one 255 p:0xffff8971f75f1200
+[  146.656602] propagate_one 255 p:0x          (null)
+[  146.656603] propagate_one 274 type = CL_SLAVE
+[  146.656603] propagate_one 279 type |= CL_MAKE_SHARED
+[  146.656604] propagate_one 289 last_source:0xffff8971de1a0600 last_source->mnt.mnt_root:0xffff8971ec2a80c0
+[  146.656606] copy_tree line:1851  mount:0xffff8971de1a0600 dentry:0xffff8971ec2a80c0  -->clone_mnt()
+//针对同组mount slave的mount克隆生成新的mount 0xffff8971de1a0780，克隆母体是 0xffff8971de1a0600 ，即本次的source mount
+[  146.656627] alloc_vfsmnt 214 alloc mount:0xffff8971de1a0780  mount->mnt_devname:/dev/sdb
+[  146.656631] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971de1a0780 old:0xffff8971de1a0600
+[  146.656751] clone_mnt 1097 mnt mount:0xffff8971de1a0780 mnt_parent:0xffff8971de1a0780 vfsmount:0xffff8971de1a07a0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:50 mnt_group_id:31 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[  146.656752] copy_tree 1861 p:0xffff8971de1a0600 mnt:0xffff8971de1a0600 q:0xffff8971de1a0780
+[  146.656754] copy_tree 1914 res mount:0xffff8971de1a0780 mnt_parent:0xffff8971de1a0780 vfsmount:0xffff8971de1a07a0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:50 mnt_group_id:31 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971de1a0600
+[  146.656756] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a9980 dentry_name:test mnt:0xffff8971f75f1980 mnt_mp:0xffff89726e569a80 child_mount:0xffff8971de1a0780
+[  146.656758] propagate_one 300 last_dest:0xffff8971f75f1980 last_source:0xffff8971de1a0780 child:0xffff8971de1a0780
+
+
+//这个同组mount slave 的mount 0xffff8971f75f1800 是上次 mount /dev/sdb /home/test 时第1次克隆生成的mount
+[  146.656759] propagate_mnt 362 slave next_group mount:0xffff8971f75f1800
+[  146.656760] propagate_mnt 365 m mount:0xffff8971f75f1800 mnt_parent:0xffff897275b71680 vfsmount:0xffff8971f75f1820 mnt_mountpoint dentry:0xffff8971ec32aa80 mnt_id:133 mnt_group_id:113 mnt_ns:0xffff89727760cc60  mnt_mp:0xffff89726ff35ac0 mnt_devname:/dev/sdb mnt_master:0xffff8971f75f1200
+[  146.656762] propagate_one 235 last_dest:0xffff8971f75f1980 first_source:0xffff8971de1a0600 last_source:0xffff8971de1a0780 dest_master:0x          (null) mp:0xffff89726e569a80
+[  146.656763] propagate_one 236 m:0xffff8971f75f1800 mp->m_dentry:0xffff8971ec2a9980 is_subdir:1
+[  146.656764] propagate_one 255 p:0xffff8971f75f1200
+[  146.656765] propagate_one 268 last_source:0xffff8971de1a0600
+[  146.656765] propagate_one 274 type = CL_SLAVE
+[  146.656766] propagate_one 279 type |= CL_MAKE_SHARED
+[  146.656767] propagate_one 289 last_source:0xffff8971de1a0600 last_source->mnt.mnt_root:0xffff8971ec2a80c0
+//针对同组mount slave的mount克隆生成新的mount 0xffff8971de1a0480 ，克隆母体是 0xffff8971de1a0600 ，即本次的source mount
+[  146.656769] copy_tree line:1851  mount:0xffff8971de1a0600 dentry:0xffff8971ec2a80c0  -->clone_mnt()
+[  146.656789] alloc_vfsmnt 214 alloc mount:0xffff8971de1a0480  mount->mnt_devname:/dev/sdb
+[  146.656792] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971de1a0480 old:0xffff8971de1a0600
+[  146.656828] clone_mnt 1097 mnt mount:0xffff8971de1a0480 mnt_parent:0xffff8971de1a0480 vfsmount:0xffff8971de1a04a0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:51 mnt_group_id:32 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[  146.656830] copy_tree 1861 p:0xffff8971de1a0600 mnt:0xffff8971de1a0600 q:0xffff8971de1a0480
+[  146.656832] copy_tree 1914 res mount:0xffff8971de1a0480 mnt_parent:0xffff8971de1a0480 vfsmount:0xffff8971de1a04a0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:51 mnt_group_id:32 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971de1a0600
+[  146.656833] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a9980 dentry_name:test mnt:0xffff8971f75f1800 mnt_mp:0xffff89726e569a80 child_mount:0xffff8971de1a0480
+[  146.656834] propagate_one 300 last_dest:0xffff8971f75f1800 last_source:0xffff8971de1a0480 child:0xffff8971de1a0480
+[  146.656836] attach_recursive_mnt 2154 set_mnt_shared source mnt p:0xffff8971de1a0600
+[  146.656837] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a9980 dentry_name:test mnt:0xffff8971f75f1200 mnt_mp:0xffff89726e569a80 child_mount:0xffff8971de1a0600
+
+//这是本次mount bind生成的原始source mount 0xffff8971de1a0600
+[  146.656845] commit_tree 944  mnt:0xffff8971de1a0600
+[  146.656846] commit_tree 950  mount:0xffff8971de1a0600
+[  146.656847] __attach_mnt 879 mnt:0xffff8971de1a0600--> parent:0xffff8971f75f1200
+
+
+[  146.656872] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[  146.656873] attach_recursive_mnt 2182 tree_list child:0xffff8971de1a0480
+//克隆的第2个mount 0xffff8971de1a0480
+[  146.656874] commit_tree 944  mnt:0xffff8971de1a0480
+[  146.656875] commit_tree 950  mount:0xffff8971de1a0480
+[  146.656876] __attach_mnt 879 mnt:0xffff8971de1a0480--> parent:0xffff8971f75f1800
+
+[  146.656877] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[  146.656878] attach_recursive_mnt 2182 tree_list child:0xffff8971de1a0780
+//克隆的第1个mount 0xffff8971de1a0780
+[  146.656879] commit_tree 944  mnt:0xffff8971de1a0780
+[  146.656880] commit_tree 950  mount:0xffff8971de1a0780
+[  146.656881] __attach_mnt 879 mnt:0xffff8971de1a0780--> parent:0xffff8971f75f1980
+
+//本次mount bind 生成的mount(即source mount) 0xffff8971de1a0600 的父mount（即dest mount）是 0xffff8971de1a0600 ，就是上次mount /dev/sdb /mnt/ext4 生成的mount。
+[  146.656883] attach_recursive_mnt 2190 source_mnt mount:0xffff8971de1a0600 mnt_parent:0xffff8971f75f1200 vfsmount:0xffff8971de1a0620 mnt_mountpoint dentry:0xffff8971ec2a9980 dentryname:test mnt_id:49 mnt_group_id:112 mnt_ns:0xffff89727a154720 mnt_ns->root:0xffff897278bb8000 mnt_mp:0xffff89726e569a80 mnt_devname:/dev/sdb mnt_master:0x          (null)
+
+
+
+
+
+
+
+
+
+[32282.227060] do_mount dev_name:/mnt/ext4/home dir_name:/mnt/ext4/test
+//这些信息是挂载源的，"/mnt/ext4/home" 目录的dentry 就是 0xffff8971ec2a80c0 ，所属文件系统根目录dentry是 0xffff89726e20e780
+[32282.227175] do_loopback 2357 old_path vfsmount:0xffff8971f75f1220 dentry:0xffff8971ec2a80c0 dentry.name:home vfsmount->mnt_root:0xffff89726e20e780 vfsmount->mnt_root->d_iname:/
+///本次的挂载点目录信息，注意因为"/mnt/ext4/home"上一步挂载到了"/mnt/ext4/test"，所以遍历挂载点目录/mnt/ext4/test最后，实际挂载点目录是"/mnt/ext4/home"的 0xffff8971ec2a80c0，就是这个 home 目录的dentry
+[32282.227177] lock_mount 2234 mountpoint 0xffff8971f9c4d000 mp->m_dentry:0xffff8971ec2a80c0 mp->m_dentry->d_iname:home
+[32282.227178] do_loopback 2372 source mount:0xffff8971f75f1200 dest mount:0xffff8971de1a0600 mountpoint:ffff8971f9c4d000
+//照着上次mount bind 挂载的dest mount 0xffff8971f75f1200 克隆生成本次mount bind的source mount 0xffff8971d69f1b00，并设置二者 shared。这个表述不准确，容易引起歧义。
+
+///这里有个疑问，为什么要照着上次的mount bind的dest mount克隆呢？do_loopback()传递给clone_mnt的就是old，即本次mount bind源目录的mount。那为什么是照着上次mount bind的dest muont 0xffff8971f75f1200 克隆？ 0xffff8971f75f1200 是第一次 mount /dev/sdb /home/ext4 生成的mount，代表了这次的mount，而这里mount --bind 的源目录"/mnt/ext4/home"没有其他块设备挂载，则这个源目录的mount就是"/home/ext4"的所在文件系统的mount，就是/dev/sdb挂载到"/home/ext4"文件系统生成的mount 0xffff8971f75f1200 !
+[32282.227183] alloc_vfsmnt 214 alloc mount:0xffff8971d69f1b00  mount->mnt_devname:/dev/sdb
+[32282.227190] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971d69f1b00 old:0xffff8971f75f1200
+//克隆生成的 mount 继承了 mnt_group_id 112
+[32282.228808] clone_mnt 1097 mnt mount:0xffff8971d69f1b00 mnt_parent:0xffff8971d69f1b00 vfsmount:0xffff8971d69f1b20 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:52 mnt_group_id:112 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+
+//本次的source mount 0xffff8971d69f1b00 是照着上次mount bind 挂载的dest mount 0xffff8971f75f1200 生成的
+[32282.228812] attach_recursive_mnt 2119 source_mnt mount:0xffff8971d69f1b00 mnt_parent:0xffff8971d69f1b00 vfsmount:0xffff8971d69f1b20 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:52 mnt_group_id:112 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+//本次的dest mount是上次mount bind挂载的source mount。果然，mount是实时转化的，上次还是source mount，这次就变成了dest mount
+[32282.228814] attach_recursive_mnt 2122 dest_mnt mount:0xffff8971de1a0600 mnt_parent:0xffff8971f75f1200 vfsmount:0xffff8971de1a0620 mnt_mountpoint dentry:0xffff8971ec2a9980 mnt_id:49 mnt_group_id:112 mnt_ns:0xffff89727a154720 mnt_ns->root:0xffff897278bb8000 mnt_mp:0xffff89726e569a80 mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.228815] attach_recursive_mnt 2125 mountpoint 0xffff8971f9c4d000 m_dentry:0xffff8971ec2a80c0 d_iname:home
+
+//遍历dest mount 0xffff8971de1a0600 shared mount组的mount，第一个是 0xffff8971f75f1200 ，即souce mount。因为souce mount和 dest mount已经设置了shared关系。接着克隆新的mount
+[32282.228829] propagate_mnt 348 n mount:0xffff8971f75f1200 mnt_parent:0xffff897278074a80 vfsmount:0xffff8971f75f1220 mnt_mountpoint dentry:0xffff8971ec32aa80 mnt_id:132 mnt_group_id:112 mnt_ns:0xffff89727a154720  mnt_mp:0xffff89726ff35ac0 mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.228831] propagate_mnt 349 next_peer mount:0xffff8971f75f1200
+///第一次设置的 last_dest 是本次mount的原始dest mount 0xffff8971de1a0600 ,last_source 是本次mount原始的source mount 0xffff8971d69f1b00
+[32282.228832] propagate_one 235 last_dest:0xffff8971de1a0600 first_source:0xffff8971d69f1b00 last_source:0xffff8971d69f1b00 dest_master:0x          (null) mp:0xffff8971f9c4d000
+[32282.228834] propagate_one 236 m:0xffff8971f75f1200 mp->m_dentry:0xffff8971ec2a80c0 is_subdir:1
+[32282.228835] propagate_one 247 peers type = CL_MAKE_SHARED m:0xffff8971f75f1200  last_dest:0xffff8971de1a0600
+[32282.228836] propagate_one 289 last_source:0xffff8971d69f1b00 last_source->mnt.mnt_root:0xffff8971ec2a80c0
+[32282.228837] copy_tree line:1851  mount:0xffff8971d69f1b00 dentry:0xffff8971ec2a80c0  -->clone_mnt()
+//照着last_source ，这里即 source mount 0xffff8971d69f1b00 克隆生成新的mount 0xffff8971d69f1c80
+[32282.229597] alloc_vfsmnt 214 alloc mount:0xffff8971d69f1c80  mount->mnt_devname:/dev/sdb
+[32282.229691] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971d69f1c80 old:0xffff8971d69f1b00
+//这里克隆的mount 的 mnt_group_id 也是继承了母体的。
+[32282.230464] clone_mnt 1097 mnt mount:0xffff8971d69f1c80 mnt_parent:0xffff8971d69f1c80 vfsmount:0xffff8971d69f1ca0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:53 mnt_group_id:112 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.230467] copy_tree 1861 p:0xffff8971d69f1b00 mnt:0xffff8971d69f1b00 q:0xffff8971d69f1c80
+[32282.230469] copy_tree 1914 res mount:0xffff8971d69f1c80 mnt_parent:0xffff8971d69f1c80 vfsmount:0xffff8971d69f1ca0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:53 mnt_group_id:112 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+///这个克隆生成的mount 的父mount是 0xffff8971f75f1200 ，即遍历dest mount 0xffff8971de1a0600 shared mount组得到的mount，挂载点dentry是本次的克隆母体，即source mount 0xffff8971d69f1b00 的挂载点dentry。喔喔，这就是传播mount的原理吧，即同一个shared mount组的mount都要克隆生成一个mount，挂载到同一个挂载点目录dentry
+[32282.230472] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a80c0 dentry_name:home mnt:0xffff8971f75f1200 mnt_mp:0xffff8971f9c4d000 child_mount:0xffff8971d69f1c80
+///这里有个变化，last_dest变成了遍历shared mount组得到的mount 0xffff8971f75f1200 ，last_source 变成了刚刚克隆的mount 0xffff8971d69f1c80
+[32282.230474] propagate_one 300 last_dest:0xffff8971f75f1200 last_source:0xffff8971d69f1c80 child:0xffff8971d69f1c80
+
+
+
+//这个 mount 是本次操作新生成的mount，即new mount，直接返回，因为只对本次mount前已经存在的mount进行克隆mount
+[32282.230476] propagate_mnt 348 n mount:0xffff8971d69f1b00 mnt_parent:0xffff8971d69f1b00 vfsmount:0xffff8971d69f1b20 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:52 mnt_group_id:112 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.230477] propagate_mnt 349 next_peer mount:0xffff8971d69f1b00
+//这里有了变化，last_source 变成 了上一步克隆生成的mount  0xffff8971d69f1c80
+[32282.230478] propagate_one 235 last_dest:0xffff8971f75f1200 first_source:0xffff8971d69f1b00 last_source:0xffff8971d69f1c80 dest_master:0x          (null) mp:0xffff8971f9c4d000
+[32282.230480] propagate_one 236 m:0xffff8971d69f1b00 mp->m_dentry:0xffff8971ec2a80c0 is_subdir:1
+
+//这个 mount 是本次操作新生成的mount，即new mount，直接返回，因为只对本次mount前已经存在的mount进行克隆mount
+[32282.230481] propagate_mnt 348 n mount:0xffff8971d69f1c80 mnt_parent:0xffff8971f75f1200 vfsmount:0xffff8971d69f1ca0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:53 mnt_group_id:112 mnt_ns:0x          (null)  mnt_mp:0xffff8971f9c4d000 mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.230482] propagate_mnt 349 next_peer mount:0xffff8971d69f1c80
+[32282.230484] propagate_one 235 last_dest:0xffff8971f75f1200 first_source:0xffff8971d69f1b00 last_source:0xffff8971d69f1c80 dest_master:0x          (null) mp:0xffff8971f9c4d000
+[32282.230485] propagate_one 236 m:0xffff8971d69f1c80 mp->m_dentry:0xffff8971ec2a80c0 is_subdir:1
+
+///上边的两步没有克隆新的mount，last_dest 和 last_source还保持第一次克隆mount时后设置的数据，看来没有克隆新mount就不会再设置last_dest 和 last_source呀。
+
+
+///遍历dest mount 0xffff8971de1a0600 的 slave mount组的mount ，但是不是照着 source mount 0xffff8971d69f1c80 克隆生成新的mount，而是照着前边遍历 shared mount 组的0xffff8971f75f1200克隆生成的mount 0xffff8971d69f1c80 ，克隆生成新的mount 0xffff8971d69f1e00
+[32282.230487] propagate_mnt 362 slave next_group mount:0xffff8971de1a0480
+[32282.230489] propagate_mnt 365 m mount:0xffff8971de1a0480 mnt_parent:0xffff8971f75f1800 vfsmount:0xffff8971de1a04a0 mnt_mountpoint dentry:0xffff8971ec2a9980 mnt_id:51 mnt_group_id:32 mnt_ns:0xffff89727760cc60  mnt_mp:0xffff89726e569a80 mnt_devname:/dev/sdb mnt_master:0xffff8971de1a0600
+[32282.230491] propagate_one 235 last_dest:0xffff8971f75f1200 first_source:0xffff8971d69f1b00 last_source:0xffff8971d69f1c80 dest_master:0x          (null) mp:0xffff8971f9c4d000
+[32282.230492] propagate_one 236 m:0xffff8971de1a0480 mp->m_dentry:0xffff8971ec2a80c0 is_subdir:1
+[32282.230508] propagate_one 255 p:0xffff8971de1a0600
+[32282.230510] propagate_one 255 p:0x          (null)
+[32282.230511] propagate_one 274 type = CL_SLAVE
+[32282.230512] propagate_one 279 type |= CL_MAKE_SHARED
+[32282.230513] propagate_one 289 last_source:0xffff8971d69f1c80 last_source->mnt.mnt_root:0xffff8971ec2a80c0
+[32282.230515] copy_tree line:1851  mount:0xffff8971d69f1c80 dentry:0xffff8971ec2a80c0  -->clone_mnt()
+[32282.231233] alloc_vfsmnt 214 alloc mount:0xffff8971d69f1e00  mount->mnt_devname:/dev/sdb
+//这里克隆的母体是前边遍历 shared mount 组的0xffff8971f75f1200克隆生成的mount 0xffff8971d69f1c80
+[32282.231245] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971d69f1e00 old:0xffff8971d69f1c80
+[32282.232011] clone_mnt 1097 mnt mount:0xffff8971d69f1e00 mnt_parent:0xffff8971d69f1e00 vfsmount:0xffff8971d69f1e20 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:54 mnt_group_id:33 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.232014] copy_tree 1861 p:0xffff8971d69f1c80 mnt:0xffff8971d69f1c80 q:0xffff8971d69f1e00
+[32282.232016] copy_tree 1914 res mount:0xffff8971d69f1e00 mnt_parent:0xffff8971d69f1e00 vfsmount:0xffff8971d69f1e20 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:54 mnt_group_id:33 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971d69f1c80
+[32282.232018] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a80c0 dentry_name:home mnt:0xffff8971de1a0480 mnt_mp:0xffff8971f9c4d000 child_mount:0xffff8971d69f1e00
+///这里有个变化，last_dest变成了遍历slave mount组得到的mount 0xffff8971de1a0480 ， last_source 变成了刚刚克隆的mount 0xffff8971d69f1c80
+[32282.232020] propagate_one 300 last_dest:0xffff8971de1a0480 last_source:0xffff8971d69f1e00 child:0xffff8971d69f1e00
+
+
+//遍历dest mount 0xffff8971de1a0600 的 slave mount组的mount ，但是不是照着 source mount 0xffff8971d69f1c80 克隆生成新的mount，而是照着前边遍历 shared mount 组的0xffff8971f75f1200克隆生成的mount 0xffff8971d69f1c80 ，克隆生成新的mount 0xffff8971d69f1f80
+[32282.232021] propagate_mnt 362 slave next_group mount:0xffff8971de1a0780
+[32282.232023] propagate_mnt 365 m mount:0xffff8971de1a0780 mnt_parent:0xffff8971f75f1980 vfsmount:0xffff8971de1a07a0 mnt_mountpoint dentry:0xffff8971ec2a9980 mnt_id:50 mnt_group_id:31 mnt_ns:0xffff8971f9ded7e0  mnt_mp:0xffff89726e569a80 mnt_devname:/dev/sdb mnt_master:0xffff8971de1a0600
+[32282.232024] propagate_one 235 last_dest:0xffff8971de1a0480 first_source:0xffff8971d69f1b00 last_source:0xffff8971d69f1e00 dest_master:0x          (null) mp:0xffff8971f9c4d000
+[32282.232026] propagate_one 236 m:0xffff8971de1a0780 mp->m_dentry:0xffff8971ec2a80c0 is_subdir:1
+[32282.232027] propagate_one 255 p:0xffff8971de1a0600
+[32282.232028] propagate_one 268 last_source:0xffff8971d69f1c80
+[32282.232029] propagate_one 274 type = CL_SLAVE
+[32282.232030] propagate_one 279 type |= CL_MAKE_SHARED
+[32282.232031] propagate_one 289 last_source:0xffff8971d69f1c80 last_source->mnt.mnt_root:0xffff8971ec2a80c0
+[32282.232033] copy_tree line:1851  mount:0xffff8971d69f1c80 dentry:0xffff8971ec2a80c0  -->clone_mnt()
+[32282.232763] alloc_vfsmnt 214 alloc mount:0xffff8971d69f1f80  mount->mnt_devname:/dev/sdb
+[32282.232774] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971d69f1f80 old:0xffff8971d69f1c80
+[32282.233558] clone_mnt 1097 mnt mount:0xffff8971d69f1f80 mnt_parent:0xffff8971d69f1f80 vfsmount:0xffff8971d69f1fa0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:55 mnt_group_id:34 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.233560] copy_tree 1861 p:0xffff8971d69f1c80 mnt:0xffff8971d69f1c80 q:0xffff8971d69f1f80
+[32282.233562] copy_tree 1914 res mount:0xffff8971d69f1f80 mnt_parent:0xffff8971d69f1f80 vfsmount:0xffff8971d69f1fa0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:55 mnt_group_id:34 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971d69f1c80
+[32282.233564] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a80c0 dentry_name:home mnt:0xffff8971de1a0780 mnt_mp:0xffff8971f9c4d000 child_mount:0xffff8971d69f1f80
+///这里有个变化，last_dest变成了遍历slave mount组得到的mount 0xffff8971de1a0780 ， last_source 变成了刚刚克隆的mount 0xffff8971d69f1f80
+[32282.233565] propagate_one 300 last_dest:0xffff8971de1a0780 last_source:0xffff8971d69f1f80 child:0xffff8971d69f1f80
+
+
+//遍历dest mount 0xffff8971de1a0600 的 slave mount组的mount ，但是不是照着 source mount 0xffff8971d69f1c80 克隆生成新的mount，而是照着前边遍历 shared mount 组的0xffff8971f75f1200克隆生成的mount 0xffff8971d69f1c80 ，克隆生成新的mount 0xffff8971d69f0780
+[32282.233566] propagate_mnt 362 slave next_group mount:0xffff8971f75f1980
+[32282.233586] propagate_mnt 365 m mount:0xffff8971f75f1980 mnt_parent:0xffff8971f421eb80 vfsmount:0xffff8971f75f19a0 mnt_mountpoint dentry:0xffff8971ec32aa80 mnt_id:134 mnt_group_id:114 mnt_ns:0xffff8971f9ded7e0  mnt_mp:0xffff89726ff35ac0 mnt_devname:/dev/sdb mnt_master:0xffff8971f75f1200
+[32282.233588] propagate_one 235 last_dest:0xffff8971de1a0780 first_source:0xffff8971d69f1b00 last_source:0xffff8971d69f1f80 dest_master:0x          (null) mp:0xffff8971f9c4d000
+[32282.233589] propagate_one 236 m:0xffff8971f75f1980 mp->m_dentry:0xffff8971ec2a80c0 is_subdir:1
+[32282.233590] propagate_one 255 p:0xffff8971f75f1200
+[32282.233592] propagate_one 255 p:0x          (null)
+[32282.233593] propagate_one 268 last_source:0xffff8971d69f1c80
+[32282.233593] propagate_one 274 type = CL_SLAVE
+[32282.233595] propagate_one 279 type |= CL_MAKE_SHARED
+[32282.233596] propagate_one 289 last_source:0xffff8971d69f1c80 last_source->mnt.mnt_root:0xffff8971ec2a80c0
+[32282.233598] copy_tree line:1851  mount:0xffff8971d69f1c80 dentry:0xffff8971ec2a80c0  -->clone_mnt()
+[32282.234391] alloc_vfsmnt 214 alloc mount:0xffff8971d69f0780  mount->mnt_devname:/dev/sdb
+[32282.234398] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971d69f0780 old:0xffff8971d69f1c80
+[32282.235392] clone_mnt 1097 mnt mount:0xffff8971d69f0780 mnt_parent:0xffff8971d69f0780 vfsmount:0xffff8971d69f07a0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:56 mnt_group_id:35 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.235394] copy_tree 1861 p:0xffff8971d69f1c80 mnt:0xffff8971d69f1c80 q:0xffff8971d69f0780
+[32282.235396] copy_tree 1914 res mount:0xffff8971d69f0780 mnt_parent:0xffff8971d69f0780 vfsmount:0xffff8971d69f07a0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:56 mnt_group_id:35 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971d69f1c80
+[32282.235398] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a80c0 dentry_name:home mnt:0xffff8971f75f1980 mnt_mp:0xffff8971f9c4d000 child_mount:0xffff8971d69f0780
+///这里有个变化，last_dest变成了遍历slave mount组得到的mount 0xffff8971f75f1980 ， last_source 变成了刚刚克隆的mount 0xffff8971d69f0780
+[32282.235399] propagate_one 300 last_dest:0xffff8971f75f1980 last_source:0xffff8971d69f0780 child:0xffff8971d69f0780
+
+
+//遍历dest mount 0xffff8971de1a0600 的 slave mount组的mount ，但是不是照着 source mount 0xffff8971d69f1c80 克隆生成新的mount，而是照着前边遍历 shared mount 组的0xffff8971f75f1200克隆生成的mount 0xffff8971d69f1c80 ，克隆生成新的mount 0xffff8971d69f0480
+[32282.235400] propagate_mnt 362 slave next_group mount:0xffff8971f75f1800
+[32282.235403] propagate_mnt 365 m mount:0xffff8971f75f1800 mnt_parent:0xffff897275b71680 vfsmount:0xffff8971f75f1820 mnt_mountpoint dentry:0xffff8971ec32aa80 mnt_id:133 mnt_group_id:113 mnt_ns:0xffff89727760cc60  mnt_mp:0xffff89726ff35ac0 mnt_devname:/dev/sdb mnt_master:0xffff8971f75f1200
+[32282.235404] propagate_one 235 last_dest:0xffff8971f75f1980 first_source:0xffff8971d69f1b00 last_source:0xffff8971d69f0780 dest_master:0x          (null) mp:0xffff8971f9c4d000
+[32282.235405] propagate_one 236 m:0xffff8971f75f1800 mp->m_dentry:0xffff8971ec2a80c0 is_subdir:1
+[32282.235406] propagate_one 255 p:0xffff8971f75f1200
+[32282.235407] propagate_one 268 last_source:0xffff8971d69f1c80
+[32282.235408] propagate_one 274 type = CL_SLAVE
+[32282.235408] propagate_one 279 type |= CL_MAKE_SHARED
+[32282.235410] propagate_one 289 last_source:0xffff8971d69f1c80 last_source->mnt.mnt_root:0xffff8971ec2a80c0
+[32282.235411] copy_tree line:1851  mount:0xffff8971d69f1c80 dentry:0xffff8971ec2a80c0  -->clone_mnt()
+[32282.236123] alloc_vfsmnt 214 alloc mount:0xffff8971d69f0480  mount->mnt_devname:/dev/sdb
+[32282.236130] clone_mnt line:1050 alloc_vfsmnt mount:0xffff8971d69f0480 old:0xffff8971d69f1c80
+[32282.236881] clone_mnt 1097 mnt mount:0xffff8971d69f0480 mnt_parent:0xffff8971d69f0480 vfsmount:0xffff8971d69f04a0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:57 mnt_group_id:36 mnt_ns:0x          (null)  mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0x          (null)
+[32282.236883] copy_tree 1861 p:0xffff8971d69f1c80 mnt:0xffff8971d69f1c80 q:0xffff8971d69f0480
+[32282.236884] copy_tree 1914 res mount:0xffff8971d69f0480 mnt_parent:0xffff8971d69f0480 vfsmount:0xffff8971d69f04a0 mnt_mountpoint dentry:0xffff8971ec2a80c0 mnt_id:57 mnt_group_id:36 mnt_ns:0x          (null) mnt_mp:0x          (null) mnt_devname:/dev/sdb mnt_master:0xffff8971d69f1c80
+[32282.236902] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a80c0 dentry_name:home mnt:0xffff8971f75f1800 mnt_mp:0xffff8971f9c4d000 child_mount:0xffff8971d69f0480
+///这里有个变化，last_dest变成了遍历slave mount组得到的mount 0xffff8971f75f1800 ， last_source 变成了刚刚克隆的mount 0xffff8971d69f0480
+[32282.236904] propagate_one 300 last_dest:0xffff8971f75f1800 last_source:0xffff8971d69f0480 child:0xffff8971d69f0480
+
+//设置本次原始的source mount
+[32282.236906] attach_recursive_mnt 2154 set_mnt_shared source mnt p:0xffff8971d69f1b00
+[32282.236907] mnt_set_mountpoint 869 mnt_mountpoint_dentry:0xffff8971ec2a80c0 dentry_name:home mnt:0xffff8971de1a0600 mnt_mp:0xffff8971f9c4d000 child_mount:0xffff8971d69f1b00
+[32282.236908] commit_tree 944  mnt:0xffff8971d69f1b00
+[32282.236909] commit_tree 950  mount:0xffff8971d69f1b00
+[32282.236912] __attach_mnt 879 mnt:0xffff8971d69f1b00--> parent:0xffff8971de1a0600
+
+//设置本次遍历slave mount组克隆生成的mount 0xffff8971d69f0480
+[32282.236919] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[32282.236920] attach_recursive_mnt 2182 tree_list child:0xffff8971d69f0480
+[32282.236920] commit_tree 944  mnt:0xffff8971d69f0480
+[32282.236921] commit_tree 950  mount:0xffff8971d69f0480
+[32282.236923] __attach_mnt 879 mnt:0xffff8971d69f0480--> parent:0xffff8971f75f1800
+
+//设置本次遍历slave mount组克隆生成的mount 0xffff8971d69f0780
+[32282.236924] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[32282.236925] attach_recursive_mnt 2182 tree_list child:0xffff8971d69f0780
+[32282.236926] commit_tree 944  mnt:0xffff8971d69f0780
+[32282.236926] commit_tree 950  mount:0xffff8971d69f0780
+
+//设置本次遍历slave mount组克隆生成的mount 0xffff8971d69f1f80
+[32282.236927] __attach_mnt 879 mnt:0xffff8971d69f0780--> parent:0xffff8971f75f1980
+[32282.236928] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[32282.236929] attach_recursive_mnt 2182 tree_list child:0xffff8971d69f1f80
+[32282.236930] commit_tree 944  mnt:0xffff8971d69f1f80
+[32282.236931] commit_tree 950  mount:0xffff8971d69f1f80
+
+//设置本次遍历slave mount组克隆生成的mount 0xffff8971d69f1e00
+[32282.236932] __attach_mnt 879 mnt:0xffff8971d69f1f80--> parent:0xffff8971de1a0780
+[32282.236933] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[32282.236933] attach_recursive_mnt 2182 tree_list child:0xffff8971d69f1e00
+[32282.236934] commit_tree 944  mnt:0xffff8971d69f1e00
+[32282.236935] commit_tree 950  mount:0xffff8971d69f1e00
+
+//设置本次遍历 shared mount组克隆生成的mount 0xffff8971d69f1c80
+[32282.236936] __attach_mnt 879 mnt:0xffff8971d69f1e00--> parent:0xffff8971de1a0480
+[32282.236937] attach_recursive_mnt 2176 ->__lookup_mnt  q:0x          (null) ->mnt_change_mountpoint
+[32282.236938] attach_recursive_mnt 2182 tree_list child:0xffff8971d69f1c80
+[32282.236939] commit_tree 944  mnt:0xffff8971d69f1c80
+[32282.236939] commit_tree 950  mount:0xffff8971d69f1c80
+[32282.236940] __attach_mnt 879 mnt:0xffff8971d69f1c80--> parent:0xffff8971f75f1200
+
+
+[32282.236944] attach_recursive_mnt 2190 source_mnt mount:0xffff8971d69f1b00 mnt_parent:0xffff8971de1a0600 vfsmount:0xffff8971d69f1b20 mnt_mountpoint dentry:0xffff8971ec2a80c0 dentryname:home mnt_id:52 mnt_group_id:112 mnt_ns:0xffff89727a154720 mnt_ns->root:0xffff897278bb8000 mnt_mp:0xffff8971f9c4d000 mnt_devname:/dev/sdb mnt_master:0x          (null)
+
+
+
+mount bind 总结
+mount /dev/sdb /mnt/ext4
+mount --bind /mnt/ext4/home  /mnt/ext4/test
+mount --bind /mnt/ext4/home  /mnt/ext4/test
+
+1  mount bind  的dest mount 来源。先找到挂载点目录"/mnt/ext4/test"，如果挂载点目录没有块设备挂载，直接返回这个目录dentry，接着返回该目录所在文件系统的mount。如果该目录有块设备挂载，
+则要一直遍历至最后一次挂载的块设备，然后返回这个块设备的根目录作为挂载点目录dentry，接着是该块设备挂载时生成的mount结构。这个mount是本次mount bind的dest mount，
+即挂载点目录所在文件系统块设备挂载时生成的mount结构。
+
+2  mount bind的 source mount来源。先遍历挂载原目录"/mnt/ext4/home"所在文件系统的mount，如果"/mnt/ext4/home"有块设备挂载，要转换成最后挂载的块设备的文件系统mount结构。然后以这个mount为克隆母体，克隆生成一个mount，就是本次mount bind操作的原始source mount，mount group id 继承了克隆母体mount的。这一对souce mount和dest mount 构成父子关系，也构成mount shared关系，属于一个mount组。
+
+3  执行 propagate_mnt()传播mount时。遍历dest mount同一个mount shared组的mount ,这里姑且称这种mount是mount_x。然后判断挂载点dentry是否是这个mount对应块设备文件系统下的目录dentry，还有是不是本次mount前已经存在的mount，全是的话，照着last source指定的mount克隆生成新的mount。这个克隆生成的mount 的父mount是 mount_x。克隆的mount 的 mnt_group_id是继承了母体last source 指定mount的。挂载点dentry是本次的克隆母体、即last source指定mount的挂载点dentry，就是本次mount 操作挂载点目录dentry。喔喔，这就是传播mount的原理吧，即同一个shared mount组的mount都要要照着last mount克隆生成一个mount，然后都挂载到mount操作指定的挂载点目录dentry。
+
+4 执行 propagate_mnt()传播mount时，第一次设置的 last_dest 是本次mount的原始dest mount ，last_source 是本次mount原始的source mount 。之后二者会变，在遍历slave mount或者shared mount组的mount_x后，克隆生成了新的mount_new，last_dest变成了mount_x(即遍历slave mount或者shared mount组的那个mount)， last_source 变成了刚刚克隆生成的mount_new。
+
+5  执行 propagate_mnt()传播mount时。遍历dest mount 同一个slave mount组的mount_x，然后照着last source指定的mount克隆生成新的mount。这种克隆生成的mount的parent是mount_x，再详细是 propagate_mnt 362 slave next_group mount:0xffff8971f75f1800 这个mount。克隆生成的mount的mnt_master是它的克隆母体，即last source指定的mount。克隆生成mount的挂载点dentry是本次的克隆母体、即last source指定mount的挂载点dentry，就是本次mount 操作挂载点目录dentry。同理，这就是传播mount的原理吧，即同一个slave mount组的mount都要照着last mount 克隆生成一个mount，然后都挂载到mount操作指定的挂载点目录dentry。
+
+6  在attach_recursive_mnt最后， 执行commit_tree()，把本次的source mount、遍历dest mount同一个shared mount组的mount而克隆生成的mount、遍历dest mount同一个slave mount组的mount而克隆生成的mount，添加到系统mount树，建立复杂关系。
+
+
+

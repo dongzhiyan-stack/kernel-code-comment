@@ -58,8 +58,9 @@ struct mnt_namespace;
 
 //每一个挂载的块设备都要生成一个mount结构体，顺带着就生成了vfsmount，每一次挂载都会生成的一个mount和vfsmount结构
 struct vfsmount {
-    //挂载的块设备的根目录dentry
+    //挂载的块设备的根目录dentry。有时也代表挂载点目录所在文件系统的根目录dentry
 	struct dentry *mnt_root;	/* root of the mounted tree 源头块设备的根文件系统*/
+    //挂载的块设备的超级快。有时也代表挂载点目录所在文件系统的超级块。
 	struct super_block *mnt_sb;	/* pointer to superblock */
 	int mnt_flags;
 };

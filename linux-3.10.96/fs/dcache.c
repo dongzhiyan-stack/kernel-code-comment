@@ -2904,7 +2904,7 @@ out:
  * Returns 0 otherwise.
  * Caller must ensure that "new_dentry" is pinned before calling is_subdir()
  */
-  
+//new_dentry目录是否是old_dentry的子目录，是则返回1
 int is_subdir(struct dentry *new_dentry, struct dentry *old_dentry)
 {
 	int result;

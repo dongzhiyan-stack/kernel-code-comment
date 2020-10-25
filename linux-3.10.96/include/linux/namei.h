@@ -11,9 +11,9 @@ struct vfsmount;
 enum { MAX_NESTED_LINKS = 8 };
 
 struct nameidata {
-    //一般在path_init设置path，包括里边的struct vfsmount *mnt
+    //一般在path_init()设置初始path为current->fs->root，包括里边的struct vfsmount *mnt.之后根据遍历的每一级目录，再
 	struct path	path;
-	struct qstr	last;
+	struct qstr	last;//本次搜索的文件或者的目录名字hash值
 	struct path	root;
     //path_init最后有赋值，nd->inode=nd->path.dentry->d_inode，这就是搜索的起始目录
 	struct inode	*inode; /* path.dentry.d_inode */
