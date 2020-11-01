@@ -863,26 +863,29 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 }
 EXPORT_SYMBOL_GPL(vfs_kern_mount);
 
-//创建新的mount并对大部分成员初始化，好多成员信息复制了old的。
-
-//假设old是/home/所在文件系统原先挂载生成的struct mount，old_path.dentry是/home挂载源的。如果/home/目录已经有块设备挂载了，
-//则要转换成之前挂载的块设备的根目录dentry保存到old_path.dentry。
+/*克隆创建本次挂载的mount结构，即本次的source mount，大部分成员复制了old的，old是mount bind源目录所在文件系统的mount结构*/
+//假设源目录/home，则old是/home/所在文件系统挂载生成的struct mount，old_path.dentry是/home挂载源的。如果/home/目录已经有块设备挂载了，
+//则要转换成之前挂载的块设备的mount结构，赋予old，然后是它根目录dentry保存到old_path.dentry。mount和目录dentry刨根问底到最后的块设备，终极mount和dentry
 static struct mount *clone_mnt(struct mount *old, struct dentry *root,
-					int flag)
-{
+					int flag)//old 是mount --bind /home/ /home/test 源目录/home的终极mount，是本次的克隆母体，克隆生成本次挂载的source mount
+					         //root是/home目录终极dentry，终极的意思是如果该目录可能有多个块设备挂载，要遍历到最后一个块设备的根目录
+{                            //否则，只是/home目录的dentry
 	struct super_block *sb = old->mnt.mnt_sb;
 	struct mount *mnt;
 	int err;
-    //为本次挂载分配一个新的mount，并赋予mount的mnt_devname为old->mnt_devname
+    //为本次挂载分配一个新的mount，并赋予mnt的mnt_devname为old->mnt_devname.
+    /*mnt就是本次的克隆mount，即本次挂载的source mount*/
 	mnt = alloc_vfsmnt(old->mnt_devname);
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
 
+    //如果本次的挂载是slave或者private属性
 	if (flag & (CL_SLAVE | CL_PRIVATE | CL_SHARED_TO_SLAVE))
-		mnt->mnt_group_id = 0; /* not a peer of original */
-	else
+		mnt->mnt_group_id = 0; // not a peer of original 
+	else/*充分说明本次mount bind的新生成的source mount即mnt，group id来自mount bind操作源目录所在终极文件系统mount的group id*/
 		mnt->mnt_group_id = old->mnt_group_id;
 
+    //只有mount是share属性并且没有group id时才会分配新的group id。默认的mount都是shared属性，一般mount操作的soucer mount不会在这里分配
 	if ((flag & CL_MAKE_SHARED) && !mnt->mnt_group_id) {
 		err = mnt_alloc_group_id(mnt);
 		if (err)
@@ -890,7 +893,7 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	}
 
 	mnt->mnt.mnt_flags = old->mnt.mnt_flags & ~MNT_WRITE_HOLD;
-	/* Don't allow unprivileged users to change mount flags */
+	// Don't allow unprivileged users to change mount flags 
 	if (flag & CL_UNPRIVILEGED) {
 		mnt->mnt.mnt_flags |= MNT_LOCK_ATIME;
 
@@ -908,38 +911,50 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	}
 
 	atomic_inc(&sb->s_active);
+    /*本次挂载克隆生成的mount，即mnt的超级快是克隆母体的*/
 	mnt->mnt.mnt_sb = sb;
+    
     //本次挂载源的根目录dentry，mount --bind模式下，根目录可不一定是块设备的根目录，而是挂载源的那个目录。比如
-    //mount --bind  /home/test/test2  /home/test,此时挂载源的根目录dentry是/home/test/test2的.如果之前已经有块设备sda3挂载到/home/，
-    //此时的根目录实际是sda3文件系统里的/test/test2目录的dentry,这应该是就是cat /proc/self/mountinfo看到第4列的挂载源不是'/'的原因吧
+    //mount --bind  /home/test/test2  /home/test,此时挂载源目录dentry是/home/test/test2的.如果之前已经有块设备sda3挂载到/home/，
+    //此时的源目录实际是sda3文件系统里的/test/test2目录的dentry,这应该是就是cat /proc/self/mountinfo看到第4列的挂载源不是'/'的原因吧
+    /*总之，mount bind 操作生成的source mount，即mnt的mnt_root，可能只是mount bind源目录dentry*/
 	mnt->mnt.mnt_root = dget(root);
-	mnt->mnt_mountpoint = mnt->mnt.mnt_root;
-    //mount这里的mnt_parent被赋值为自己
-	mnt->mnt_parent = mnt;
+    
+	mnt->mnt_mountpoint = mnt->mnt.mnt_root;//初始挂载点目录先赋值成mnt_root，后续会再改
+	mnt->mnt_parent = mnt;//mnt_parent也是暂时赋值为自己，后续再改
+	
 	br_write_lock(&vfsmount_lock);
 	list_add_tail(&mnt->mnt_instance, &sb->s_mounts);
 	br_write_unlock(&vfsmount_lock);
 
-    //如果挂载有slave属性，
+
 	if ((flag & CL_SLAVE) ||
 	    ((flag & CL_SHARED_TO_SLAVE) && IS_MNT_SHARED(old))) {
+	    /*如果挂载属性slave，本次挂载的source mount通过其mnt_slave链接到克隆母体mount结构的mnt_slave_list*/
 		list_add(&mnt->mnt_slave, &old->mnt_slave_list);
+
+        /*mnt的mnt_master指向克隆母体的mount结构，二者构成父子关系*/
 		mnt->mnt_master = old;
 		CLEAR_MNT_SHARED(mnt);
-    //如果挂载没有private属性
+    //如果挂载没有private属性，即share或者没有指mount属性
 	} else if (!(flag & CL_PRIVATE)) {
-	    //如果本次挂载有make-shared属性，或者挂载源老的mount是shared属性
+	
+	 //本次挂载指定shared属性。或挂载源的mount(克隆母体)是shared属性，这就是mount时没有指定属性，则默认就是shared，因为它的克隆母体是shared
 		if ((flag & CL_MAKE_SHARED) || IS_MNT_SHARED(old))
-			list_add(&mnt->mnt_share, &old->mnt_share);//把本次的mount链接到mnt_share链表
-        //挂载源老的mount是slave属性
+        /*把本次挂载的source mount通过其mnt_share链接到克隆母体的mnt_share链表*/
+			list_add(&mnt->mnt_share, &old->mnt_share);
+			
+        //如果本次mount bind没有指定mount属性，但是mount bind源目录的mount即克隆母体是slave属性，则本次挂载的source mount添加到
+        //克隆母体mount结构的mnt_slave链表。这样本次的source mount和克隆目录mount就属于同一个mount slave组，不是父子关系
+        /*如果克隆母体slave属性而本次mount没有指定属性，而本次mount会被添加到与克隆母体同一个mount salve组链表*/
 		if (IS_MNT_SLAVE(old))
 			list_add(&mnt->mnt_slave, &old->mnt_slave);//把本次的mount链接到mnt_slave链表
-	    //设置为old->mnt_master
+			
+	    //默认设置source mount的mnt_master与克隆母体的old->mnt_master一致，表示两个mount都是一个mount slave组的
+	    //就是说，mount指定share属性，其mount->mnt_master不会为NULL???????????????，不是吧，应该有地方清NULL的吧???????
 		mnt->mnt_master = old->mnt_master;
-        /*显然本次的mount受了老的mount即old很大影响，mnt->mnt_share、mnt->mnt_slave、mnt->mnt_master都是。本次是
-         mount --bind /home/  /home/test，old是/home/所在文件系统的mount结构，现在新生成的mount结构mnt也是基于/home/生成的
-         ，所以mnt跟old有父子关系吧??????????????*/
 	}
+    
     //设置mount的shared属性
 	if (flag & CL_MAKE_SHARED)
 		set_mnt_shared(mnt);
@@ -1468,13 +1483,12 @@ mnt是挂载点目录所在文件系统的mount结构，dentry是挂载点目录dentry。注意，已经转换
 mnt是sda1挂载到/home/目录生成的，dentry是sda1块设备文件系统的根目录。接着sda2挂载待/home/test2目录，挂载时生成mount2,挂载点dentry2。
 sda3挂载到/home/test3目录，挂载时生成mount3,挂载点dentry2。mount2和mount3与mnt是父子关系，因为mount2和mount3的挂载点目录是/home/目录下的
 test2和test3目录，准确说是sda1块设备下的test2和test3目录。然后，sda5挂在到/home/test2/test5目录，生成mount5,挂载点dentry5。sda6挂载到
-/home/test3/test6目录，生成mount6，挂载点dentry6。则mount5和mount2是父子关系，mount6和mount3是父子关系。copy_tree()看着的作用是
-1  
-*/
+/home/test3/test6目录，生成mount6，挂载点dentry6。则mount5和mount2是父子关系，mount6和mount3是父子关系。*/
 
-/*不是bind形式的mount，只是q=res=clone_mnt()和q->mnt_mountpoint = mnt->mnt_mountpoint而已。就是创建一个新mount，大部分复制mnt的值
-然后设置新mount的mnt_mountpoint为mnt->mnt_mountpoint*/
-struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,//mnt的挂载点目录dentry
+
+/*只是q=res=clone_mnt()克隆一个mount，然后q->mnt_mountpoint = mnt->mnt_mountpoint设置克隆的mount的mnt_mountpoint为克隆母体
+的mnt_mountpoint，最后返回克隆的mount。list_for_each_entry()那段代码就没有执行到*/
+struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,//mnt是克隆母体，dentry是克隆母体mount块设备的根目录
 					int flag)
 {
 	struct mount *res, *p, *q, *r, *parent;
@@ -1492,11 +1506,12 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,//mnt的挂载点目
     //p是最原始的
 	p = mnt;
 
-    /*不是bind形式的mount，这个循环基本执行不了，第二个if判断那里是猴子那个都成立*/
+    /*下边这个实际测试发现，就没有执行过，mount bind也测试过，一样。什么情况下会执行到?????????????*/
     //遍历mnt->mnt_mounts链表上的mounte结构，这个链表上的mount应该都是mnt的子mount结构
 	list_for_each_entry(r, &mnt->mnt_mounts, mnt_child) {
 		struct mount *s;
-        //is_subdir:判断r->mnt_mountpoint是否是dentry的子目录，是则返回1
+        
+        //is_subdir:判断r->mnt_mountpoint是否是dentry的子目录，是则返回1，if不成立
 		if (!is_subdir(r->mnt_mountpoint, dentry))
 			continue;
 
@@ -1848,7 +1863,7 @@ static int do_loopback(struct path *path, const char *old_name,
 	if (!old_name || !*old_name)
 		return -EINVAL;
     //探测/home/挂载源，得到该目录的所在文件系统的vfsmount和目录dentry信息保存到old_path。如果/home/目录已经有块设备挂载了
-    //则要把vfsmount和dentry转成挂载的块设备文件系统的vfsmount和根目录dentry保存到old_path
+    //则要把vfsmount和dentry转成挂载的块设备文件系统的vfsmount和根目录dentry保存到old_path。挂载源的目录也要刨根问底
 	err = kern_path(old_name, LOOKUP_FOLLOW|LOOKUP_AUTOMOUNT, &old_path);
 	if (err)
 		return err;
@@ -1876,9 +1891,9 @@ static int do_loopback(struct path *path, const char *old_name,
 
 	if (recurse)
 		mnt = copy_tree(old, old_path.dentry, 0);
-	else//创建新的mount并对大部分成员初始化，好多成员信息复制了old的。
-        //old是/home/所在文件系统原先挂载生成的struct mount，old_path.dentry是/home挂载源的。如果/home/目录已经有块设备挂载了，
-	    //则要转换成之前挂载的块设备的根目录dentry保存到old_path.dentry。
+	else/*克隆创建本次挂载的mount结构，即本次的source mount，大部分成员复制了old的，old是mount bind源目录所在文件系统的mount结构*/
+//假设源目录/home，则old是/home/所在文件系统挂载生成的struct mount，old_path.dentry是/home挂载源的。如果/home/目录已经有块设备挂载了，
+//则要转换成之前挂载的块设备的mount结构，赋予old，然后是它根目录dentry保存到old_path.dentry。mount和目录dentry刨根问底到最后的块设备
 		mnt = clone_mnt(old, old_path.dentry, 0);
 
 	if (IS_ERR(mnt)) {

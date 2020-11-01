@@ -58,10 +58,13 @@ struct mnt_namespace;
 
 //每一个挂载的块设备都要生成一个mount结构体，顺带着就生成了vfsmount，每一次挂载都会生成的一个mount和vfsmount结构
 struct vfsmount {
-    //挂载的块设备的根目录dentry。有时也代表挂载点目录所在文件系统的根目录dentry
+    //挂载的块设备的根目录dentry。有时也代表挂载点目录所在文件系统的根目录dentry。如果是mount bind，mnt_root不一定是块设备文件系统根目录
+    //而是挂载源目录的dentry，见clone_mnt()
 	struct dentry *mnt_root;	/* root of the mounted tree 源头块设备的根文件系统*/
-    //挂载的块设备的超级快。有时也代表挂载点目录所在文件系统的超级块。
+    //挂载的块设备的超级快。有时也代表挂载点目录所在文件系统的超级块，错，这个理解是片面的，没有理解透彻mount的本质!挂载点目录是
+    //怎么形成的?它也是它所在的文件系统对应的块设备挂载到某个目录形成的!只是现在这个目录作为一个挂载点目录。
 	struct super_block *mnt_sb;	/* pointer to superblock */
+    //mount属性，shared属性在set_mnt_shared()中设置
 	int mnt_flags;
 };
 
