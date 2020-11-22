@@ -80,7 +80,7 @@ struct scsi_cmnd {
 	unsigned char prot_op;
 	unsigned char prot_type;
 
-	unsigned short cmd_len;
+	unsigned short cmd_len;//scsi_setup_blk_pc_cmnd中赋值为req->cmd_len
 	enum dma_data_direction sc_data_direction;
 
 	/* These elements define the operation we are about to perform */
@@ -93,13 +93,13 @@ struct scsi_cmnd {
 
 	unsigned underflow;	/* Return error if less than
 				   this amount is transferred */
-
+    //传输字节数
 	unsigned transfersize;	/* How much we are guaranteed to
 				   transfer with each SCSI transfer
 				   (ie, between disconnect / 
 				   reconnects.   Probably == sector
 				   size */
-
+    //scsi_get_cmd_from_req()中分配cmd后并指向req
 	struct request *request;	/* The command we are
 				   	   working on */
 

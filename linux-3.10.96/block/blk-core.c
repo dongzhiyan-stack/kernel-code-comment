@@ -1399,6 +1399,7 @@ static bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
 	req->__data_len += bio->bi_size;//req->__sectorÃ»±ä£¬µ«ÊÇreq->__data_lenÀÛ¼Ó±¾´ÎµÄbio´ÅÅÌ·¶Î§bio->bi_size£¬
 	req->ioprio = ioprio_best(req->ioprio, bio_prio(bio));
 
+    //IOºÏ²¢ºó£¬¸ü¸ÄIOÊ¹ÓÃÂÊµÈÊı¾İ
 	drive_stat_acct(req, 0);
 	return true;
 }
@@ -1463,22 +1464,22 @@ static bool attempt_plug_merge(struct request_queue *q, struct bio *bio,
 	if (!plug)
 		goto out;
 	*request_count = 0;
-    //ÒÀ´ÎÈ¡³ö½ø³Ìplug->listÁ´±íÉÏÒÑÓĞµÄstruct request rq£¬È»ºóÅĞ¶Ïrq´ú±íµÄ´ÅÅÌ·¶Î§ÊÇ·ñ°¤×Å±¾´ÎµÄbioµÄ·¶Î§£¬ÊÇÔò°ÑbioºÏ²¢µ½rq
+    //ÒÀ´ÎÈ¡³ö½ø³Ìplug->listÁ´±íÉÏÒÑÓĞµÄstruct request req£¬È»ºóÅĞ¶Ïrq´ú±íµÄ´ÅÅÌ·¶Î§ÊÇ·ñ°¤×Å±¾´ÎµÄbioµÄ·¶Î§£¬ÊÇÔò°ÑbioºÏ²¢µ½req
 	list_for_each_entry_reverse(rq, &plug->list, queuelist) {
 		int el_ret;
-        //±È½Ïrq¶ÓÁĞÊÇ·ñÍ¬Ò»¸ö
+        //±È½Ïreq¶ÓÁĞÊÇ·ñÍ¬Ò»¸ö£¬ÕâÖÖÇé¿öÓ¦¸ÃºÜÈİÒ×³ÉÁ¢°É£¬Ö»ÒªÊÇÈ¡³öµÄreqËùÔÚµÄ¿éÉè±¸Óëq´ú±íµÄÊÇÍ¬Ò»¸ö¿éÉè±¸£¬ºÜÈİÒ×³ÉÁ¢
 		if (rq->q == q)
 			(*request_count)++;
-         //Ö»ÓĞ¶şÕßÊôÓÚÍ¬Ò»¸örq¶ÓÁĞ£¬²¢ÇÒÍ¨¹ıºÏ²¢¼ì²é²ÅÄÜÖ´ĞĞÏÂ±ßµÄºÏ²¢
+         //Ö»ÓĞ¶şÕßÊôÓÚÍ¬Ò»¸öreq¶ÓÁĞ£¬²¢ÇÒÍ¨¹ıºÏ²¢¼ì²é²ÅÄÜÖ´ĞĞÏÂ±ßµÄºÏ²¢
 		if (rq->q != q || !blk_rq_merge_ok(rq, bio))
 			continue;
-        //¼ì²ébioºÍrq´ú±íµÄ´ÅÅÌ·¶Î§ÊÇ·ñ°¤×Å£¬°¤×ÅÔò¿ÉÒÔºÏ²¢
+        //¼ì²ébioºÍreq´ú±íµÄ´ÅÅÌ·¶Î§ÊÇ·ñ°¤×Å£¬°¤×ÅÔò¿ÉÒÔºÏ²¢
 		el_ret = blk_try_merge(rq, bio);
-		if (el_ret == ELEVATOR_BACK_MERGE) {//¶şÕß°¤×Å£¬rqÏòºóºÏ²¢±¾´ÎµÄbio
+		if (el_ret == ELEVATOR_BACK_MERGE) {//¶şÕß°¤×Å£¬reqÏòºóºÏ²¢±¾´ÎµÄbio
 			ret = bio_attempt_back_merge(q, rq, bio);
 			if (ret)
 				break;
-		} else if (el_ret == ELEVATOR_FRONT_MERGE) {//¶şÕß°¤×Å£¬rqÏòÇ°ºÏ²¢±¾´ÎµÄbio
+		} else if (el_ret == ELEVATOR_FRONT_MERGE) {//¶şÕß°¤×Å£¬reqÏòÇ°ºÏ²¢±¾´ÎµÄbio
 			ret = bio_attempt_front_merge(q, rq, bio);
 			if (ret)
 				break;
@@ -1603,7 +1604,7 @@ get_rq:
 	 * We don't worry about that case for efficiency. It won't happen
 	 * often, and the elevators are able to handle it.
 	 */
-	//req³õÊ¼»¯
+	//¸ù¾İbioµÄ²ÎÊı¶Ôreq³õÊ¼»¯
 	//req->__sector = bio->bi_sector£¬rq->__data_len = bio->bi_size£¬rq->bio = rq->biotail = bio,req->cmd_type = REQ_TYPE_FS
 	init_request_from_bio(req, bio);
 
@@ -1634,7 +1635,7 @@ get_rq:
 		drive_stat_acct(req, 1);//¾ÍÊÇblk_account_io_start
 	}
     else
-	{//·ñÔò¾Í
+	{//·ñÔò¾ÍÖ±½ÓÆô¶¯reqÊı¾İ´«Êä
 		spin_lock_irq(q->queue_lock);
         //ĞÂ·ÖÅäµÄrqÌí¼Óµ½rq¶ÓÁĞ
         //¸üĞÂÖ÷¿éÉè±¸ºÍ¿éÉè±¸·ÖÇøµÄtime_in_queueºÍio_ticksÊı¾İ£¬Ôö¼Ó¶ÓÁĞflightÖĞreq¼ÆÊı
@@ -2187,12 +2188,19 @@ static inline struct request *blk_pm_peek_request(struct request_queue *q,
  * Context:
  *     queue_lock must be held.
  */
-//´Órq¶ÓÁĞÖĞÈ¡³öreq£¬Õâ¸öreqÓ¦¸Ã×îÖÕ·¢ËÍ¸øÇı¶¯µÄ
+
+/*
+ 1 Ñ­»·Ö´ĞĞ__elv_next_request()£¬´Óq->queue_head¶ÓÁĞÈ¡³ö´ı½øĞĞIOÊı¾İ´«ÊäµÄreq
+ 2 ·ÖÅäÒ»¸östruct scsi_cmnd *cmd£¬Ê¹ÓÃreq¶Ôcmd½øĞĞ²¿·Ö³õÊ¼»¯cmd->request=req£¬req->special = cmd£¬»¹ÓĞcmd->transfersize´«Êä×Ö½ÚÊı
+     ¡¢cmd->sc_data_direction DMA´«Êä·½Ïò
+ 3 ÏÈ±éÀúreqÉÏµÄÃ¿Ò»¸öbio£¬ÔÙµÃµ½Ã¿¸öbioµÄbio_vec£¬°Ñbio¶ÔÓ¦µÄÎÄ¼şÊı¾İÔÚÄÚ´æÖĞµÄÊ×µØÖ·bvec->bv_pag+bvec->bv_offsetĞ´Èëscatterlist
+   scatterlistÊÇ´ÅÅÌÊı¾İDMA´«ÊäÓĞ¹ØµÄÊı¾İ½á¹¹£¬scatterlist±£´æµ½bidi_sdb->table.sgl£¬bidi_sdbÊÇreqµÄstruct scsi_data_buffer³ÉÔ±¡£
+ */
 struct request *blk_peek_request(struct request_queue *q)
 {
 	struct request *rq;
 	int ret;
-    //__elv_next_request¾ÍÊÇ´Óq->queue_head¶ÓÁĞÈ¡³ö´ı·¢ËÍ¸øÇı¶¯µÄreq
+    //Ñ­»·Ö´ĞĞ__elv_next_request()£¬´Óq->queue_head¶ÓÁĞÈ¡³ö´ı½øĞĞIOÊı¾İ´«ÊäµÄreq¡£
 	while ((rq = __elv_next_request(q)) != NULL) {
 
 		rq = blk_pm_peek_request(q, rq);
@@ -2237,8 +2245,14 @@ struct request *blk_peek_request(struct request_queue *q)
 
 		if (!q->prep_rq_fn)
 			break;
-
-		ret = q->prep_rq_fn(q, rq);//mmc_prep_request reqÔ¤´¦Àí
+        
+    /*
+     1 ·ÖÅäÒ»¸östruct scsi_cmnd *cmd£¬Ê¹ÓÃreq¶Ôcmd½øĞĞ²¿·Ö³õÊ¼»¯cmd->request=req£¬req->special = cmd£¬»¹ÓĞcmd->transfersize´«Êä×Ö½ÚÊı
+         ¡¢cmd->sc_data_direction DMA´«Êä·½Ïò
+     2 ÏÈ±éÀúreqÉÏµÄÃ¿Ò»¸öbio£¬ÔÙµÃµ½Ã¿¸öbioµÄbio_vec£¬°Ñbio¶ÔÓ¦µÄÎÄ¼şÊı¾İÔÚÄÚ´æÖĞµÄÊ×µØÖ·bvec->bv_pag+bvec->bv_offsetĞ´Èëscatterlist
+       scatterlistÊÇ´ÅÅÌÊı¾İDMA´«ÊäÓĞ¹ØµÄÊı¾İ½á¹¹£¬scatterlist±£´æµ½bidi_sdb->table.sgl£¬bidi_sdbÊÇreqµÄstruct scsi_data_buffer³ÉÔ±¡£
+     */
+		ret = q->prep_rq_fn(q, rq);//scsi_prep_fn
 		if (ret == BLKPREP_OK) {
 			break;
 		} else if (ret == BLKPREP_DEFER) {
@@ -2380,8 +2394,9 @@ EXPORT_SYMBOL(blk_fetch_request);
  
 /* 1 Ö´ĞĞblk_account_io_completionÔö¼Ósectors IOÊ¹ÓÃ¼ÆÊı£¬¼´´«ÊäµÄÉÈÇøÊı¡£¸üĞÂreq->__data_lenºÍreq->buffer
    2 ÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı£¬»½ĞÑĞİÃßµÄ½ø³Ì*/
-bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)//nr_bytesÀ´×Ôblk_rq_bytes(rq)
-{
+bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
+{// nr_bytesÔÚscsi_finish_command()ÖĞ¸³Öµ¡£ÊÇ±¾´Î´ÅÅÌÓ²¼şÊµ¼Ê´«ÊäÍê³ÉµÄÊı¾İÁ¿£¬²¢²»Ò»¶¨ÊÇreqËùÓĞµÄ´ÅÅÌÊı¾İÁ¿¡£ËùÒÔ
+ //req¶ÔÓ¦µÄµÄ´ÅÅÌÊı¾İ²»ÄÜ±£Ö¤Ò»´Î¾ÍÈ«²¿´«ÊäÍê³ÉÑ½£¬ÎÒÈ¥£¬ÕâÓĞµãÆ­ÈË£¬±¾À´ÒÔÎªreqµÄºÏ²¢ÁË¶à¸öbio£¬¿ÉÒÔ±£Ö¤Ò»´Î¾Í°ÑËùÓĞIOÊı¾İ´«ÊäÍê
 	int total_bytes;
 
 	if (!req->bio)
@@ -2432,10 +2447,16 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)//
 	total_bytes = 0;
     //ÉñÆæµÄÊÂÇé·¢ÉúÁË£¬ÕâÀïÈ¡³öreq¶ÔÓ¦µÄbio¿ªÊ¼´¦ÀíÁË£¬ÆäÊµÎÒÒ»Ö±Ò²ºÜºÃÆæ£¬req´«ÊäÍê³Éºó£¬¶ÔÔ­À´µÄbioÊÇÔõÃ´´¦ÀíµÄ?????
     //Õâ¸öÑ­»·»áÒÀ´ÎÈ¡³öreq->bioÁ´±íÉÏËùÓĞreq¶ÔÓ¦µÄbio,Ò»¸öÒ»¸ö¸üĞÂbio½á¹¹Ìå³ÉÔ±Êı¾İ£¬Ö´ĞĞbioµÄ»Øµ÷º¯Êı£¬»½ĞÑĞİÃßµÄ½ø³Ì
+    /*nr_bytes´ú±í±¾´ÎÊµ¼Ê´«ÊäÍê³ÉµÄ´ÅÅÌÊı¾İÁ¿£¬²¢²»Ò»¶¨ÊÇreq¶ÔÓ¦µÄÈ«²¿´ÅÅÌÊı¾İ£¬ËùÒÔ¸ÃÑ­»·if (!nr_bytes)ºÜÈİÒ×³ÉÁ¢£¬Ö»Òª°Ñ
+      Êµ¼Ê´«ÊäÍê³É´ÅÅÌÊı¾İµÄ¼¸¸öbio±éÀúÍê£¬nr_bytes¾ÍÊÇ0ÁË£¬¾Í»áÌø³öÑ­»·¡£*/
 	while (req->bio) {
 		struct bio *bio = req->bio;
 		unsigned bio_bytes = min(bio->bi_size, nr_bytes);
 
+        //ºÜÈİÒ×³ÉÁ¢£¬bio_bytes´ó¸ÅÂÊ¾ÍÊÇbio->bi_size£¬È»ºóÁîreq->bioÖ¸ÏòreqµÄÏÂÒ»¸öbio¡£Ö®ºóÓĞÁ½ÖÖÇé¿ö£¬Èç¹û±¾´ÎÊµ¼Ê´«ÊäÍêµÄ
+        //×Ö½ÚÊıbio_bytes¾ÍÊÇbio->bi_size£¬ÔòÏÂ±ßnr_bytesÎª0£¬Ìø³öÑ­»·¡£req->bio = bio->bi_nextÖ¸ÏòµÄbio£¬½ô½Ó×Å¾Í»á´«Êä¡£Èç¹û
+        //±¾´ÎÊµ¼Ê´«ÊäÍêµÄ×Ö½ÚÊıbio_bytes´óÓÚbio->bi_size£¬ËµÃ÷±¾´ÎÓĞ¶à¸öbio²ÎÓë´ÅÅÌÊı¾İ´«Êä£¬ÄÇ¾ÍÖ´ĞĞreq_bio_endio»½ĞÑµÈ´ıbio´«ÊäµÄ
+        //½ø³Ì¡£Ñ­»·£¬Ö±µ½°Ñ±¾´Î²ÎÓë´«ÊäµÄbioÈ«²¿±éÀúÍê¡£Èç¹ûreqµÄbio¶¼²ÎÓë´«ÊäÁË£¬Ôòreq->bio = bio->bi_next=NULL¡£
 		if (bio_bytes == bio->bi_size)
 			req->bio = bio->bi_next;//req->bioÖ¸ÏòÏÂÒ»¸öbio
 
@@ -2555,7 +2576,7 @@ static void blk_finish_request(struct request *req, int error)
 	blk_account_io_done(req);
 
 	if (req->end_io)
-		req->end_io(req, error);//»Øµ÷º¯Êı
+		req->end_io(req, error);//»Øµ÷º¯Êı£¬»½ĞÑµÈ´ıIO´«ÊäÍê³É¶øĞİÃßµÄ½ø³Ì
 	else {
 		if (blk_bidi_rq(req))
 			__blk_put_request(req->next_rq->q, req->next_rq);
@@ -3129,6 +3150,7 @@ mq-deadlineËã·¨µÄ»¹Òª²åÈëºìºÚÊ÷ºÍfifo¶ÓÁĞ¡£Èç¹ûÃ»ÓĞIOµ÷¶ÈËã·¨£¬ÔÚÓ²¼ş¶ÓÁĞ¿ÕÏĞÊ±£
 		/*
 		 * rq is already accounted, so use raw insert
 		 */
+		//Èç¹ûreqÓĞREQ_FLUSH | REQ_FUAÊôĞÔ
 		if (rq->cmd_flags & (REQ_FLUSH | REQ_FUA))
 			__elv_add_request(q, rq, ELEVATOR_INSERT_FLUSH);//flush²Ù×÷??????
 		else//ÔÚÕâÀï°Ñreq²åÈëµ½IOµ÷¶ÈËã·¨¶ÓÁĞÀï

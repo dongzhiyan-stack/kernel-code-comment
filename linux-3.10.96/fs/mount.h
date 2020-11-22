@@ -60,7 +60,7 @@ struct mount {
     //clone_mnt()把本次挂载的source mount通过其mnt_share链接到克隆母体的mnt_share链表
 	struct list_head mnt_share;	/* circular list of shared mounts */
     //clone_mnt()中，把本次挂载slave属性的source mount结构链接到克隆母体mount的mnt_slave_list链表。mount结构的mnt_slave_list链表
-    //是保存子slave mount的，凡是照着一个mount结构克隆生成的mount，都添加到克隆母体的mnt_slave_list链表，克隆的mount是母体子slave mount
+    //是保存子slave mount的，凡是照着一个mount结构克隆生成的mount，都添加到克隆母体的mnt_slave_list链表，克隆的mount是母体的子slave mount
 	struct list_head mnt_slave_list;/* list of slave mounts */
     // 1 clone_mnt()中，把本次挂载source slave属性的mount结构链接到克隆母体mount的mnt_slave_list链表
     /* 2 clone_mnt()中，克隆母体是slave属性而本次source mount没有指定属性，则source mount被添加到与克隆母体同一个mount salve组链表
@@ -68,7 +68,7 @@ struct mount {
        二者是同一个mount slave组成员。如果source mount靠其mnt_slave添加到克隆母体的mnt_slave_list链表，则二者是父子关系，不是同组关系。
        */
 	struct list_head mnt_slave;	/* slave list entry */
-    /* 1 clone_mnt()中，本次挂载是slave属性，克隆生成的source mount，即mnt，其mnt_master指向克隆母体的mount结构
+    /* 1 clone_mnt()中，本次挂载是slave属性，克隆生成的source mount^，即mnt，其mnt_master指向克隆母体的mount结构
     // 2 clone_mnt()中，本次挂载没有指定mount属性，而克隆母体又是slave属性，则souece mount的mnt_master就是克隆母体的mount->mnt_master，
     //二者属于同一个mount slave组
        3 正常mount /dev/sda3 /home这样生成的mount其mnt_master是NULL，mount bind的share属性的mount其mnt_master是NULL
@@ -82,7 +82,7 @@ struct mount {
 	struct hlist_head mnt_fsnotify_marks;
 	__u32 mnt_fsnotify_mask;
 #endif
-    //mount id
+    //mount id, alloc_vfsmnt， mnt_alloc_id()中分配
 	int mnt_id;			/* mount identifier */
     //mount group id，一个mount组里，所有的mount结构的mnt_group_id一样.就是靠这个判断两个mount是否属于同一个peer group
     //do_loopback()->clone_mnt() 中赋值

@@ -291,8 +291,8 @@ static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
 			__elv_rqhash_del(rq);
 			continue;
 		}
-        //req的扇区结束地址等于offset，offset是bio的扇区起始地址(该函数传参是offset=blk_rq_pos(rq))，这样bio就是后项合并到req
-        //hash key是req的扇区结束地址
+        //rq_hash_key(rq)req的扇区结束地址等于offset。offset是bio的扇区起始地址(该函数传参是offset=blk_rq_pos(rq))，
+        //这样bio就是后项合并到req。hash key是req的扇区起始地址
 		if (rq_hash_key(rq) == offset)
 			return rq;
 	}
@@ -473,12 +473,14 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 		*req = __rq;
 		return ELEVATOR_BACK_MERGE;//哎，ELEVATOR_BACK_MERGE这里是后项合并
 	}
-/*    -----原始内核的，下边的是3.10.0.957.27内核，就增加了e->aux->ops.mq.request_merge
-    //具体IO调度算法函数cfq_merge或者deadline_merge，找到可以合并的bio的req???????,这里返回ELEVATOR_FRONT_MERGE，前项合并
+/*   
+   具体IO调度算法函数cfq_merge或者deadline_merge，找到可以合并的bio的req。这里返回ELEVATOR_FRONT_MERGE，前项合并
+*/
+#ifdef CONFIG_3.10.96
 	if (e->type->ops.elevator_merge_fn)
 		return e->type->ops.elevator_merge_fn(q, req, bio);
-*/
-    
+
+#else// 这是是3.10.0.957.27内核，就增加了e->aux->ops.mq.request_merge
     if (e->uses_mq && e->aux->ops.mq.request_merge)
        //dd_request_merge 和 deadline_merge的函数源码就是一样的，就是在调度算法的 读或写红黑树队列里，找到等于bio_end_sector(bio)的req
        //找到说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并ELEVATOR_FRONT_MERGE
@@ -487,7 +489,8 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
     //具体IO调度算法函数cfq_merge或者deadline_merge，该函数是在调度算法的 读或写红黑树队列里，遍历req,找到req起始扇区地址
     //等于bio_end_sector(bio)的req，如果找到匹配的req，说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并ELEVATOR_FRONT_MERGE
           return e->aux->ops.sq.elevator_merge_fn(q, req, bio);
-    
+#endif
+
 	return ELEVATOR_NO_MERGE;
 }
 
@@ -665,8 +668,8 @@ void elv_drain_elevator(struct request_queue *q)
 	}
 }
 //新分配的req插入IO算法队列，或者是把当前进程plug链表上req全部插入到IO调度算法队列
-void __elv_add_request(struct request_queue *q, struct request *rq, int where)//where默认是ELEVATOR_INSERT_SORT
-{
+void __elv_add_request(struct request_queue *q, struct request *rq, int where)
+{//blk_flush_plug_list调用时，req有(REQ_FLUSH | REQ_FUA)和属性，则是where是ELEVATOR_INSERT_FLUSH，否则是ELEVATOR_INSERT_SORT
 	trace_block_rq_insert(q, rq);
 
 	blk_pm_add_request(q, rq);

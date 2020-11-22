@@ -32,7 +32,7 @@ static void blk_done_softirq(struct softirq_action *h)
 
 		rq = list_entry(local_list.next, struct request, csd.list);
 		list_del_init(&rq->csd.list);
-		rq->q->softirq_done_fn(rq);
+		rq->q->softirq_done_fn(rq);//scsi_softirq_done
 	}
 }
 

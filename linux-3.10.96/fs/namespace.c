@@ -556,6 +556,25 @@ static void free_vfsmnt(struct mount *mnt)
  * @dir. If @dir is set return the first mount else return the last mount.
  * vfsmount_lock must be held for read or write.
  */
+ 
+/*这个函数是遍历挂载点目录的核心。mount /dev/sda3 /home/，/home/所在文件系统的是mount1，本次是dest mount，挂载点目录是home目录dentry，
+成为dentry1，此时home目录还没有块设备挂载。
+本次的source mount是/dev/sda3生成，成为mount2。在挂载的最后，会设置mount2->parent=mount1，mount2->mnt_mountpoint=dentry1。
+dest mount是source mount的父亲，这是规定!当再mount /dev/sd2 /home，本次的挂载点目录依然是home，但是home的dentry属性表示它是个挂载点
+目录，此时就要执行__follow_mount_rcu->__lookup_mnt(mount1->mnt,dentry1)返回最后一次挂载到home目录的块设备挂载时生成的mount结构。
+判断方法很简单，就是if (&p->mnt_parent->mnt == mnt && p->mnt_mountpoint == dentry)，从mount树中找到一个mount_x，
+如果mount_x->mnt_parent->mnt=mount1->mnt,并且mount_x->mnt_mountpoint=dentry1，那说明这个mount_x一定是挂载到home目录的那个
+块设备挂载时生成，返回mount_x即可。当然这个home目录会有多个块设备或者tmpfs挂载，那就循环执行__lookup_mnt()，
+直到找到最后一次挂载到home目录的那个块设备的mount结构。重点注意，上边表述有误导的地方，
+/home/所在文件系统挂载时生成，mount1
+mount /dev/sda3 /home/  source mount:mount2，dest mount是mount1，mount2->parent=mount1。挂载点目录是dentry1
+mount /dev/sda5 /home/  source mount:mount5，dest mount是mount2，mount5->parent=mount2。挂载点目录是dentry2
+__lookup_mnt()则要判断两次，第一次是if (&p->mnt_parent->mnt ==mount1->vfsmnt  && p->mnt_mountpoint == dentry1)，此时是要遍历父mount
+是mount1的mount，即mount2。接着要if (&p->mnt_parent->mnt ==mount2->vfsmnt  && p->mnt_mountpoint == dentry2)，
+此时是要遍历父mount是mount2的mount，即mount5。所以说，当有多个块设备挂载到/home目录时，每次的父mount都是不一样的。
+
+总结一句话:__follow_mount_rcu->__lookup_mnt 就是找到最后一次挂载到/home的块设备或者tmpfs的文件系统生成的mount结构
+*/
 //在mount hash链表中找到mount的mnt_parent，如果这个parent mount与传入的vfsmount的mount是同一个，并且parent mount的mnt_mountpoint
 //与传入的挂载点目录dentry是同一个，那就返回这个parent mount
 struct mount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry,
@@ -933,7 +952,7 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	    /*如果挂载属性slave，本次挂载的source mount通过其mnt_slave链接到克隆母体mount结构的mnt_slave_list*/
 		list_add(&mnt->mnt_slave, &old->mnt_slave_list);
 
-        /*mnt的mnt_master指向克隆母体的mount结构，二者构成父子关系*/
+        /*mnt的mnt_master指向克隆母体的mount结构*/
 		mnt->mnt_master = old;
 		CLEAR_MNT_SHARED(mnt);
     //如果挂载没有private属性，即share或者没有指mount属性
@@ -946,7 +965,7 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 			
         //如果本次mount bind没有指定mount属性，但是mount bind源目录的mount即克隆母体是slave属性，则本次挂载的source mount添加到
         //克隆母体mount结构的mnt_slave链表。这样本次的source mount和克隆目录mount就属于同一个mount slave组，不是父子关系
-        /*如果克隆母体slave属性而本次mount没有指定属性，而本次mount会被添加到与克隆母体同一个mount salve组链表*/
+        /*如果克隆母体slave属性而本次mount没有指定属性，则本次mount会被添加到与克隆母体同一个mount salve组链表*/
 		if (IS_MNT_SLAVE(old))
 			list_add(&mnt->mnt_slave, &old->mnt_slave);//把本次的mount链接到mnt_slave链表
 			
@@ -1488,8 +1507,8 @@ test2和test3目录，准确说是sda1块设备下的test2和test3目录。然后，sda5挂在到/home/
 
 /*只是q=res=clone_mnt()克隆一个mount，然后q->mnt_mountpoint = mnt->mnt_mountpoint设置克隆的mount的mnt_mountpoint为克隆母体
 的mnt_mountpoint，最后返回克隆的mount。list_for_each_entry()那段代码就没有执行到*/
-struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,//mnt是克隆母体，dentry是克隆母体mount块设备的根目录
-					int flag)
+struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
+					int flag)//mnt是克隆母体，dentry是克隆母体mount挂载源目录dentry，不一定是块设备根目录dentry，mount bind操作是挂载源目录dentry
 {
 	struct mount *res, *p, *q, *r, *parent;
 
@@ -1700,6 +1719,11 @@ static int attach_recursive_mnt(struct mount *source_mnt,
 		if (err)
 			goto out;
 	}
+    //遍历dest mount树下的slave  mount组或者share mount组的所有mount，每个这种mount作为dest mount^, 同时以source mount为克隆母体
+    //克隆生成一个mount，作为source mount^，dest mount^和source mount^构成父子关系，二者不是本次mount 挂载的原始source mount和dest mount
+    //只是中途生成的，有区别。这个就是传播mount:本次与dest mount同一个slave 或者share mount组的mount，要作为dest mount^，本次mount挂载的
+    //原始source mount要作为克隆母体，一一为dest mount^们克隆生成一个source mount^，这就是mount组传播mount的原理。克隆生成的mount
+    //添加到tree_list链表，下边执行commit_tree()再把这些mount链表添加到各个mount结构有关的链表。
 	err = propagate_mnt(dest_mnt, dest_mp, source_mnt, &tree_list);
 	if (err)
 		goto out_cleanup_ids;
@@ -1873,6 +1897,9 @@ static int do_loopback(struct path *path, const char *old_name,
 	if (mnt_ns_loop(&old_path))
 		goto out; 
     //遍历/home/test获取挂载点目录，由于该目录之前可能有其他块设备挂载，所以要遍历找到最后一次挂载的块设备的vfsmount和根目录dentry
+ /*lock_mount()验证下来就没什么用，因为path.mnt和path.dentry就已经是挂载点目录的终极mount和dentry。显然在前边do_mount->path_init()
+ 函数中得到path.mnt和path.dentry已经是挂载点目录的最后一次挂载的文件系统(块设备或者tmpfs等)，所以lock_mount()->lookup_mnt()->__lookup_mnt()
+ ，__lookup_mnt()直接返回NULL，即没有mount，lock_mount()的作用仅仅是mp->dentry=path.dentry设置本次的挂载点目录dentry就返回了。*/
 	mp = lock_mount(path);
 	err = PTR_ERR(mp);
 	if (IS_ERR(mp))
@@ -2120,6 +2147,9 @@ static int do_add_mount(struct mount *newmnt, struct path *path, int mnt_flags)
 
 	mnt_flags &= ~(MNT_SHARED | MNT_WRITE_HOLD | MNT_INTERNAL);
     //得到挂载点目录的struct mountpoint *mp
+    /*lock_mount()验证下来就没什么用，因为path.mnt和path.dentry就已经是挂载点目录的终极mount和dentry。显然在前边do_mount->path_init()
+    函数中得到path.mnt和path.dentry已经是挂载点目录的最后一次挂载的文件系统(块设备或者tmpfs等)，所以lock_mount()->lookup_mnt()->__lookup_mnt()
+    ，__lookup_mnt()直接返回NULL，即没有mount，lock_mount()的作用仅仅是mp->dentry=path.dentry设置本次的挂载点目录dentry就返回了。*/
 	mp = lock_mount(path);
 	if (IS_ERR(mp))
 		return PTR_ERR(mp);

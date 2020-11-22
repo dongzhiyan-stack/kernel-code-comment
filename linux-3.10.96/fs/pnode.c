@@ -144,10 +144,10 @@ void change_mnt_propagation(struct mount *mnt, int type)
  * a peer of one we'd found earlier.
  */
 /*
-  mount1_1是dest mount，自身属于share mount组。mount1_1和mount1_2和mount_1_3属于一个slave mount组，他们的mnt_master都指向mount1,
+  mount1是dest mount，自身属于share mount组。mount1_1和mount1_2和mount_1_3属于一个slave mount组，他们的mnt_master都指向mount1,
   下边没有画全,正常slave mount组的mount->mnt_master都指向其克隆母体。
   
-  假设本次操作时 mount --bind /home/test  /home/
+  假设本次操作是 mount --bind /home/test  /home/
   
   mount1---mount2---mount3---mount4---mount5 (share/peer mount组1)
      |       |
@@ -201,9 +201,9 @@ step 8:有没有可能dest mount是mount1_1，这样，dest mount本身就是一个slave mount组
   mount --bind 时才会指定 --make-slave/--make-private/--make-share属性。现在就暂时认定，dest mount不会有privae属性，它不是slave mount组的。
 
  总结，现在对mount的传播遍历规则一斤搞清楚了:以dest mount为源头，遍历遍历shared mount或者slave mount组的mount。正常情况，dest mount
- 是在share mount组，所以遍历这个share mount组的一个个成员并返回。但是，这个share mount的mount可能是slave mount组的母体，这种情况，就
+ 是在share mount组，所以遍历这个share mount组的一个个成员并返回。但是，这个share mount的mount可能是slave mount组的母体。这种情况，就
  进入这个slave mount组遍历slave mount并返回，遍历完则返回slave mount母体，继续遍历母体所在的那个mount组。注意，slave mount组的mount
- 也可能是slave mount组的母体，这种就继续深入这一层的slave mount遍历mount，遍历完全部的slave mount再返回母体mount那一层。如果没有
+ 也可能是另一个slave mount组的母体，这种就继续深入这一层的slave mount遍历mount，遍历完全部的slave mount再返回母体mount那一层。如果没有
  slave mount，遍历过程非常简单，一个个遍历share mount组的mount就行了。如果中途碰到有个mount是slave mount组的母体，那就遍历这个
  slave mount组的mount，遍历完返回母体那一层的mount继续遍历。
 */
@@ -305,13 +305,30 @@ mount1---mount2---mount3---mount4---mount5 (share/peer mount组1)
 总结:get_source()得到dest 这个mount对应的source mount。规则是，如果是dest是slave mount，则get_source()返回的永远是最近一步的last_src
 那个mount，相当于dest为slave则get_source()返回的克隆母体永远是last_src，这个last_src就是这个slave mount组克隆母体对应的那个source mount
 吧。是的，mount1的slave mount组成员mount1_1和mount1_2是dest时，get_source返回的就是本次挂载的原始source mount，而这个原始souce mount和
-mount1就是本次mount bind的源mount和目的mount。如果dest 是share组mount成员，get_source()返回的last_src，永远是上一次循环克隆生成child，
-实时在变。
-1  get_source()dest是slave mount组成员，返回的永远是这个slave mount组的克隆母体对应的source mount，last_src是这个source mount不变。然后
-   每一次propagate_mnt()中都是执行copy_tree()，以这个source mount克隆生成新的mount即child，child->mnt_master为source mount。
+mount1就是本次mount bind的源mount和目的mount。如果dest 是share组mount成员，get_source()返回的last_src，永远是
+propagate_mnt->child = copy_tree(source..) 这个克隆生成child(第一次除外，last_src是本次原始dest mount的source mount)，实时在变。
+
+1  get_source()dest是slave mount组成员，返回的永远是这个slave mount组2的克隆母体(即mount1)对应的source mount，last_src是这个source mount
+   不变。然后每一次propagate_mnt()中都是执行copy_tree()，以这个source mount克隆生成新的mount即child，child->mnt_master为source mount。
+   while (last_dest != dest->mnt_master)这个循环，就是要一直向上遍历last_dest->mnt_master，last_src=last_src->mnt_master也跟着向上遍历，
+   直到last_dest是dest的mnt_master(即mount1),此时last_src也变成了跟mount1对应的source mount。什么意思呢，mount1作为本次的dest mount，
+   肯定有一个source mount与之对应，本案例就是本次挂载形成的source mount。
+   
 2  get_source()dest是share mount组成员，除了第一次是返回本次mount挂载的source mount，然后照着克隆生成新的mount即child，child和克隆母体 
    是同一个mount共享组。然后last_src=child。之后的几次循环，get_source()都是返回上次克隆生成child，然后以此为母体再克隆。所有克隆生成
-   child都和本次mount挂载的source mount是一个mount共享组。
+   child都和本次mount挂载的source mount是一个mount共享组。share mount组mount的遍历，每次get_source()返回的都是上一个slave mount组的
+   对应的mount成员克隆生成child。当dest 是mount2时，get_source()返回本次挂载原始source mount，然后执行copy_tree()以这个souce mount为克隆
+   母体克隆生成child_2，接着执行mnt_set_mountpoint(mount2,dest_mp,child_2)，设置child_2和mount2构成父子关系，即child2->mnt_parent=mount2,
+   child2就是mount2的source mount，mount2是dest mount，一一对应。child_2的挂载点目录是dest_mp->dentry，
+   即本次mount bind操作的挂载点目录dentry。下次循执行
+   propagation_next()返回mount3，执行get_source(),dest是mount3,get_source()返回child_2，然后执行copy_tree()以child_2克隆生成child_3,
+   接着执行mnt_set_mountpoint(mount3,dest_mp,child_3)设置mount3和child_3构成父子关系，即child3->mnt_parent=mount3,child_3的挂载点目录。
+   child3就是mount3的source mount，mount3是dest mount，一一对应。是dest_mp->dentry，即本次mount bind操作的挂载点目录dentry。
+
+   简单总结，get_soucrce()返回的是dest在shared mount组前一个mount的对应的source mount,即last_src。share mount组的每个mountx
+   (是slave mount组成员克隆母体的除外，如mount1)，都要照着get_soucrce()返回的last_src克隆生成一个child，last_src和child的关系是，二者
+   是同一个share mount组的，child和mountx是父子关系，即child->mnt_parent=mountx。child的挂载点目录dentry是本次mount bind操作
+   的挂载点目录dentry。
 */
 static struct mount *get_source(struct mount *dest,
 				struct mount *last_dest,
@@ -360,6 +377,11 @@ static struct mount *get_source(struct mount *dest,
  * @source_mnt: source mount.
  * @tree_list : list of heads of trees to be attached.
  */
+//遍历dest mount树下的slave  mount组或者share mount组的所有mount，每个这种mount作为dest mount^, 同时以source mount为克隆母体
+//克隆生成一个mount，作为source mount^，dest mount^和source mount^构成父子关系，二者不是本次mount 挂载的原始source mount和dest mount
+//只是中途生成的，有区别。这个就是传播mount:本次与dest mount同一个slave 或者share mount组的mount，要作为dest mount^，本次mount挂载的
+//原始source mount要作为克隆母体，一一为dest mount^们克隆生成一个source mount^，这就是mount组传播mount的原理。克隆生成的mount
+//添加到tree_list链表，稍后执行commit_tree()再把这些mount链表添加到各个mount结构有关的链表。
 int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
 		    struct mount *source_mnt, struct list_head *tree_list)
 {
@@ -370,8 +392,8 @@ int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
 	struct mount *prev_src_mnt  = source_mnt;
 	LIST_HEAD(tmp_list);
 
-//返回peer group即同是shared属性mount组中的下一个mount或者同是slave属性mount组的下一个mount。貌似所有父子mount结构有shared属性的mount
-//都靠其mnt_share成员构成一个单向链表。所有父子mount结构有slave属性的mount靠其mnt_slave成员构成一个单向链表。propagation_next()函数
+//返回peer group即同是shared属性mount组中的下一个mount或者同是slave属性mount组的下一个mount。貌似mount结构有shared属性的mount
+//都靠其mnt_share成员构成一个单向链表。有slave属性的mount靠其mnt_slave成员构成一个单向链表。propagation_next()函数
 //貌似就是以本次mount命令的dest mount结构为开始，通过mount结构的mnt_share和mnt_slave成员，遍历所有同一个属性组所有的mount结构赋予m变量
 	for (m = propagation_next(dest_mnt, dest_mnt); m;
 			m = propagation_next(m, dest_mnt)) {
@@ -387,7 +409,8 @@ int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
 		if (m->mnt_ns->user_ns != user_ns)
 			type |= CL_UNPRIVILEGED;
 
-     /*执行clone_mnt()照着source克隆一个mount，设置克隆的mount的mnt_mountpoint为克隆母体的mnt_mountpoint，最后返回克隆mount于child*/
+     /*执行clone_mnt()照着source克隆一个mount，即child mount。设置child mount的mnt_mountpoint为克隆母体的mnt_mountpoint。
+       还有一个要点，设置child mount的child->mnt.mnt_root是克隆母体的source->mnt.mnt_root。最后返回克隆mount于child*/
 		child = copy_tree(source, source->mnt.mnt_root, type);
 		if (IS_ERR(child)) {
 			ret = PTR_ERR(child);
@@ -398,10 +421,15 @@ int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
         /*dest_mp->m_dentry是本次mount挂载点终极目录dentry，m->mnt.mnt_root是m这个mount结构代表的块设备文件系统的根目录
           只有dest_mp->m_dentry是m代表的文件系统下的目录dentry才有效*/
 		if (is_subdir(dest_mp->m_dentry, m->mnt.mnt_root)) {
-          /*针对克隆生成mount结构child设置父子关系。克隆生成的child是"source mount"，m是挂载点目录的块设备的mount结构，就是"dest mount"
-            m是child的parent，dest_mp->m_dentry是child挂载点目录dentry，那dest_mp->m_dentry肯定也是是"dest mount"即m这个mount结构代表
-            的块设备文件系统的根目录下的一个目录，这点没得商量，所以if (is_subdir(dest_mp->m_dentry, m->mnt.mnt_root))必须要有。
-             */
+        /*针对克隆生成mount结构child设置父子关系。克隆生成的child是"source mount^"，m是挂载点目录的块设备的mount结构，就是"dest mount^"
+         m是child的parent。dest_mp->m_dentry是child挂载点目录dentry，那dest_mp->m_dentry肯定也得是"dest mount"即m这个mount结构代表
+         的块设备文件系统的根目录下的一个目录，这点没得商量。所以if (is_subdir(dest_mp->m_dentry, m->mnt.mnt_root))必须要有。
+         */
+        //这里我有个大的疑问???????????设置克隆生成的mount即child的挂载点目录!简单来说，本次的mount bind命令的挂载源目录也要挂载到与
+        //挂载点目录的dest mount同一个mount share共享组的其他mount。这样不是应该设置child的挂载点目录与dest mount^同样的挂载点?????
+        //即设置child->mnt_mountpoint = m->mnt_mountpoint?但实际设置child->mnt_mountpoint时本次mount bind操作的挂载点目录。并且我查看
+        //cat /proc/self/mountinfo看到的信息，凡是mount组传播生成的mount，它的挂载点目录与他父mount是就是同一个，说明二者的mount的
+        //mnt_mountpoint就是同一个呀?????有很多疑问，我觉个查看mount信息的内核函数show_mountinfo->seq_path_root()应该能解答疑惑
 			mnt_set_mountpoint(m, dest_mp, child);
             /*克隆生成child暂时添加到tree_list链表，在attach_recursive_mnt最后，会把tree_list链表上的克隆生成的mount取出来，执行
              attach_recursive_mnt，把mount结构添加到系统*/

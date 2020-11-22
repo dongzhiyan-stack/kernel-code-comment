@@ -34,10 +34,11 @@ struct bio_vec {
  * stacking drivers)
  */
 struct bio {
-    //应该是本次bio请求的起始扇区号
+    //应该是本次bio请求的起始扇区号，见 io_submit_init()函数
 	sector_t		bi_sector;	/* device address in 512 byte
 						   sectors */
     //貌似bi_next指向下一个bio，req上有多个bio，bio挂在这个链表上,bio_attempt_back_merge()和attempt_merge()中有赋值
+    //blk_update_request()函数对req对应的磁盘数据不能一次全部传输完，怎么取出bi_next指向的下一个bio，做了详细解释。
 	struct bio		*bi_next;	/* request queue link */
     //本次要操作的块设备bdev，其中有struct request_queue            
 	struct block_device	*bi_bdev;
@@ -89,7 +90,7 @@ struct bio {
 	atomic_t		bi_cnt;		/* pin count */
     //以该成员bv_offset和bv_len描述的是page cache的一片内存吧，这片数据要写入磁盘，一个bio对应了多个bio_vec
     //突然有个感想，req里的bio的磁盘地址是连续的，但是bio对应的文件页数据保存
-    //的内存页page，内存地址可不一定连续呀，所以才会用bio_vec来单独描述bio对应的内存页page
+    //的内存页page，内存地址可不一定连续呀，所以才会用bio_vec来单独描述bio对应的内存页page。io_submit_init
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
 
 	struct bio_set		*bi_pool;

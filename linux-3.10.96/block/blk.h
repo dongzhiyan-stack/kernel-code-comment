@@ -71,6 +71,7 @@ static inline struct request *__elv_next_request(struct request_queue *q)
 	struct request *rq;
 
 	while (1) {
+        //从q->queue_head取出待传输的req
 		if (!list_empty(&q->queue_head)) {
 			rq = list_entry_rq(q->queue_head.next);
 			return rq;

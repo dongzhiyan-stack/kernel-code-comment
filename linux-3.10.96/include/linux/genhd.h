@@ -113,7 +113,7 @@ struct hd_struct {
 	unsigned int discard_alignment;
 	struct device __dev;
 	struct kobject *holder_dir;
-	int policy, partno;//partno
+	int policy, partno;//partno，分区编号，如果不是主分区不为0，块设备分区的话是0。blk_account_io_done
 	struct partition_meta_info *info;
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 	int make_it_fail;
@@ -124,7 +124,8 @@ struct hd_struct {
 	//inflight[1]保存主磁盘分区，比如sda；inflight[0]保存当前块设备的磁盘分区，比如sda2
 	atomic_t in_flight[2];
 #ifdef	CONFIG_SMP
-    //磁盘使用率等统计数据，每个CPU一个
+    //记录磁盘使用率等统计数据，每个CPU一个。part_round_stats()统计IO使用率数据时只有当前CPU增加，diskstats_show()获取IO使用率统计
+    //数据时，是累加所有CPU的IO数据。
 	struct disk_stats __percpu *dkstats;
 #else
 	struct disk_stats dkstats;
@@ -218,7 +219,7 @@ struct gendisk {
 #endif
 	int node_id;
 };
-//struct hd_struct *part应该代表的是一个磁盘分区，比如sda2，part_to_disk代表的是整个磁盘，比如sda
+//struct hd_struct *part代表的是一个磁盘分区，比如sda2，part_to_disk代表的是整个磁盘，比如sda
 static inline struct gendisk *part_to_disk(struct hd_struct *part)
 {
 	if (likely(part)) {

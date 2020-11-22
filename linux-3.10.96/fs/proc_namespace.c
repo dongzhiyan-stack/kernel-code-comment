@@ -127,9 +127,11 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	struct path root = p->root;
 	int err = 0;
-
+    //形如 52 49 8:16，即mount id、父mount id，主次设备号
 	seq_printf(m, "%i %i %u:%u ", r->mnt_id, r->mnt_parent->mnt_id,
 		   MAJOR(sb->s_dev), MINOR(sb->s_dev));
+
+    //挂载源目录
 	if (sb->s_op->show_path)
 		err = sb->s_op->show_path(m, mnt->mnt_root);
 	else
@@ -138,6 +140,7 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 		goto out;
 	seq_putc(m, ' ');
 
+    //挂载点目录，mnt_path.mnt_root 是挂载源的根目录，我不理解，怎么就会得到挂载点目录?????????????
 	/* mountpoints outside of chroot jail will give SEQ_SKIP on this */
 	err = seq_path_root(m, &mnt_path, &root, " \t\n\\");
 	if (err)

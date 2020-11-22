@@ -110,6 +110,7 @@ static int blk_phys_contig_segment(struct request_queue *q, struct bio *bio,
 	return 0;
 }
 
+//把bio的待传输的文件数据的内存地址bvec->bv_pag+bvec->bv_offset设置到sg
 static void
 __blk_segment_map_sg(struct request_queue *q, struct bio_vec *bvec,
 		     struct scatterlist *sglist, struct bio_vec **bvprv,
@@ -146,7 +147,7 @@ new_segment:
 			sg_unmark_end(*sg);
 			*sg = sg_next(*sg);
 		}
-
+        //把bio的待传输的文件数据的内存地址bvec->bv_pag+bvec->bv_offset设置到sg
 		sg_set_page(*sg, bvec->bv_page, nbytes, bvec->bv_offset);
 		(*nsegs)++;
 	}
@@ -157,6 +158,8 @@ new_segment:
  * map a request to scatterlist, return number of sg entries setup. Caller
  * must make sure sg can hold rq->nr_phys_segments entries
  */
+//先遍历req上的每一个bio，再得到每个bio的bio_vec，把bio对应的文件数据在内存中的首地址bvec->bv_pag+bvec->bv_offset写入scatterlist
+//scatterlist是磁盘数据DMA传输有关的数据结构
 int blk_rq_map_sg(struct request_queue *q, struct request *rq,
 		  struct scatterlist *sglist)
 {
@@ -173,7 +176,11 @@ int blk_rq_map_sg(struct request_queue *q, struct request *rq,
 	 */
 	bvprv = NULL;
 	sg = NULL;
+  //先遍历req上的每一个bio，再得到每个bio的bio_vec，bio_vec是bio对应的文件数据在内存中的地址，一个bio可能对应多个bio_vec
+  //一个bio代表一片连续的磁盘空间，一个bio_vec代表一个page页内存，bvec->bv_pag+bvec->bv_offset 是内存中文件数据的首地址，实际IO数据传输时，
+  //是使用DMA把内存中的文件数据自动传输到磁盘控制器。这个循环是把bio对应的文件数据在内存中的首地址依次写入sg。sg DMA数据传输时使用。
 	rq_for_each_segment(bvec, rq, iter) {
+        //把bio的待传输的文件数据的内存地址bvec->bv_pag+bvec->bv_offset设置到sg
 		__blk_segment_map_sg(q, bvec, sglist, &bvprv, &sg,
 				     &nsegs, &cluster);
 	} /* segments in rq */

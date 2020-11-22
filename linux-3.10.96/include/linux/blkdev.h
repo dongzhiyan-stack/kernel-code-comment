@@ -101,6 +101,8 @@ enum rq_cmd_type_bits {
  * if you modify this structure, be sure to check block/blk-core.c:blk_rq_init()
  * as well!
  */
+//一个bio代表一个IO请求，要读写一片连续的磁盘空间，比如读写磁盘地址0~8K。一个bio_vec代表一个page页内存，一个bio可能对应多个bio_vec
+//当bio的对应磁盘范围是8K，那它对应两个bio_vec。一个req可以合并多个IO请求即bio，这些bio的磁盘空间范围可以连成一片。
 struct request {
 #ifdef __GENKSYMS__
 	union {
@@ -139,7 +141,9 @@ struct request {
     //req代表的磁盘范围起始扇区
 	sector_t __sector;		/* sector cursor *///struct bio
 
-    //req上的第一个bio吧，一个req可能合并了多个bio，bio的bi_next链表挂着其他bio。如果第一个bio传输完，会指向下一个bio,见blk_update_request和blk_rq_bio_prep
+    //req上的第一个bio吧，一个req可能合并了多个bio，bio的bi_next链表挂着其他bio。如果第一个bio传输完，会指向下一个bio,
+    //见blk_update_request和blk_rq_bio_prep。blk_update_request()函数对req对应的磁盘数据不能一次全部传输完，分多个bio传输，做了详细解释。
+    /*req对应的第一个bio是这个bio指向的，之后的bio就靠bio->next寻得*/
 	struct bio *bio;
 	struct bio *biotail;//在把bio合并到rq时，也是执行新加入的bio，奇怪，看ll_back_merge_fn()和bio_attempt_back_merge()和attempt_merge、blk_rq_bio_prep
 
@@ -209,7 +213,7 @@ struct request {
 #endif
 
 	unsigned short ioprio;
-
+    //scsi_get_cmd_from_req()指向分配的scsi命令结构体
 	void *special;		/* opaque pointer available for LLD use */
     //该req对应的bh的内存page地址,还考虑了页内offset，看blk_update_request()后半段
 	char *buffer;		/* kaddr of the current segment if available */
@@ -243,7 +247,7 @@ struct request {
 	void *end_io_data;
 
 	/* for bidi */
-	struct request *next_rq;
+	struct request *next_rq;//传输下一个req
 };
 
 #define req_op(req)		(op_from_rq_bits((req)->cmd_flags))
@@ -366,7 +370,8 @@ struct queue_limits {
 	RH_KABI_USE(3, struct queue_limits_aux *limits_aux)
 };
 //貌似在blk_alloc_queue_node()分配struct request_queue
-//块设备初始化时通过blk_mq_init_queue()创建request_queue并对大部分成员初始化，还有分配软件、硬件队列，
+//块设备初始化时通过blk_mq_init_queue()创建request_queue并对大部分成员初始化，还有分配软件、硬件队列。一个块设备只有一个，不管有多少个
+//块设备分区
 struct request_queue {
 	/*
 	 * Together with queue_head for cacheline sharing
@@ -395,7 +400,7 @@ struct request_queue {
 //mmc_init_queue()->blk_init_queue()->blk_init_queue_node()->blk_init_allocated_queue()->blk_queue_make_request()中赋值为blk_queue_bio()
 //nvme blk_mq_init_queue->blk_mq_init_allocated_queue->blk_queue_make_request 中赋值
 	make_request_fn		*make_request_fn;
-	prep_rq_fn		*prep_rq_fn;//mmc_init_queue()中赋值为mmc_prep_request
+	prep_rq_fn		*prep_rq_fn;//mmc_init_queue()中赋值为mmc_prep_request;执行scsi_alloc_queue->blk_queue_prep_rq赋值为scsi_prep_fn
 	unprep_rq_fn		*unprep_rq_fn;
 	merge_bvec_fn		*merge_bvec_fn;
 	softirq_done_fn		*softirq_done_fn;//nvme_pci_complete_rq   blk_queue_softirq_done中设置
@@ -933,7 +938,7 @@ struct req_iterator {
 		for (_bio = (rq)->bio; _bio; _bio = _bio->bi_next)
 
 #define rq_for_each_segment(bvl, _rq, _iter)			\
-	__rq_for_each_bio(_iter.bio, _rq)			\
+	__rq_for_each_bio(_iter.bio, _rq)			\ //遍历req上的每一个bio
 		bio_for_each_segment(bvl, _iter.bio, _iter.i)
 
 #define rq_iter_last(rq, _iter)					\
