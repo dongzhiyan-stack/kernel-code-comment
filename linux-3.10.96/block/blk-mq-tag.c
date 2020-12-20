@@ -102,11 +102,60 @@ static int __blk_mq_get_tag(struct blk_mq_alloc_data *data,
 	else
 		return __sbitmap_queue_get(bt);
 }
-//从硬件队列有关的blk_mq_tags结构体的static_rqs[]数组里得到空闲的request。获取失败则启动硬件IO数据派发，
-//之后再尝试从blk_mq_tags结构体的static_rqs[]数组里得到空闲的request
+/*
+1 关于硬件队列的tags->breserved_tags、tags->bitmap_tags、static_rqs[]、nr_reserved_tags一直很疑惑，现在应该搞清楚了。当submio时执行
+blk_mq_make_request->blk_mq_sched_get_request，从硬件队列相关的blk_mq_tags结构的static_rqs[]数组里得到空闲的req。其实本质是:
+先得到硬件队列hctx，然后根据有无调度算法返回该硬件唯一绑定的hctx->sched_tags或者hctx->tags，即blk_mq_get_tag()中的
+struct blk_mq_tags *tags = blk_mq_tags_from_data(data)。现在有了blk_mq_tags，接着从tags->breserved_tags或者tags->bitmap_tags先分配
+一个空闲tag，这个tag指定了本次分配的req在static_rqs[]数组的下标，下标就是blk_mq_get_tag()的返回值tag + tag_offset。
+tags->breserved_tags或者tags->bitmap_tags是struct sbitmap_queue结构，应该可以理解成就是一个个bit位吧，
+有点像ext4文件系统的inode bitmap，每一个bit表示一个tag，该bit表示的tag被分配了就置1，分配tag应该就是从tags->breserved_tags或者
+tags->bitmap_tags查找bit为是0的哪个?应该是这个意思。然后赋值req->tag =tag ，hctx->tags->rqs[req->tag] = req。
+
+2 从tags->bitmap_tags或者tags->breserved_tags分配的tag，其实是一个数字，表示本次分配的reg在static_rqs[]数组的下标。
+
+3 关于tags->breserved_tags和tags->bitmap_tags，有调度器使用tags->bitmap_tags，无调度器使用tags->breserved_tags。
+看blk_mq_get_tag()函数if (data->flags & BLK_MQ_REQ_RESERVED)成立，则使用tags->breserved_tags，什么条件成立呢?
+
+submio执行blk_mq_make_request->blk_mq_sched_get_request，使用了调度器，则data->flags |= BLK_MQ_REQ_INTERNAL。
+
+然后执行blk_mq_get_tag(),if (data->flags & BLK_MQ_REQ_RESERVED不成立，执行bt = &tags->bitmap_tags和tag_offset = tags->nr_reserved_tags，
+然后从tags->bitmap_tags分配一个tag，然后tags->nr_reserved_tags+tag 是本次分配的req在static_rqs[]的下标，啥意思?static_rqs[]数组的
+0~tags->nr_reserved_tags位置都是reserved tag，tags->nr_reserved_tags后边的才是非reserved tag。接着执行__blk_mq_alloc_request(),
+因为if (data->flags & BLK_MQ_REQ_INTERNAL)成立，则__rq_aux(rq, data->q)->internal_tag = tag，这个tag大于tags->nr_reserved_tags，
+这点很重要，稍后就有用。然后经过漫长的旅途，要把该req派送给硬件驱动了，需执行blk_mq_dispatch_rq_list()。但是因为磁盘驱动硬件繁忙，
+该req没有派发成功。则要执行__blk_mq_requeue_request(req)，把该req占用的tag从tags->bitmap_tags从释放掉，然后把req放入hctx->dispatch
+链表启动异步派发。最终还会执行blk_mq_dispatch_rq_list()->blk_mq_get_driver_tag()，
+if (blk_mq_tag_is_reserved(data.hctx->sched_tags, rq_aux(rq)->internal_tag))不成立，不会执行data.flags |= BLK_MQ_REQ_RESERVED，
+接着执行blk_mq_get_tag()，跟上边的流程一样，还是bt = &tags->bitmap_tags 从bitmap_tags分配tag。
+
+4如果submio执行blk_mq_make_request->blk_mq_sched_get_request，没有使用调度器，不会执行data->flags |= BLK_MQ_REQ_INTERNAL，
+
+然后执行blk_mq_get_tag(),if (data->flags & BLK_MQ_REQ_RESERVED不成立，执行bt = &tags->bitmap_tags和tag_offset = tags->nr_reserved_tags，
+然后从tags->bitmap_tags分配一个tag，然后tags->nr_reserved_tags+tag 是本次分配的req在static_rqs[]的下标。接着执行
+__blk_mq_alloc_request(),因为if (data->flags & BLK_MQ_REQ_INTERNAL)不不不不成立，则__rq_aux(rq, data->q)->internal_tag = -1，
+这样tag小于tags->nr_reserved_tags，这点很重要，稍后就有用。然后经过漫长的旅途，要把该req派送给硬件驱动了，需执行
+blk_mq_dispatch_rq_list()。但是因为磁盘驱动硬件繁忙，该req没有派发成功。则要执行__blk_mq_requeue_request(req)，把该req占用的
+tag从tags->bitmap_tags从释放掉，然后把req放入hctx->dispatch链表启动异步派发。最终还会执行blk_mq_dispatch_rq_list()->
+blk_mq_get_driver_tag()，if (blk_mq_tag_is_reserved(data.hctx->sched_tags, rq_aux(rq)->internal_tag))成立成立成立成立成立，
+则执行data.flags |= BLK_MQ_REQ_RESERVED，接着执行blk_mq_get_tag()，因为if (data->flags & BLK_MQ_REQ_RESERVED) 成立，则
+bt = &tags->breserved_tags和tag_offset = 0，则本次是从tags->breserved_tags这个reserved tag分配tag，并且tag+0是本次分配的req在
+static_rqs[]数组的下标。也就是说，static_rqs[]数组的0~tags->nr_reserved_tags是reserved tag的req的数组下标，tags->nr_reserved_tags以上
+的tag是非reserved tag的req的数组下标。
+
+5 凡是执行blk_mq_get_driver_tag()的情况，都是该req在第一次派发时遇到硬件队列繁忙，就把tag释放了，然后rq->tag=-1。
+接着启动异步派发，才会执行该函数
+
+6 tag和req是绑定的，在submio执行blk_mq_make_request->blk_mq_sched_get_request时，是先从硬件队列blk_mq_tags分配tag，然后从blk_mq_tags
+的static_rqs[tag]得到req。之后在进行req传输时，遇到磁盘驱动硬件繁忙，则会执行__blk_mq_requeue_request(req)把req的tag释放掉，然后等
+异步派发req时，则会执行blk_mq_get_driver_tag()重新为req分配tag。
+*/
+
+//从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag，一个req必须分配一个tag才能IO传输。
+//分配失败则启动硬件IO数据派发，休眠，后再尝试从blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag。
 unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 {
-    //有调度器时返回硬件队列的hctx->sched_tags，无调度器时返回硬件队列的hctx->tags
+    //使用调度器时返回硬件队列的hctx->sched_tags，无调度器时返回硬件队列的hctx->tags。返回的是硬件队列唯一对应的的blk_mq_tags
 	struct blk_mq_tags *tags = blk_mq_tags_from_data(data);
 	struct sbitmap_queue *bt;
 	struct sbq_wait_state *ws;
@@ -115,39 +164,42 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 	bool drop_ctx;
 	int tag;
 
-	if (data->flags & BLK_MQ_REQ_RESERVED) {
+	if (data->flags & BLK_MQ_REQ_RESERVED) {//使用预留tag
 		if (unlikely(!tags->nr_reserved_tags)) {
 			WARN_ON_ONCE(1);
 			return BLK_MQ_TAG_FAIL;
 		}
 		bt = &tags->breserved_tags;
 		tag_offset = 0;
-	} else {
+	} else {//不使用预留tag
+	
 	    //返回blk_mq_tags的bitmap_tags
 		bt = &tags->bitmap_tags;
         //应该是static_rqs[]里空闲的request的数组下标偏移，见该函数最后
 		tag_offset = tags->nr_reserved_tags;
 	}
     
-//根据sbitmap_queue得到blk_mq_tags结构体的static_rqs[]数组里空闲的request的数组下标。返回这个下标，实际这个下标不是static_rqs[]
-//真正的数组下标，加一个偏移值tags->nr_reserved_tags才是。返回-1说明没有空闲request。注意，这个request就是从硬件队列有关的blk_mq_tags
-//结构static_rqs[]里分配的req。如果static_rqs[]没有空闲的request，就会执行下边的循环，启动硬件nmve传输，以腾出空闲的request
+//从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag。tag表明了req在static_rqs[]的数组下标。
+//实际tag并不是req在static_rqs[]数组的下标，真正的数组下标，加一个偏移值tag_offset才是。返回-1说明没有空闲tag，就会执行下边的循环，
+//启动磁盘硬件传输，以腾出空闲的tag。一个tag就是一个req，req传输前必须得分配tag，分配tag本质是从硬件队列blk_mq_tags得到空闲req。
 	tag = __blk_mq_get_tag(data, bt);
 	if (tag != -1)
 		goto found_tag;
 
-	if (data->flags & BLK_MQ_REQ_NOWAIT)
+	if (data->flags & BLK_MQ_REQ_NOWAIT)//显然这是不运行等待
 		return BLK_MQ_TAG_FAIL;
 
     //走到这一步，说明硬件队列有关的blk_mq_tags里没有空闲的request可分配，那就会陷入休眠等待，并且执行blk_mq_run_hw_queue
     //启动IO 数据传输，传输完成后可以释放出request，达到分配request的目的
-	ws = bt_wait_ptr(bt, data->hctx);
+
+	ws = bt_wait_ptr(bt, data->hctx);//获取硬件队列唯一对应的wait_queue_head_t等待队列头，我去，这也是硬件队列唯一对应的
 	drop_ctx = data->ctx == NULL;
 	do {
 		struct sbitmap_queue *bt_prev;
 
-		prepare_to_wait(&ws->wait, &wait, TASK_UNINTERRUPTIBLE);
-        //再次尝试从blk_mq_tags结构体里static_rqs[]数组里得到空闲的request
+		prepare_to_wait(&ws->wait, &wait, TASK_UNINTERRUPTIBLE);//在ws->wait等待队列准备休眠
+        
+        //再次尝试从blk_mq_tags结构体里分配空闲tag
 		tag = __blk_mq_get_tag(data, bt);
 		if (tag != -1)
 			break;
@@ -157,14 +209,14 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 		 * pending IO submits before going to sleep waiting for
 		 * some to complete.
 		 */
-		//启动nvme硬件IO数据派发，流程也是相当复杂
+		//启动磁盘硬件队列IO同步传输，以腾出空闲req
 		blk_mq_run_hw_queue(data->hctx, false);
 
 		/*
 		 * Retry tag allocation after running the hardware queue,
 		 * as running the queue may also have found completions.
 		 */
-		//再次尝试从blk_mq_tags结构体里static_rqs[]数组里得到空闲的request
+		//再次尝试从blk_mq_tags结构体里分配空闲tag
 		tag = __blk_mq_get_tag(data, bt);
 		if (tag != -1)
 			break;
@@ -176,16 +228,19 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
         //休眠调度
 		io_schedule();
 
-        //奇怪，再次获取软件队列和硬件队列，为什么????????????????????????难道是上边启动了硬件IO数据派发，有些req会传输完成?????
+        //奇怪，再次获取软件队列和硬件队列，为什么?????????上边启动了硬件IO数据派发，等io_schedule()调度后再被唤醒，进程所处CPU有
+        //可能会变，所以要根据进程所处CPU获取对应的软件队列，再获取对应的硬件队列
 		data->ctx = blk_mq_get_ctx(data->q);
 		data->hctx = blk_mq_map_queue(data->q, data->ctx->cpu);
-        //有调度器时返回硬件队列的hctx->sched_tags，无调度器时返回硬件队列的hctx->tags
+        
+        //使用调度器时返回硬件队列的hctx->sched_tags，无调度器时返回硬件队列的hctx->tags
 		tags = blk_mq_tags_from_data(data);
 		if (data->flags & BLK_MQ_REQ_RESERVED)
 			bt = &tags->breserved_tags;
 		else//再次获取bitmap_tags，流程跟前边一模一样
 			bt = &tags->bitmap_tags;
 
+        //休眠后唤醒，完成休眠
 		finish_wait(&ws->wait, &wait);
 
 		/*
@@ -196,6 +251,7 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 		if (bt != bt_prev)
 			sbitmap_queue_wake_up(bt_prev);
 
+        //再次根据硬件队列获取唯一对应的wait_queue_head_t等待队列头
 		ws = bt_wait_ptr(bt, data->hctx);
 	} while (1);
 
@@ -205,7 +261,7 @@ unsigned int blk_mq_get_tag(struct blk_mq_alloc_data *data)
 	finish_wait(&ws->wait, &wait);
 
 found_tag:
-    //看到没有，tag+tag_offset才是空闲quest在static_rqs[]数组的真正下标
+    //看到没有，tag+tag_offset才是本次分配的空闲request在static_rqs[]数组的真正下标
 	return tag + tag_offset;
 }
 //tags->bitmap_tags中按照req->tag这个tag编号释放tag
@@ -213,6 +269,7 @@ void blk_mq_put_tag(struct blk_mq_hw_ctx *hctx, struct blk_mq_tags *tags,
 		    struct blk_mq_ctx *ctx, unsigned int tag)
 {
 	if (!blk_mq_tag_is_reserved(tags, tag)) {
+        //tag - tags->nr_reserved_tags后才是该tag在tags->bitmap_tags的真是位置
 		const int real_tag = tag - tags->nr_reserved_tags;
 
 		BUG_ON(real_tag >= tags->nr_tags);
@@ -405,13 +462,13 @@ free_tags:
 	kfree(tags);
 	return NULL;
 }
-
+//分配一个blk_mq_tags结构，设置其成员nr_reserved_tags和nr_tags，分配blk_mq_tags的bitmap_tags、breserved_tags结构
 struct blk_mq_tags *blk_mq_init_tags(unsigned int total_tags,
 				     unsigned int reserved_tags,
 				     int node, int alloc_policy)
 {
 	struct blk_mq_tags *tags;
-    //total_tags竟然是set->queue_depth，最大支持的硬件队列数??????????
+    //total_tags竟然是set->queue_depth
 	if (total_tags > BLK_MQ_TAG_MAX) {
 		pr_err("blk-mq: tag depth too large\n");
 		return NULL;
@@ -423,7 +480,7 @@ struct blk_mq_tags *blk_mq_init_tags(unsigned int total_tags,
 
 	tags->nr_tags = total_tags;
 	tags->nr_reserved_tags = reserved_tags;
-
+    //分配blk_mq_tags的bitmap_tags、breserved_tags结构
 	return blk_mq_init_bitmap_tags(tags, node, alloc_policy);
 }
 

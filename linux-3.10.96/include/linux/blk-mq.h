@@ -32,7 +32,7 @@ struct blk_mq_hw_ctx {
 
 	RH_KABI_REPLACE(struct delayed_work	delayed_work,
 		        struct delayed_work	delay_work)//处理rq的work线程
-
+    //共享tag，BLK_MQ_F_TAG_SHARED。blk_mq_init_allocated_queue->blk_mq_add_queue_tag_set->queue_set_hctx_shared中设置
 	unsigned long		flags;		/* BLK_MQ_F_* flags */
 
 	struct request_queue	*queue;//磁盘对应的队列
@@ -40,8 +40,8 @@ struct blk_mq_hw_ctx {
 
 	void			*driver_data;
     //看着像是硬件队列关联的软件队列个数?????看blk_mq_map_swqueue()，nr_ctx就是ctxs[]数组的下标，即ctxs[nr_ctx++]=ctxs，
-    //每一个blk_mq_ctx软件队列结构体以nr_ctx为数组下标，保存到ctxs[]。不对，应该是硬件队列关联的软件队列编号，硬件队列可以关联多个
-    //软件队列，保存在硬件队列结构blk_mq_hw_ctx的成员ctxs[nr_ctx++]=ctxs，nr_ctx准确说是硬件队列关联的第几个软件队列吧
+    //每一个blk_mq_ctx软件队列结构体以nr_ctx为数组下标，保存到ctxs[]。不对，应该是硬件队列关联的软件队列个数，硬件队列可以关联多个
+    //软件队列，保存在硬件队列结构blk_mq_hw_ctx的成员ctxs[nr_ctx++]=ctxs，每关联一个软件队列就加1
 	unsigned int		nr_ctx;
     //保存软件队列结构体指针数组，保存关联的软件队列结构指针，一个硬件队列可以关联多个软件队列结构，
     //每一个关联当然软件队列结构都保存在ctxs[]，blk_mq_map_swqueue中赋值
@@ -65,7 +65,7 @@ struct blk_mq_hw_ctx {
     //bio需要转换成rq时,就从blk_mq_tags的static_rqs取出rq
 	struct blk_mq_tags	*tags;
 
-	unsigned long		queued;
+	unsigned long		queued;//blk_mq_sched_get_request()中分配到req后，queued++
 	unsigned long		run;
 #define BLK_MQ_MAX_DISPATCH_ORDER	10
 	unsigned long		dispatched[BLK_MQ_MAX_DISPATCH_ORDER];
@@ -91,10 +91,12 @@ struct blk_mq_hw_ctx {
 	RH_KABI_EXTEND(struct sbitmap ctx_map)
 
 	//RH_KABI_EXTEND(atomic_t		nr_active)
+	//__blk_mq_alloc_request()中从硬件队列对应的blk_mq_tags结构体的static_rqs[]分配得到req，然后nr_active就加1
 	atomic_t		nr_active;
 
 	RH_KABI_EXTEND(struct blk_flush_queue	*fq)
-	RH_KABI_EXTEND(struct srcu_struct	queue_rq_srcu)
+	//RH_KABI_EXTEND(struct srcu_struct	queue_rq_srcu)
+	struct srcu_struct	queue_rq_srcu;//硬件队列锁，__blk_mq_run_hw_queue()中上锁
 	//RH_KABI_EXTEND(wait_queue_t		dispatch_wait)
 	wait_queue_t		dispatch_wait;
 	RH_KABI_EXTEND(void			*sched_data)
@@ -144,10 +146,10 @@ struct blk_mq_tag_set {
 	unsigned int		flags;		/* BLK_MQ_F_* */
 	void			*driver_data;
     //见__blk_mq_alloc_rq_map()，分配和设置blk_mq_tags结构
-	struct blk_mq_tags	**tags;//保存每个硬件队列对应的blk_mq_tags结构指针，一个硬件队列对应一个，数组小标是硬件队列编号，从0开始
+	struct blk_mq_tags	**tags;//保存每个硬件队列对应的blk_mq_tags结构指针，一个硬件队列对应一个，数组下标是硬件队列编号，从0开始
 	struct mutex		tag_list_lock;
 	struct list_head	tag_list;
-    //这是个迷幻的数组，看blk_mq_update_queue_map()中的注释，该数组下标是CPU的编号，数组成员是硬件队列的编号
+    //这是个迷幻的数组，看blk_mq_alloc_tag_set->blk_mq_update_queue_map()中的注释，该数组下标是CPU的编号，数组成员是硬件队列的编号
     //该数组成员在blk_mq_alloc_tag_set()中分配，与CPU个数相等。数组成员初值全是0，即0号硬件队列，如果硬件队列只有一个，就因该全是0。
     //如果硬件队列有3个，mq_map[0]、mq_map[1]、mq_map[2]依次是0、1、2，，其他成员还是0，这是CPU个数大于硬件队列个数的情况
 	unsigned int		*mq_map;
@@ -264,6 +266,7 @@ struct blk_mq_ops {
 };
 
 enum {
+    //这里应该表示req成功下发给块设备驱动，但是并不代表req磁盘数据传输完成了
 	BLK_MQ_RQ_QUEUE_OK	= 0,	/* queued fine */
 	BLK_MQ_RQ_QUEUE_BUSY	= 1,	/* requeue IO for later */
 	BLK_MQ_RQ_QUEUE_ERROR	= 2,	/* end IO with error */
@@ -329,9 +332,9 @@ bool blk_mq_can_queue(struct blk_mq_hw_ctx *);
 enum {
     //获取tag失败不休眠，见blk_mq_get_driver_tag
 	BLK_MQ_REQ_NOWAIT	= (1 << 0), /* return when out of requests */
-    //判断tag是否是预留的，blk_mq_get_driver_tag()中设置
+    //判断tag是否是预留的，blk_mq_get_driver_tag()中设置，reserved tag
 	BLK_MQ_REQ_RESERVED	= (1 << 1), /* allocate from reserved pool */
-	//blk_mq_sched_get_request()有调度器设置BLK_MQ_REQ_INTERNAL
+	//blk_mq_sched_get_request()有调度器设置BLK_MQ_REQ_INTERNAL，internal tag
 	BLK_MQ_REQ_INTERNAL	= (1 << 2), /* allocate internal/sched tag */
 	BLK_MQ_REQ_PREEMPT	= (1 << 3), /* set RQF_PREEMPT */
 };

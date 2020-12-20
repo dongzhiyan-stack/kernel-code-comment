@@ -101,8 +101,9 @@ static bool blk_mq_sched_restart_hctx(struct blk_mq_hw_ctx *hctx)
 
 	return blk_mq_run_hw_queue(hctx, true);
 }
-//从硬件队列有关的blk_mq_tags结构体的static_rqs[]数组里得到空闲的request。获取失败则启动硬件IO数据派发，
-//之后再尝试从blk_mq_tags结构体的static_rqs[]数组里得到空闲的request并返回。
+/*从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag，然后req = tags->static_rqs[tag]
+从static_rqs[]分配一个req，再req->tag=tag。接着hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。
+分配失败则启动硬件IO数据派发，之后再尝试分配tag*/
 struct request *blk_mq_sched_get_request(struct request_queue *q,
 					 struct bio *bio,
 					 unsigned int op,
@@ -116,12 +117,12 @@ struct request *blk_mq_sched_get_request(struct request_queue *q,
 	data->q = q;
     
 	if (likely(!data->ctx))
-		data->ctx = blk_mq_get_ctx(q);
+		data->ctx = blk_mq_get_ctx(q);//data->ctx 获取当前进程所属CPU的专有软件队列
 	if (likely(!data->hctx))
-		data->hctx = blk_mq_map_queue(q, data->ctx->cpu);
+		data->hctx = blk_mq_map_queue(q, data->ctx->cpu);//获取软件队列的硬件队列，CPU、软件队列、硬件队列是一一对应关系
 
-	if (e) {//有调度器
-		data->flags |= BLK_MQ_REQ_INTERNAL;//有调度时，设置BLK_MQ_REQ_INTERNAL标志
+	if (e) {//使用调度器
+		data->flags |= BLK_MQ_REQ_INTERNAL;//使用调度时，设置BLK_MQ_REQ_INTERNAL标志
 
 		/*
 		 * Flush requests are special and go directly to the
@@ -132,8 +133,9 @@ struct request *blk_mq_sched_get_request(struct request_queue *q,
 			if (rq)
 				rq->cmd_flags |= REQ_QUEUED;
 		} else
-		    //从硬件队列有关的blk_mq_tags结构体的static_rqs[]数组里得到空闲的request。获取失败则启动硬件IO数据派发，
-            //之后再尝试从blk_mq_tags结构体的static_rqs[]数组里得到空闲的request并返回。
+		/*从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag，然后req = tags->static_rqs[tag]
+        从static_rqs[]分配一个req，再req->tag=tag。接着hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。
+        分配失败则启动硬件IO数据派发，之后再尝试分配tag*/
 			rq = __blk_mq_alloc_request(data, op);
 	} else {//无调度器
 	
@@ -180,8 +182,8 @@ void blk_mq_sched_put_request(struct request *rq)
  * restart queue if .get_budget() returns BLK_STS_NO_RESOURCE.
  */
 //执行deadline算法派发函数，循环从fifo或者红黑树队列选择待派发给传输的req，然后给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，
-//就是建立req与硬件队列的联系吧。然后直接启动nvme硬件传输。如果nvme硬件队列繁忙，则把req转移到hctx->dispatch队列，然后启动nvme异步
-//传输。硬件队列繁忙或者deadline算法队列没有req了则跳出循环。
+//然后把req派发给块设备驱动。如果磁盘驱动硬件繁忙，则把req转移到hctx->dispatch队列，然后启动req异步传输。
+//硬件队列繁忙或者deadline算法队列没有req了则跳出循环。
 static void blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 {
 	struct request_queue *q = hctx->queue;
@@ -262,7 +264,7 @@ static void blk_mq_do_dispatch_ctx(struct blk_mq_hw_ctx *hctx)
 		if (!blk_mq_get_dispatch_budget(hctx))
 			break;
         
-        //从软件ctx->rq_list取出req，然后从软件队列中剔除req。接着清除hctx->ctx_map中软件队列对应的标志位???????
+        //从软件队列ctx->rq_list链表取出req，然后从软件队列中剔除req。接着清除hctx->ctx_map中软件队列对应的标志位???????
 		rq = blk_mq_dequeue_from_ctx(hctx, ctx);
 		if (!rq) {
 			blk_mq_put_dispatch_budget(hctx);
@@ -270,7 +272,7 @@ static void blk_mq_do_dispatch_ctx(struct blk_mq_hw_ctx *hctx)
 		}
     /*这个软件队列上的req的派发，我看着更迷，一次只从软件队列取出一个req，然后给送blk_mq_dispatch_rq_list硬件派发，
       然后就取出硬件队列关联的下一个软件队列，再取出这个软件队列上的req派发??????为什么要这样折腾呀，把一个软件队列上
-      的req全部派发完，再处理下一个软件队列上的req不行吗?循环处理直到所有ctx软件上的所有req都处理完退出循环，硬件队列忙也会退出
+      的req全部派发完，再处理下一个软件队列上的req不行吗?循环处理直到所有ctx软件上的所有req都处理完退出循环，硬件队列忙也会退出。
       我还是觉得有点扯淡，一次处理一个软件队列上的一个req，然后就切换到下一个软件队列，循环，这样做的意义是什么呢?虽说这样也会
       遍历完软件队列上的req??????不对呀，如果nvme硬件队列繁忙，blk_mq_dispatch_rq_list返回false，就退出循环了，这样有可能有的
       软件队列上上的req没有来得及处理呀，就跳出这个循环了?????????????针对这种情况，到底是怎么处理的???????????
@@ -305,7 +307,7 @@ void blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 {
 	struct request_queue *q = hctx->queue;
 	struct elevator_queue *e = q->elevator;
-	const bool has_sched_dispatch = e && e->aux->ops.mq.dispatch_request;//有IO调度算法时是__dd_dispatch_request
+	const bool has_sched_dispatch = e && e->aux->ops.mq.dispatch_request;//有IO调度器是__dd_dispatch_request
 	LIST_HEAD(rq_list);
 
 	/* RCU or SRCU read lock is needed before checking quiesced flag */
@@ -321,7 +323,7 @@ void blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 	//如果hctx->dispatch上有req要派发，
 	if (!list_empty_careful(&hctx->dispatch)) {
 		spin_lock(&hctx->lock);
-        //把hctx->dispatch链表上的req转移到rq_list
+        //把hctx->dispatch链表上的req转移到局部rq_list
 		if (!list_empty(&hctx->dispatch))
 			list_splice_init(&hctx->dispatch, &rq_list);
 		spin_unlock(&hctx->lock);
@@ -340,43 +342,51 @@ void blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 	 * on the dispatch list or we were able to dispatch from the
 	 * dispatch list.
 	 */
-	//如果hctx->dispatch上有req要派发
+	 
+	//如果hctx->dispatch上有req要派发，hctx->dispatch链表上的req已经转移到rq_list
 	if (!list_empty(&rq_list)) {
-        //标记hctx->state的BLK_MQ_S_SCHED_RESTART标志位
+        
+        //这里设置了hctx->state的BLK_MQ_S_SCHED_RESTART标志位
 		blk_mq_sched_mark_restart_hctx(hctx);
 
-        //list来自hctx->dispatch硬件派发队列，遍历list上的req，先给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，就是建立req与
-        //硬件队列的联系吧，然后直接启动nvme硬件传输。看着任一个req要启动硬件传输，都要从blk_mq_tags结构里得到一个空闲的tag。
-        //如果nvme硬件队列繁忙，还要把list剩余的req转移到hctx->dispatch，启动异步传输
+        //rq_list上的req来自hctx->dispatch硬件派发队列，遍历list上的req，先给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，
+        //就是建立req与硬件队列的联系吧，然后把req派发给块设备驱动。看着任一个req要启动硬件传输，都要从blk_mq_tags结构里得到一个空闲
+        //的tag。如果nvme硬件队列繁忙，还要把list剩余的req转移到hctx->dispatch，启动异步传输。下发给块设备驱动的req成功减失败总个数不为0返回true
 		if (blk_mq_dispatch_rq_list(q, &rq_list, false)) {
-			if (has_sched_dispatch)//有调度算法
- //执行deadline算法派发函数，循环从fifo或者红黑树队列选择待派发给传输的req，然后给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，
- //就是建立req与硬件队列的联系吧。然后直接启动nvme硬件传输。如果nvme硬件队列繁忙，则把req转移到hctx->dispatch队列，然后启动nvme异步
- //传输。硬件队列繁忙或者deadline算法队列没有req了则跳出循环。
+
+            //走到这里，说明blk_mq_dispatch_rq_list()中把hctx->dispatch队列上下发给块设备驱动的req成功减失败总个数不为，总之
+            //hctx->dispatch队列上的req有成功下发给块设备驱动
+            
+			if (has_sched_dispatch)//有调度器则接着派发调度器队列上的req
+			
+                //执行deadline算法派发函数，循环从fifo或者红黑树队列选择待派发给传输的req，然后给req在硬件队列hctx的blk_mq_tags里分配
+                //一个空闲tag，就是建立req与硬件队列的联系吧。然后把req派发给块设备驱动。如果nvme硬件队列繁忙，则把req转移到
+                //hctx->dispatch队列，然后启动nvme异步传输。硬件队列繁忙或者deadline算法队列没有req了则跳出循环。
 				blk_mq_do_dispatch_sched(hctx);
-			else//无调度算法
-  //依次循环遍历hctx硬件队列关联的所有软件队列，依次取出一个软件队列ctx->rq_list上的req加入rq_list局部链表，执行blk_mq_dispatch_rq_list()硬件派发req。
-  //如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输。循环退出条件是，nvme硬件队列繁忙
-  //或者hctx硬件队列关联的所有软件队列上的req全都派发完。有个疑问，如果是nvme硬件队列繁忙，那有可能有些软件队列上的req还没来得及派发呀?????????????
+            
+			else//无调度器派发软件队列上的req
+                //依次循环遍历hctx硬件队列关联的所有软件队列，依次取出一个软件队列ctx->rq_list上的req加入rq_list局部链表，执行
+                //blk_mq_dispatch_rq_list()硬件派发req。如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后
+                //启动nvme异步传输。循环退出条件是，nvme硬件队列繁忙或者hctx硬件队列关联的所有软件队列上的req全都派发完。
+                /*有个疑问，如果是nvme硬件队列繁忙，那有可能有些软件队列上的req还没来得及派发呀????????????????*/
 				blk_mq_do_dispatch_ctx(hctx);
 		}
 	}
-    //如果hctx->dispatch上没有req要派发,但是有调度算法
-    else if (has_sched_dispatch) {
-    //与上边一样，执行blk_mq_do_dispatch_sched(),执行deadline算法派发函数，循环从fifo或者红黑树队列选择待派发给传输的req去派发
+    else if (has_sched_dispatch) {//如果hctx->dispatch上没有req要派发,但是有调度器，并且调度器有注册了dispatch_request函数
+         //与上边一样，执行blk_mq_do_dispatch_sched(),执行deadline算法派发函数，循环从fifo或者红黑树队列选择待派发给传输的req去派发
 		blk_mq_do_dispatch_sched(hctx);
-    //硬件队列繁忙
-	} else if (hctx->dispatch_busy) {
+    
+	} else if (hctx->dispatch_busy) {//如果hctx->dispatch链表上没有req派发，并且硬件队列繁忙
 		/* dequeue request one by one from sw queue if queue is busy */
-    //与上边一样，依次循环遍历hctx硬件队列关联的所有软件队列，取出一个软件队列上的req去派发
+        //与上边一样，依次循环遍历hctx硬件队列关联的所有软件队列，取出一个软件队列上的req去派发
 		blk_mq_do_dispatch_ctx(hctx);
 	} else {
-	  //把硬件队列hctx关联的软件队列上的ctx->rq_list链表上req转移到传入的rq_list链表尾部，然后清空ctx->rq_list链表。
-      //这样貌似是把硬件队列hctx关联的所有软件队列ctx->rq_list链表上的req全部移动到rq_list链表尾部呀
+	    //把硬件队列hctx关联的软件队列上的ctx->rq_list链表上req转移到传入的rq_list链表尾部，然后清空ctx->rq_list链表。
+        //这样貌似是把硬件队列hctx关联的所有软件队列ctx->rq_list链表上的req全部移动到局部rq_list链表尾部呀
 		blk_mq_flush_busy_ctxs(hctx, &rq_list);
-      //遍历rq_list上的req，先给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，就是
-      //建立req与硬件队列的联系吧，然后直接启动nvme硬件传输。看着任一个req要启动硬件传输，都要从blk_mq_tags结构里得到一个空闲的tag。
-      //如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输
+        //遍历rq_list上的req，先给req在硬件队列hctx的blk_mq_tags里分配一个空闲tag，就是
+        //建立req与硬件队列的联系吧，然后将req派发给块设备驱动。看着任一个req要启动硬件传输，都要从blk_mq_tags结构里得到一个空闲的tag。
+        //如果nvme硬件队列繁忙，还要把rq_list剩余的req转移到hctx->dispatch队列，然后启动nvme异步传输
 		blk_mq_dispatch_rq_list(q, &rq_list, false);
 	}
 }
@@ -549,7 +559,7 @@ done:
 }
 
 void blk_mq_sched_insert_request(struct request *rq, bool at_head,
-				 bool run_queue, bool async)
+				 bool run_queue, bool async)//blk_mq_make_request()中调用该函数将req插入IO调度队列时，run_queue和async都是true
 {
 	struct request_queue *q = rq->q;
 	struct elevator_queue *e = q->elevator;
@@ -567,24 +577,30 @@ void blk_mq_sched_insert_request(struct request *rq, bool at_head,
 	if (blk_mq_sched_bypass_insert(hctx, !!e, rq))
 		goto run;
 
-	if (e && e->aux->ops.mq.insert_requests) {
+	if (e && e->aux->ops.mq.insert_requests) {//使用调度器并且定义了insert_requests函数，mq-deadline算法时dd_insert_requests()
 		LIST_HEAD(list);
 
 		list_add(&rq->queuelist, &list);
-		e->aux->ops.mq.insert_requests(hctx, &list, at_head);
-	} else {
+		e->aux->ops.mq.insert_requests(hctx, &list, at_head);//dd_insert_requests()，把req插入IO算法队列
+		
+	} else {//如果调度算法没有定义insert_requests，一般不会成立吧
 		spin_lock(&ctx->lock);
+        //把req插入到软件队列ctx->rq_list链表,对应的硬件队列hctx->ctx_map里的bit位被置1，表示激活
 		__blk_mq_insert_request(hctx, rq, at_head);
 		spin_unlock(&ctx->lock);
 	}
 
 run:
 	if (run_queue)
-		blk_mq_run_hw_queue(hctx, async);
+		blk_mq_run_hw_queue(hctx, async);//启动硬件队列上的req派发到块设备驱动
 }
-//如果有IO调度算法，则把plug->mq_list链表上的req插入elv的hash队列，mq-deadline算法的还要插入红黑树和fifo队列。如果没有IO调度算法，在硬件队列
-//空闲时，尝试把plug->mq_list链表的上的req建立与硬件队列hctx的联系，还会把req插入到硬件队列hctx->dispatch队列，执行blk_mq_run_hw_queue
-//间接启动req硬件派发。如果硬件队列容纳的req达到上限，硬件队列变忙，则把剩余的plug->mq_list链表的上的req插入到软件队列ctx->rq_list链表上。
+
+
+//如果有IO调度算法，则把list(来自plug->mq_list或者其他)链表上的req插入elv的hash队列，mq-deadline算法的还要插入红黑树和fifo队列。
+//如果没有IO调度算法，取出plug->mq_list链表的上的req，从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags
+//分配一个空闲tag赋于req->tag，然后调用磁盘驱动queue_rq接口函数把req派发给驱动。如果遇到磁盘驱动硬件忙，则设置硬件队列忙，
+//还释放req的tag，然后把这个失败派送的req插入hctx->dispatch链表,如果此时list链表空则同步派发。最后把把list(来自plug->mq_list或者其他)
+//链表的上剩余的req插入到软件队列ctx->rq_list链表上，然后执行blk_mq_run_hw_queue()再进行req派发。
 void blk_mq_sched_insert_requests(struct request_queue *q,
 				  struct blk_mq_ctx *ctx,
 				  struct list_head *list, bool run_queue_async)//list临时保存了当前进程plug->mq_list链表上的部分req
@@ -598,29 +614,31 @@ void blk_mq_sched_insert_requests(struct request_queue *q,
         //设置req在fifo队列的超时时间。还插入elv调度算法的hash队列。注意，hash队列不是deadline调度算法独有的。
 		e->aux->ops.mq.insert_requests(hctx, list, false);//mq-deadline调度算法的走这里dd_insert_requests
 
-	else {//NONE没有调度算法的走这里
+	else {//没用IO调度器的走这里
 		/*
 		 * try to issue requests directly if the hw queue isn't
 		 * busy in case of 'none' scheduler, and this way may save
 		 * us one extra enqueue & dequeue to sw queue.
 		 */
-		//硬件队列不能忙，没有IO调度算法，不能异步处理，if才成立。尤其是硬件队列繁忙时，就执行下边的代码:list上的req插入到软件队列
+		//硬件队列不能忙，没用IO调度器，不能异步处理，if才成立。否则，就执行下边的代码:再把list上的req插入到软件队列
 		if (!hctx->dispatch_busy && !e && !run_queue_async) {
-        //依次遍历当前进程plug->mq_list链表上的req，建立req和硬件队列hctx的联系，还会启动nvme硬件传输，req传输完成则统计IO使用率等数据
-        //队列忙的话，则把req添加到硬件队列hctx->dispatch队列，执行blk_mq_run_hw_queue间接启动req硬件派发
+//依次遍历当前进程list(来自plug->mq_list链表或者其他)链表上的req，从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags
+//分配一个空闲tag赋于rq->tag，调用磁盘驱动queue_rq接口函数把req派发给驱动。如果遇到磁盘驱动硬件忙，则设置硬件队列忙，还释放req的tag，
+//然后把这个派送失败的req插入hctx->dispatch链表，如果此时list链表空则同步派发。如果遇到req传输完成则执行blk_mq_end_request()统计IO使用率等数据并唤醒进程
 			blk_mq_try_issue_list_directly(hctx, list);
-            //list临时保存了当前进程plug->mq_list链表上的req，如果list空，应该说明所有的req都派发硬件队列，然后硬件把这些req都传输完成了吧?????
+            //list临时保存了当前进程plug->mq_list链表上的req，如果list空，应该说明所有的req都派发磁盘驱动了，直接返回收工
 			if (list_empty(list))
 				return;
 		}
+        
         //到这里，说明list链表上还有剩余的req没有派发硬件队列传输。这是要把硬件队列没有处理的req插入软件队列呀!
         
-        //把list链表的成员插入到到ctx->rq_list链表后边，然后对list清0，这个list链表源自当前进程的plug链表。每一个req在分配时，
+        //把list链表上的所有req插入到到软件队列ctx->rq_list链表，然后对list清0，这个list链表源自当前进程的plug链表。每一个req在分配时，
         //req->mq_ctx会指向当前CPU的软件队列，但是真正把req插入到软件队列，看着得执行blk_mq_insert_requests才行呀
 		blk_mq_insert_requests(hctx, ctx, list);
 	}
     
-    //启动硬件IO数据派发，又一个重点函数
+    //再次启动硬件IO数据派发，又一个重点函数，run_queue_async可以指定异步派发
 	blk_mq_run_hw_queue(hctx, run_queue_async);
 }
 
@@ -634,7 +652,8 @@ static void blk_mq_sched_free_tags(struct blk_mq_tag_set *set,
 		hctx->sched_tags = NULL;
 	}
 }
-//为硬件队列结构hctx->sched_tags分配blk_mq_tags，一个硬件队列一个blk_mq_tags，然后根据为这个blk_mq_tags分配q->nr_requests个request，存于tags->static_rqs[]
+//为硬件队列结构hctx->sched_tags分配blk_mq_tags，一个硬件队列一个blk_mq_tags，然后根据为这个blk_mq_tags分配q->nr_requests个request，
+//存于tags->static_rqs[]。这是为调度算法tags分配的request。
 static int blk_mq_sched_alloc_tags(struct request_queue *q,
 				   struct blk_mq_hw_ctx *hctx,
 				   unsigned int hctx_idx)
@@ -647,8 +666,9 @@ static int blk_mq_sched_alloc_tags(struct request_queue *q,
 	if (!hctx->sched_tags)
 		return -ENOMEM;
 
-//针对hctx_idx编号的硬件队列，每一层队列深度都分配request(共分配q->nr_requests个request)赋值于tags->static_rqs[]。具体是分配N个page，将page的内存一片片分割成request集合大小
-//然后tags->static_rqs记录每一个request首地址，然后执行nvme_init_request()底层驱动初始化函数,建立request与nvme队列的关系吧
+//针对hctx_idx编号的硬件队列，每一层队列深度都分配request(共分配q->nr_requests个request)赋值于tags->static_rqs[]。
+//具体是分配N个page，将page的内存一片片分割成request集合大小。然后tags->static_rqs记录每一个request首地址，
+//接着执行nvme_init_request()底层驱动初始化函数,建立request与nvme队列的关系吧
 	ret = blk_mq_alloc_rqs(set, hctx->sched_tags, hctx_idx, q->nr_requests);
 	if (ret)
 		blk_mq_sched_free_tags(set, hctx, hctx_idx);
@@ -674,7 +694,8 @@ int blk_mq_sched_init_hctx(struct request_queue *q, struct blk_mq_hw_ctx *hctx,
 
 	if (!e)
 		return 0;
-    //为硬件队列结构hctx->sched_tags分配blk_mq_tags，一个硬件队列一个blk_mq_tags，然后根据为这个blk_mq_tags分配q->nr_requests个request，存于tags->static_rqs[]
+    //为硬件队列结构hctx->sched_tags分配blk_mq_tags，一个硬件队列一个blk_mq_tags，然后根据为这个blk_mq_tags分配q->nr_requests
+    //个request，存于tags->static_rqs[]
 	ret = blk_mq_sched_alloc_tags(q, hctx, hctx_idx);
 	if (ret)
 		return ret;

@@ -295,6 +295,7 @@ static void flush_data_end_io(struct request *rq, int error)
  * CONTEXT:
  * spin_lock_irq(q->queue_lock)
  */
+//把req插入flush队列
 void blk_insert_flush(struct request *rq)
 {
 	struct request_queue *q = rq->q;

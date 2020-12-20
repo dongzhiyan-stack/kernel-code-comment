@@ -99,7 +99,7 @@ enum rq_cmd_type_bits {
 /*
  * try to put the fields that are referenced together in the same cacheline.
  * if you modify this structure, be sure to check block/blk-core.c:blk_rq_init()
- * as well!
+ * as well! //struct bio
  */
 //一个bio代表一个IO请求，要读写一片连续的磁盘空间，比如读写磁盘地址0~8K。一个bio_vec代表一个page页内存，一个bio可能对应多个bio_vec
 //当bio的对应磁盘范围是8K，那它对应两个bio_vec。一个req可以合并多个IO请求即bio，这些bio的磁盘空间范围可以连成一片。
@@ -128,7 +128,7 @@ struct request {
 	struct blk_mq_ctx *mq_ctx;//req的软件队列，blk_mq_rq_ctx_init中赋值,req在分配后就会初始化指向当前CPU的软件队列
     struct blk_mq_hw_ctx *mq_hctx;//rq的硬件队列
         
-	u64 cmd_flags;
+	u64 cmd_flags;//__blk_mq_alloc_request和blk_mq_get_driver_tag 中置REQ_MQ_INFLIGHT
 	enum rq_cmd_type_bits cmd_type;
     //0，req传输完成   1:req开始传输状态
 	unsigned long atomic_flags;
@@ -139,7 +139,7 @@ struct request {
     //req代表的磁盘空间大小,blk_rq_bio_prep中赋值rq->__data_len = bio->bi_size
 	unsigned int __data_len;	/* total data len */
     //req代表的磁盘范围起始扇区
-	sector_t __sector;		/* sector cursor *///struct bio
+	sector_t __sector;		/* sector cursor */
 
     //req上的第一个bio吧，一个req可能合并了多个bio，bio的bi_next链表挂着其他bio。如果第一个bio传输完，会指向下一个bio,
     //见blk_update_request和blk_rq_bio_prep。blk_update_request()函数对req对应的磁盘数据不能一次全部传输完，分多个bio传输，做了详细解释。
@@ -198,7 +198,7 @@ struct request {
 	
 	//blk_start_request->blk_dequeue_request->set_io_start_time_ns 设置req启动传输时间
 	//blk_account_io_done中使用jiffies - req->start_time，相减计算每个req的传输耗时
-	unsigned long start_time;
+	unsigned long start_time;//blk_queue_bio->get_request->__get_request->blk_rq_init更新为当前jiffies
 #ifdef CONFIG_BLK_CGROUP
 	struct request_list *rl;		/* rl this rq is alloced from */
 	unsigned long long start_time_ns;
@@ -219,8 +219,8 @@ struct request {
 	char *buffer;		/* kaddr of the current segment if available */
 
     //__blk_mq_alloc_request()中赋值为空闲req在blk_mq_tags结构体的static_rqs[]数组的下标。或者说tag编号，req在blk_mq_tags中获取的tag
-    //的tag编号，
-	int tag;
+    //的tag编号。有调度器时，在分配到tag和req后，竟然tag=-1，这是为啥? 见__blk_mq_alloc_request()
+	int tag;//在__blk_mq_put_driver_tag()释放tag时也是置-1.
 	int errors;
 
 	/*
@@ -232,11 +232,13 @@ struct request {
 
 	unsigned int extra_len;	/* length of alignment and padding */
 	unsigned int sense_len;
+    //blk_start_request()中赋值
 	unsigned int resid_len;	/* residual count */
 	void *sense;
-
+    //blk_start_request->blk_add_timer() 中更新
 	unsigned long deadline;
-	struct list_head timeout_list;//blk_add_timer中把req添加到q->timeout_list链表
+	struct list_head timeout_list;//blk_start_request->blk_add_timer中把req添加到q->timeout_list链表
+	//blk_start_request->blk_add_timer() 中赋值
 	unsigned int timeout;
 	int retries;
 
@@ -410,12 +412,12 @@ struct request_queue {
 
 	RH_KABI_CONST struct blk_mq_ops *mq_ops;//跟硬件有关的操作函数，指向 nvme_mq_ops
     //这个数组保存了每个CPU对应的硬件队列编号，blk_mq_init_allocated_queue()被赋值为struct blk_mq_tag_set *set->mq_map
-    //数组下标是CPU编号
+    //该数组下标是CPU的编号，数组成员是硬件队列的编号
 	unsigned int		*mq_map;
 
    
 	/* sw queues */
-	//RH_KABI_REPLACE(struct blk_mq_ctx	*queue_ctx,-------------原生有RH_KABI_REPLACE，影响代码阅读，取出掉
+	//RH_KABI_REPLACE(struct blk_mq_ctx	*queue_ctx,-------------原生有RH_KABI_REPLACE，影响代码阅读，去除掉
 	//软件队列，每个cpu一个，blk_mq_init_queue中分配blk_mq_ctx
 	struct blk_mq_ctx __percpu	*queue_ctx;
     //队列个数，blk_mq_init_allocated_queue()中设置为CPU个数
@@ -491,7 +493,8 @@ struct request_queue {
 	 * queue settings
 	 */
 	//最多的rq请求数,不是当前的rq数，硬件队列有关的，blk_mq_sched_alloc_tags()中用到的。blk_mq_init_allocated_queue被设置为硬件队列深度。
-	unsigned long		nr_requests;	/* Max # of requests */
+    //一个硬件队列支持的最多req个数
+    unsigned long		nr_requests;	/* Max # of requests */
 	unsigned int		nr_congestion_on;
 	unsigned int		nr_congestion_off;
 	unsigned int		nr_batching;
@@ -502,6 +505,7 @@ struct request_queue {
 	unsigned int		dma_alignment;
 
 	struct blk_queue_tag	*queue_tags;
+    //blk_queue_start_tag()中把req插入该链表
 	struct list_head	tag_busy_list;
     //队列插入新的一个req加1，__elv_add_request(),elv_dispatch_add_tail()减1,blk_dequeue_request()中加1
 	unsigned int		nr_sorted;
@@ -516,6 +520,7 @@ struct request_queue {
 	unsigned int		rq_timeout;
     //blk_start_request->blk_add_timer()启动request_queue->timeout定时器
 	struct timer_list	timeout;//mmc的定时器函数是blk_rq_timed_out_timer(),blk_alloc_queue_node中赋值
+	//blk_start_request->blk_add_timer() 中把req插入该链表
 	struct list_head	timeout_list;
 
 	struct list_head	icq_list;
@@ -590,7 +595,7 @@ struct request_queue {
 	//RH_KABI_EXTEND(struct work_struct	timeout_work)
 	struct work_struct	timeout_work;
 	//RH_KABI_EXTEND(struct delayed_work	requeue_work)
-	struct delayed_work	requeue_work;
+	struct delayed_work	requeue_work;//blk_mq_init_allocated_queue()中work函数赋值为blk_mq_requeue_work
 	RH_KABI_EXTEND(struct blk_queue_stats	*stats)
 	//blk_mq_init_allocated_queue()中初始化
 	//RH_KABI_EXTEND(struct blk_stat_callback	*poll_cb)
@@ -740,6 +745,7 @@ static inline void queue_flag_clear(unsigned int flag, struct request_queue *q)
 #define blk_queue_dead(q)	test_bit(QUEUE_FLAG_DEAD, &(q)->queue_flags)
 #define blk_queue_bypass(q)	test_bit(QUEUE_FLAG_BYPASS, &(q)->queue_flags)
 #define blk_queue_init_done(q)	test_bit(QUEUE_FLAG_INIT_DONE, &(q)->queue_flags)
+//blk_queue_nomerges是判断设备队列是否支持IO合并，或者说是否禁止IO合并
 #define blk_queue_nomerges(q)	test_bit(QUEUE_FLAG_NOMERGES, &(q)->queue_flags)
 #define blk_queue_noxmerges(q)	\
 	test_bit(QUEUE_FLAG_NOXMERGES, &(q)->queue_flags)
@@ -1270,7 +1276,7 @@ static inline void blk_post_runtime_resume(struct request_queue *q, int err) {}
  */
 struct blk_plug {
 	unsigned long magic; /* detect uninitialized use-cases */
-    //单通道时代，每个进程独有的blk_plug，每个进程的bio就是先添加到blk_plug链表上,blk_flush_plug_list()会对该链表上的req排序
+    //单队列时代，每个进程独有的blk_plug，每个进程的bio就是先添加到blk_plug链表上,blk_flush_plug_list()会对该链表上的req排序
 	struct list_head list; /* requests */
     //mq多队列时代，新分配的req添加到plug->mq_list链表上，看blk_mq_make_request()
 	struct list_head mq_list; /* blk-mq requests */

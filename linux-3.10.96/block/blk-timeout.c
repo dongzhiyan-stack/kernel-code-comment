@@ -164,6 +164,7 @@ EXPORT_SYMBOL_GPL(blk_abort_request);
  *    Each request has its own timer, and as it is added to the queue, we
  *    set up the timer. When the request completes, we cancel the timer.
  */
+//req->timeout和req->deadline赋值，把req插入q->timeout_list链表，启动request_queue->timeout定时器
 void blk_add_timer(struct request *req)
 {
 	struct request_queue *q = req->q;
@@ -178,10 +179,12 @@ void blk_add_timer(struct request *req)
 	 * Some LLDs, like scsi, peek at the timeout to prevent a
 	 * command from being retried forever.
 	 */
+	//req->timeout
 	if (!req->timeout)
 		req->timeout = q->rq_timeout;
-
+    //更新超时时间
 	req->deadline = jiffies + req->timeout;
+    //把req插入q->timeout_list链表
 	list_add_tail(&req->timeout_list, &q->timeout_list);
 
 	/*

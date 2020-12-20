@@ -11,17 +11,21 @@ struct blk_mq_tag_set;
 //描述软件队列，每个CPU一个
 struct blk_mq_ctx {
 	//struct {----影响代码阅读，先注释掉
-		spinlock_t		lock;
+		spinlock_t		lock;//软件队列锁，每个CPU独有，多进程读写文件，避免多核竞争锁
+		
  //blk_mq_make_request->blk_mq_merge_bio->blk_mq_attempt_merge，就是依次遍历软件队列ctx->rq_list链表上的req，然后看req能否与bio前项或者后项合并
  //blk_mq_sched_insert_requests->blk_mq_insert_requests把当前进程的plug链表上的req插入到软件队列rq_list上，这些req貌似是
  //硬件队列没有来得及处理的入req，难道软件队列就是接盘硬件队列剩下的呀
         struct list_head	rq_list;//软件队列存放req的链表
 	//}  ____cacheline_aligned_in_smp;
 
-	unsigned int		cpu;//对应的CPU编号，根据这个CPU编号去寻找硬件队列结构体，看blk_mq_make_request->blk_mq_sched_bio_merge->__blk_mq_sched_bio_merge->blk_mq_map_queue
+    //软件队列对应的CPU编号，根据这个CPU编号去寻找硬件队列结构体，看blk_mq_make_request->blk_mq_sched_bio_merge->__blk_mq_sched_bio_merge->blk_mq_map_queue
+    //blk_mq_init_cpu_queues也有赋值
+    unsigned int		cpu;
 
-    //硬件队列关联的第几个软件队列。硬件队列每关联一个软件队列，都hctx->ctxs[hctx->nr_ctx++] = ctx把软件队列结构保存到
-    //hctx->ctxs[hctx->nr_ctx++]，即硬件队列结构的hctx->ctxs[]数组，而index_hw会先保存hctx->nr_ctx。
+    //硬件队列关联的第几个软件队列。硬件队列每关联一个软件队列，先index_hw = hctx->nr_ctx，然后hctx->ctxs[hctx->nr_ctx++] = ctx
+    //把软件队列结构保存到hctx->ctxs[hctx->nr_ctx++]，hctx->ctxs[]是硬件队列保存软件队列结构的指针数组。index_hw表示软件队列结构在
+    //硬件队列hctx->ctxs[]数组的保存位置。一个硬件队列可能对应多个软件队列，故hctx->ctxs[]可能保存多个软件队列结构，最多CPU个数那样。
     unsigned int		index_hw;//blk_mq_map_swqueue()中赋值
 
 	RH_KABI_DEPRECATE(unsigned int, ipi_redirect)
@@ -33,7 +37,7 @@ struct blk_mq_ctx {
 	/* incremented at completion time */
 	unsigned long		____cacheline_aligned_in_smp rq_completed[2];
 
-	struct request_queue	*queue;//磁盘硬件唯一的队列
+	struct request_queue	*queue;//磁盘硬件唯一的队列，blk_mq_init_cpu_queues中赋值
 	struct kobject		kobj;
 } ____cacheline_aligned_in_smp;
 
@@ -95,6 +99,7 @@ extern int blk_mq_hw_queue_to_node(unsigned int *map, unsigned int);
 //根据CPU编号先从q->mq_map[cpu]找到硬件队列编号，再q->queue_hw_ctx[硬件队列编号]返回硬件队列唯一的blk_mq_hw_ctx结构体
 //如果硬件队列只有一个，那总是返回0号硬件队列的blk_mq_hw_ctx。每个CPU都有唯一对应的硬件队列，这在初始化时就已经确定了，
 //看blk_mq_update_queue_map()是怎么分配CPU的硬件队列的
+/*核心是根据软件队列所属的CPU编号，取出该CPU对应的硬件队列编号，最后从q->queue_hw_ctx[硬件队列编号]取出硬件队列结构*/
 static inline struct blk_mq_hw_ctx *blk_mq_map_queue(struct request_queue *q,
 		int cpu)
 {
@@ -141,7 +146,7 @@ static inline void blk_mq_put_ctx(struct blk_mq_ctx *ctx)
 struct blk_mq_alloc_data {
 	/* input parameter */
 	struct request_queue *q;
-	unsigned int flags;//blk_mq_sched_get_request()有调度器设置BLK_MQ_REQ_INTERNAL
+	unsigned int flags;//blk_mq_sched_get_request()有调度器设置BLK_MQ_REQ_INTERNAL，blk_mq_get_driver_tag中设置BLK_MQ_REQ_RESERVED
 	unsigned int shallow_depth;
 
 	/* input & output parameter */
@@ -201,6 +206,7 @@ static inline void __blk_mq_put_driver_tag(struct blk_mq_hw_ctx *hctx,
 {
     //tags->bitmap_tags中按照req->tag这个tag编号释放tag
 	blk_mq_put_tag(hctx, hctx->tags, rq->mq_ctx, rq->tag);
+    //rq->tag置-1
 	rq->tag = -1;
 
 	if (rq->cmd_flags & REQ_MQ_INFLIGHT) {
@@ -226,6 +232,7 @@ static inline void blk_mq_put_driver_tag(struct request *rq)
 		return;
     //根据cpu编号找到硬件队列
 	hctx = blk_mq_map_queue(rq->q, rq->mq_ctx->cpu);
+    //tags->bitmap_tags中按照req->tag这个tag编号释放tag
 	__blk_mq_put_driver_tag(hctx, rq);
 }
 

@@ -421,8 +421,8 @@ static bool dd_bio_merge(struct blk_mq_hw_ctx *hctx, struct bio *bio)
 /*
  * add rq to rbtree and fifo
  */
-//尝试将req合并到q->last_merg或者调度算法的hash队列的临近req。合并不了的话，把req插入到deadline调度算法的红黑树和fifo队列，
-//设置req在fifo队列的超时时间。还插入elv调度算法的hash队列。注意，hash队列不是deadline调度算法独有的。
+//尝试将req合并到q->last_merg或者调度算法的hash队列的临近req。合并不了的话，把req插入到deadline调度算法的红黑树和fifo队列，设置req在fifo
+//队列的超时时间。还插入elv调度算法的hash队列。注意，hash队列不是deadline调度算法独有的。hash队列和fifo队列到底是不是一回事???????
 static void dd_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 			      bool at_head)//at_head:false
 {

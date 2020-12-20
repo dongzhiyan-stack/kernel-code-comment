@@ -1831,6 +1831,7 @@ bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
 	list_for_each_entry_reverse(rq, plug_list, queuelist) {
 		int el_ret;
 
+        //如果是同一个块设备的req，则*same_queue_rq = rq赋予req，这个可能会多次赋值，*same_queue_rq指向最后一次赋值的req
 		if (rq->q == q) {
 			(*request_count)++;
 			/*
@@ -2611,7 +2612,7 @@ void blk_account_io_start(struct request *rq, bool new_io)
 			part = &rq->rq_disk->part0;
 			hd_struct_get(part);
 		}
-        //这里统计IO使用率等数据，util就是在这里
+        //这里统计IO使用率等数据，IO使用率util的计算就是在这里
 		part_round_stats(rq->q, cpu, part);
         //增加req计数，又有一个新的req加入队列
 		part_inc_in_flight(rq->q, part, rw);
@@ -3441,6 +3442,7 @@ void blk_start_plug(struct blk_plug *plug)
 
 	plug->magic = PLUG_MAGIC;
 	INIT_LIST_HEAD(&plug->list);
+    //mq多通道时代
 	INIT_LIST_HEAD(&plug->mq_list);
 	INIT_LIST_HEAD(&plug->cb_list);
 

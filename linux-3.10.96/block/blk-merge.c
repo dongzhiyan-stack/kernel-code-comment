@@ -392,6 +392,7 @@ void blk_rq_set_mixed_merge(struct request *rq)
 	rq->cmd_flags |= REQ_MIXED_MERGE;
 }
 //next合并打了req，没用了，这个next从in flight队列剔除掉，顺便执行part_round_stats更新io_ticks IO使用率计数
+//???????????????为什么不增加IO统计数据的merge这个IO合并数呢?
 static void blk_account_io_merge(struct request *req)
 {
 	if (blk_do_io_stat(req)) {

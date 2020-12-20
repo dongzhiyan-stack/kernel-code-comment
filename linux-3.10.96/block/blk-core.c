@@ -1004,6 +1004,7 @@ static struct request *__get_request(struct request_list *rl, int rw_flags,
 	if (!rq)
 		goto fail_alloc;
 
+    //ÕâÀïÉèÖÃreq->start_timeÎªjiffies
 	blk_rq_init(q, rq);
 	blk_rq_set_rl(rq, rl);
 	rq->cmd_flags = rw_flags | REQ_ALLOCED;
@@ -1104,7 +1105,7 @@ static struct request *get_request(struct request_queue *q, int rw_flags,
 
 	rl = blk_get_rl(q, bio);	/* transferred to @rq on success */
 retry:
-    //·ÖÅärq
+    //·ÖÅärq£¬ÕâÀïÉèÖÃreq->start_timeÎªjiffies
 	rq = __get_request(rl, rw_flags, bio, gfp_mask);
 	if (rq)
 		return rq;
@@ -1256,6 +1257,7 @@ static void part_round_stats_single(int cpu, struct hd_struct *part,
 
     //in_flight ²»Îª0£¬ËµÃ÷in flight¶ÓÁĞÓĞreq
 	if (part_in_flight(part)) {
+        //time_in_queueÏÔÈ»ÓëIO¶ÓÁĞÖĞµÄ×ÜIOÊıÔÚIO¶ÓÁĞÖĞµÄÊ±¼äÓĞ¹Ø
 		__part_stat_add(cpu, part, time_in_queue,
 				part_in_flight(part) * (now - part->stamp));
 		__part_stat_add(cpu, part, io_ticks, (now - part->stamp));
@@ -1591,7 +1593,7 @@ get_rq:
 	 * Grab a free request. This is might sleep but can not fail.
 	 * Returns with the queue unlocked.
 	 */
-	//µÃµ½Ò»¸öĞÂµÄrq£¬Àï±ßÓĞ¿ÉÄÜĞİÃß
+	//µÃµ½Ò»¸öĞÂµÄrq£¬Àï±ßÓĞ¿ÉÄÜĞİÃß,ÕâÀïÉèÖÃreq->start_timeÎªjiffies
 	req = get_request(q, rw_flags, bio, GFP_NOIO);
 	if (unlikely(!req)) {
 		bio_endio(bio, -ENODEV);	/* @q is dead */
@@ -2136,13 +2138,13 @@ static void blk_account_io_done(struct request *req)
 
 		cpu = part_stat_lock();
 		part = req->part;
-        //Ôö¼Óios¼ÆÊı
+        //Ôö¼Óµ±Ç°¿éÉè±¸·ÖÇøºÍÖ÷·ÖÇøµÄios¼ÆÊı
 		part_stat_inc(cpu, part, ios[rw]);
-        //Ôö¼Óticks¼ÆÊı
+        //Ôö¼Óµ±Ç°¿éÉè±¸·ÖÇøºÍÖ÷·ÖÇøµÄticks¼ÆÊı
 		part_stat_add(cpu, part, ticks[rw], duration);
         //¸üĞÂÖ÷¿éÉè±¸ºÍ¿éÉè±¸·ÖÇøµÄtime_in_queueºÍio_ticksÊı¾İ
 		part_round_stats(cpu, part);
-        //ÓĞÒ»¸öreq´Ó¶ÓÁĞÖĞÒÆ³ıÁË£¬¼õ1£¬¼õÉÙreq¼ÆÊı
+        //µ±Ç°¿éÉè±¸·ÖÇøºÍÖ÷·ÖÇøµÄIO¶ÓÁĞÊı¼û1
 		part_dec_in_flight(part, rw);
 
 		hd_struct_put(part);
@@ -2325,8 +2327,9 @@ void blk_dequeue_request(struct request *rq)
  * Context:
  *     queue_lock must be held.
  */
-void blk_start_request(struct request *req)//Æô¶¯µ×²ãÓ²¼ş´«Êä
+void blk_start_request(struct request *req)//±íÊ¾ÒªÆô¶¯µ×²ãÓ²¼ş´«ÊäÁË
 {
+    //°Ñreq´Ó¶ÓÁĞÌŞ³ı
 	blk_dequeue_request(req);
 
 	/*
@@ -2338,7 +2341,8 @@ void blk_start_request(struct request *req)//Æô¶¯µ×²ãÓ²¼ş´«Êä
 		req->next_rq->resid_len = blk_rq_bytes(req->next_rq);
 
 	BUG_ON(test_bit(REQ_ATOM_COMPLETE, &req->atomic_flags));
-	blk_add_timer(req);//Æô¶¯request_queue->timeout¶¨Ê±Æ÷
+    //req->timeoutºÍreq->deadline¸³Öµ£¬°Ñreq²åÈëq->timeout_listÁ´±í£¬Æô¶¯request_queue->timeout¶¨Ê±Æ÷
+	blk_add_timer(req);
 }
 EXPORT_SYMBOL(blk_start_request);
 
@@ -2520,6 +2524,7 @@ static bool blk_update_bidi_request(struct request *rq, int error,
 				    unsigned int nr_bytes,
 				    unsigned int bidi_bytes)
 {
+    //Èç¹ûreqÉÏµÄbioÈ«²¿´«ÊäÍê³É£¬·µ»Øfalse¡£·ñÔò»¹ÓĞbioÒª´«Êä£¬·µ»Øtrue
 	if (blk_update_request(rq, error, nr_bytes))
 		return true;
 
@@ -2608,10 +2613,12 @@ static bool blk_end_bidi_request(struct request *rq, int error,
 	struct request_queue *q = rq->q;
 	unsigned long flags;
 
+    //Èç¹ûreqÉÏµÄbioÈ«²¿´«ÊäÍê³É£¬·µ»Øfalse¡£·ñÔò»¹ÓĞbioÒª´«Êä£¬·µ»Øtrue
 	if (blk_update_bidi_request(rq, error, nr_bytes, bidi_bytes))
 		return true;
 
 	spin_lock_irqsave(q->queue_lock, flags);
+    //reqÉÏµÄbioÈ«²¿´«ÊäÍê³É,²Å»áÖ´ĞĞµ½ÕâÀï
 	blk_finish_request(rq, error);
 	spin_unlock_irqrestore(q->queue_lock, flags);
 
@@ -3096,8 +3103,8 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)//from_schedu
 	flush_plug_callbacks(plug, from_schedule);
 
     
-/*È¡³öµ±Ç°½ø³Ìplug->mq_listÁ´±íÉÏµÄreq£¬Èç¹ûÓĞIOµ÷¶ÈËã·¨£¬Ôò°Ñreq²åÈëelvµÄhash¶ÓÁĞ£¬
-mq-deadlineËã·¨µÄ»¹Òª²åÈëºìºÚÊ÷ºÍfifo¶ÓÁĞ¡£Èç¹ûÃ»ÓĞIOµ÷¶ÈËã·¨£¬ÔÚÓ²¼ş¶ÓÁĞ¿ÕÏĞÊ±£¬³¢ÊÔ°Ñplug->mq_listÁ´±íµÄÉÏµÄreq½¨Á¢Óë
+/*È¡³öµ±Ç°½ø³Ìplug->mq_listÁ´±íÉÏµÄreq£¬Èç¹ûÓĞIOµ÷¶ÈËã·¨£¬Ôò°Ñreq²åÈëelvµÄfifo¶ÓÁĞ£¬
+mq-deadlineËã·¨µÄ»¹Òª²åÈëºìºÚÊ÷¡£Èç¹ûÃ»ÓĞIOµ÷¶ÈËã·¨£¬ÔÚÓ²¼ş¶ÓÁĞ¿ÕÏĞÊ±£¬³¢ÊÔ°Ñplug->mq_listÁ´±íµÄÉÏµÄreq½¨Á¢Óë
 Ó²¼ş¶ÓÁĞhctxµÄÁªÏµ£¬»¹»á°Ñreq²åÈëµ½Ó²¼ş¶ÓÁĞhctx->dispatch¶ÓÁĞ£¬Ö´ĞĞblk_mq_run_hw_queue¼ä½ÓÆô¶¯reqÓ²¼şÅÉ·¢¡£
 Èç¹ûÓ²¼ş¶ÓÁĞÈİÄÉµÄreq´ïµ½ÉÏÏŞ£¬Ó²¼ş¶ÓÁĞ±äÃ¦£¬Ôò°ÑÊ£ÓàµÄplug->mq_listÁ´±íµÄÉÏµÄreq²åÈëµ½Èí¼ş¶ÓÁĞctx->rq_listÁ´±íÉÏ¡£
 Õâ¸ö¹ı³ÌÉæ¼°µ½ÁËplug->mq_listÁ´±íÉÏµÄreq²åÈëÓ²¼ş¶ÓÁĞºÍÈí¼ş¶ÓÁĞµÄÖî¶àÏ¸½Ú´¦Àí¡£*/
@@ -3120,6 +3127,8 @@ mq-deadlineËã·¨µÄ»¹Òª²åÈëºìºÚÊ÷ºÍfifo¶ÓÁĞ¡£Èç¹ûÃ»ÓĞIOµ÷¶ÈËã·¨£¬ÔÚÓ²¼ş¶ÓÁĞ¿ÕÏĞÊ±£
 	 * Save and disable interrupts here, to avoid doing it for every
 	 * queue lock we have to take.
 	 */
+	 
+	/*----------Õû¸ö¹ı³Ì¹ØÖĞ¶ÏÁË*/
 	local_irq_save(flags);
     //ÒÀ´ÎÈ¡³ö½ø³ÌplugÁ´±íÉÏµÄreqÒÀ´Î²åÈëIOµ÷¶ÈËã·¨¶ÓÁĞÉÏ
 	while (!list_empty(&list)) {
