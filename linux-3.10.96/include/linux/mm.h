@@ -1050,6 +1050,7 @@ long get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 		    unsigned long start, unsigned long nr_pages,
 		    int write, int force, struct page **pages,
 		    struct vm_area_struct **vmas);
+//与架构有关的函数，start是用户态虚拟地址，根据也表页目录映射原理，得到它的物理地址page，保存到pages数组，如此而已
 int get_user_pages_fast(unsigned long start, int nr_pages, int write,
 			struct page **pages);
 struct kvec;

@@ -645,8 +645,8 @@ struct fuse_fallocate_in {
 };
 
 struct fuse_in_header {
-	uint32_t	len;
-	uint32_t	opcode;
+	uint32_t	len;//queue_request()中设置
+	uint32_t	opcode;//fuse操作 FUSE_READ、FUSE_WRITE 等。fuse_read_fill中设置FUSE_READ。fuse_send_open中也会设置
 	uint64_t	unique;
 	uint64_t	nodeid;
 	uint32_t	uid;

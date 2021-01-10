@@ -1845,7 +1845,7 @@ static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *r
 	 * Any other error (busy), just add it to our list as we
 	 * previously would have done.
 	 */
-	//根据req设置nvme command,把req添加到q->timeout_list，并且启动q->timeout,把新的nvme command复制到nvmeq->sq_cmds[]队列
+	//根据req设置磁盘驱动 command,把req添加到q->timeout_list，并且启动q->timeout,把command复制到nvmeq->sq_cmds[]队列
 	ret = q->mq_ops->queue_rq(hctx, &bd);//nvme_queue_rq
 	switch (ret) {
 	case BLK_MQ_RQ_QUEUE_OK:
@@ -1865,10 +1865,11 @@ static int __blk_mq_issue_directly(struct blk_mq_hw_ctx *hctx, struct request *r
 	return ret;
 }
 //从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag赋于rq->tag，然后
-//hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。分配失败则启动硬件IO数据派发，之后再尝试分配tag，循环。然后
-//调用磁盘驱动queue_rq接口函数，根据req设置nvme command，启动q->timeout定时器等等,这看着是req直接发给磁盘硬件传输了。
-//如果遇到磁盘驱动硬件忙，则设置硬件队列忙，还释放req的tag。如果执行blk_mq_get_driver_tag分配不到tag，则执行blk_mq_request_bypass_insert
-//把req添加到硬件队列hctx->dispatch队列，间接启动req硬件派发.
+//hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。分配失败则启动硬件IO数据派发，之后再尝试分配tag，循环,
+//直到分配req成功。然后调用磁盘驱动queue_rq接口函数向驱动派发req:根据req设置磁盘驱动 command，启动q->timeout定时器等等,
+//这看着是req直接发给磁盘硬件传输了。如果遇到磁盘驱动硬件忙，则释放req的tag,设置硬件队列忙.
+
+//如果执行blk_mq_get_driver_tag分配不到tag，则执行blk_mq_request_bypass_insert.把req添加到硬件队列hctx->dispatch队列，间接启动req硬件派发.
 static int __blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 						struct request *rq,//req来自当前进程plug->mq_list链表，有时是刚分配的新req
 						bool bypass_insert)
@@ -1929,9 +1930,10 @@ static void blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
 	might_sleep_if(hctx->flags & BLK_MQ_F_BLOCKING);
 	hctx_lock(hctx, &srcu_idx);
     
-//从硬件队列hctx有关的blk_mq_tags结构体里得到的req一席之地，有空闲位置可以给req时，则hctx->tags->rqs[rq->tag]=rq
-//建立req和硬件队列hctx的联系。然后调用nvme_queue_rq，根据req设置nvme command，启动q->timeout定时器等等,这看着是req
-//直接发给nvme硬件传输了。如果不能直接发给nvme硬件传输，则把req添加到硬件队列hctx->dispatch队列，间接启动req硬件派发
+  //从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag赋于rq->tag，然后
+  //hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。分配失败则启动硬件IO数据派发，之后再尝试分配tag，循环,直到分配req成功。
+  //然后调用磁盘驱动queue_rq接口函数向驱动派发req，启动磁盘数据传输。如果遇到磁盘驱动硬件忙，则释放req的tag,设置硬件队列忙.
+
 	ret = __blk_mq_try_issue_directly(hctx, rq, false);
     //如果硬件队列忙，把req添加到硬件队列hctx->dispatch队列，间接启动req硬件派发
 	if (ret == BLK_MQ_RQ_QUEUE_BUSY || ret == BLK_MQ_RQ_QUEUE_DEV_BUSY)
@@ -1957,8 +1959,8 @@ int blk_mq_request_issue_directly(struct request *rq)//req来自当前进程plug->mq_l
 	hctx_lock(hctx, &srcu_idx);
     //从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag赋于rq->tag，然后
     //hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。分配失败则启动硬件IO数据派发，之后再尝试分配tag，循环。然后
-    //调用磁盘驱动queue_rq接口函数，根据req设置nvme command，启动q->timeout定时器等等,将req直接派发磁盘硬件传输了。
-    //如果遇到磁盘驱动硬件忙，则设置硬件队列忙，还释放req的tag。如果执行分配不到tag，则执行blk_mq_request_bypass_insert
+    //调用磁盘驱动queue_rq接口函数，根据req设置 command，启动q->timeout定时器等等,将req直接派发磁盘硬件传输了。
+    //如果遇到磁盘驱动硬件忙，则设置硬件队列忙，还释放req的tag。如果分配不到tag，则执行blk_mq_request_bypass_insert
     //把req添加到硬件队列hctx->dispatch队列，间接启动req硬件派发.
 
 	ret = __blk_mq_try_issue_directly(hctx, rq, true);
@@ -2803,7 +2805,7 @@ static void blk_mq_realloc_hw_ctxs(struct blk_mq_tag_set *set,
 /* 1 循环分配每个硬件队列结构blk_mq_hw_ctx并初始化，即对每个struct blk_mq_hw_ctx *hctx硬件队列结构大部分成员赋初值。
      重点是赋值hctx->tags=blk_mq_tags，即每个硬件队列唯一对应一个blk_mq_tags，blk_mq_tags来自struct blk_mq_tag_set 的成员
      struct blk_mq_tags[hctx_idx]。然后分配hctx->ctxs软件队列指针数组，注意只是指针数组!
-   2 为硬件队列结构hctx->sched_tags分配blk_mq_tags，这是调度算法的tags。接着根据为这个blk_mq_tags分配q->nr_requests个request，
+   2 为硬件队列结构hctx->sched_tags分配blk_mq_tags，这是调度算法的tags。接着为这个blk_mq_tags分配q->nr_requests个request，
      存于tags->static_rqs[]，这是调度算法的blk_mq_tags的request!*/     
 	for (i = 0; i < set->nr_hw_queues; i++) {//为了简单起见，假设硬件队列数set->nr_hw_queues是1
 		int node;

@@ -35,7 +35,7 @@ static int fuse_send_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 	inarg.flags = file->f_flags & ~(O_CREAT | O_EXCL | O_NOCTTY);
 	if (!fc->atomic_o_trunc)
 		inarg.flags &= ~O_TRUNC;
-	req->in.h.opcode = opcode;
+	req->in.h.opcode = opcode;//设置fuse open命令
 	req->in.h.nodeid = nodeid;
 	req->in.numargs = 1;
 	req->in.args[0].size = sizeof(inarg);
@@ -475,7 +475,7 @@ static int fuse_fsync(struct file *file, loff_t start, loff_t end,
 {
 	return fuse_fsync_common(file, start, end, datasync, 0);
 }
-
+//填充req.in和req.out
 void fuse_read_fill(struct fuse_req *req, struct file *file, loff_t pos,
 		    size_t count, int opcode)
 {
@@ -486,14 +486,14 @@ void fuse_read_fill(struct fuse_req *req, struct file *file, loff_t pos,
 	inarg->offset = pos;
 	inarg->size = count;
 	inarg->flags = file->f_flags;
-	req->in.h.opcode = opcode;
+	req->in.h.opcode = opcode;//fuse操作 FUSE_READ 操作码
 	req->in.h.nodeid = ff->nodeid;
 	req->in.numargs = 1;
 	req->in.args[0].size = sizeof(struct fuse_read_in);
 	req->in.args[0].value = inarg;
 	req->out.argvar = 1;
 	req->out.numargs = 1;
-	req->out.args[0].size = count;
+	req->out.args[0].size = count;//发送字节数
 }
 
 static void fuse_release_user_pages(struct fuse_req *req, int write)
@@ -600,14 +600,15 @@ static size_t fuse_async_req_send(struct fuse_conn *fc, struct fuse_req *req,
 
 	return num_bytes;
 }
-
+//填充req.in和req.out，把req加入fc->pending链表，唤醒fc->waitq上休眠的进程。在req->waitq()等待队列上休眠，等待被唤醒
+//唤醒后，已经读取到数据到req.in
 static size_t fuse_send_read(struct fuse_req *req, struct fuse_io_priv *io,
 			     loff_t pos, size_t count, fl_owner_t owner)
 {
 	struct file *file = io->file;
 	struct fuse_file *ff = file->private_data;
 	struct fuse_conn *fc = ff->fc;
-
+    //填充req.in和req.out
 	fuse_read_fill(req, file, pos, count, FUSE_READ);
 	if (owner != NULL) {
 		struct fuse_read_in *inarg = &req->misc.read.in;
@@ -616,10 +617,11 @@ static size_t fuse_send_read(struct fuse_req *req, struct fuse_io_priv *io,
 		inarg->lock_owner = fuse_lock_owner_id(fc, owner);
 	}
 
-	if (io->async)
+	if (io->async)//异步发送，调试发现没有这个
 		return fuse_async_req_send(fc, req, count, io);
 
 	fuse_request_send(fc, req);
+    //返回发送的数据量???是req->out.args[0].size
 	return req->out.args[0].size;
 }
 
@@ -660,7 +662,7 @@ static int fuse_readpage(struct file *file, struct page *page)
 	 * page.
 	 */
 	fuse_wait_on_page_writeback(inode, page->index);
-
+    //分配一个新的req
 	req = fuse_get_req(fc, 1);
 	err = PTR_ERR(req);
 	if (IS_ERR(req))
@@ -670,9 +672,12 @@ static int fuse_readpage(struct file *file, struct page *page)
 
 	req->out.page_zeroing = 1;
 	req->out.argpages = 1;
-	req->num_pages = 1;
+	req->num_pages = 1;//读取一个page
+    //上层read传入的保存数据的page存入req->pages[0]
 	req->pages[0] = page;
-	req->page_descs[0].length = count;
+	req->page_descs[0].length = count;//读取字节数是4K
+	//填充req.in和req.out，把req加入fc->pending链表，唤醒fc->waitq上休眠的进程。在req->waitq()等待队列上休眠，等待被唤醒。
+	//唤醒后，已经读取到数据到req.in，推测应该是这样的。
 	num_read = fuse_send_read(req, &io, pos, count, NULL);
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
@@ -683,7 +688,7 @@ static int fuse_readpage(struct file *file, struct page *page)
 		 */
 		if (num_read < count)
 			fuse_read_update_size(inode, pos + num_read, attr_ver);
-
+        //已经读取到数据，设置page状态为PG_uptodate
 		SetPageUptodate(page);
 	}
 
@@ -742,6 +747,7 @@ static void fuse_send_readpages(struct fuse_req *req, struct file *file)
 	req->out.argpages = 1;
 	req->out.page_zeroing = 1;
 	req->out.page_replace = 1;
+    //填充req.in和req.out，设置req->in.h.opcode=FUSE_READ，表示本次是fuse read
 	fuse_read_fill(req, file, pos, count, FUSE_READ);
 	req->misc.read.attr_ver = fuse_get_attr_version(fc);
 	if (fc->async_read) {
@@ -749,6 +755,7 @@ static void fuse_send_readpages(struct fuse_req *req, struct file *file)
 		req->end = fuse_readpages_end;
 		fuse_request_send_background(fc, req);
 	} else {
+	    //发送req
 		fuse_request_send(fc, req);
 		fuse_readpages_end(fc, req);
 		fuse_put_request(fc, req);
@@ -765,6 +772,7 @@ struct fuse_fill_data {
 static int fuse_readpages_fill(void *_data, struct page *page)
 {
 	struct fuse_fill_data *data = _data;
+    //fuse_readpages中赋值data->req
 	struct fuse_req *req = data->req;
 	struct inode *inode = data->inode;
 	struct fuse_conn *fc = get_fuse_conn(inode);
@@ -777,10 +785,11 @@ static int fuse_readpages_fill(void *_data, struct page *page)
 	     req->pages[req->num_pages - 1]->index + 1 != page->index)) {
 		int nr_alloc = min_t(unsigned, data->nr_pages,
 				     FUSE_MAX_PAGES_PER_REQ);
+        //发送req命令，表示要读取数据了
 		fuse_send_readpages(req, data->file);
 		if (fc->async_read)
 			req = fuse_get_req_for_background(fc, nr_alloc);
-		else
+		else//为什么这里要再分配一个新的req再赋予data->req?????应该是连续调用fuse_readpages_fill()读数据时，每次都要用新的req
 			req = fuse_get_req(fc, nr_alloc);
 
 		data->req = req;
@@ -796,6 +805,7 @@ static int fuse_readpages_fill(void *_data, struct page *page)
 	}
 
 	page_cache_get(page);
+    //每次执行该函数，都把将来要保存本次read的数据的page保存到req->pages[0、1、2]，将来
 	req->pages[req->num_pages] = page;
 	req->page_descs[req->num_pages].length = PAGE_SIZE;
 	req->num_pages++;
@@ -803,8 +813,9 @@ static int fuse_readpages_fill(void *_data, struct page *page)
 	return 0;
 }
 
+//fuse真正读取读取数据
 static int fuse_readpages(struct file *file, struct address_space *mapping,
-			  struct list_head *pages, unsigned nr_pages)
+			  struct list_head *pages, unsigned nr_pages)//pages是page链表，保存本次read的数据，nr_pages为page个数
 {
 	struct inode *inode = mapping->host;
 	struct fuse_conn *fc = get_fuse_conn(inode);
@@ -820,8 +831,9 @@ static int fuse_readpages(struct file *file, struct address_space *mapping,
 	data.inode = inode;
 	if (fc->async_read)
 		data.req = fuse_get_req_for_background(fc, nr_alloc);
-	else
+	else//分配一个req
 		data.req = fuse_get_req(fc, nr_alloc);
+    
 	data.nr_pages = nr_pages;
 	err = PTR_ERR(data.req);
 	if (IS_ERR(data.req))

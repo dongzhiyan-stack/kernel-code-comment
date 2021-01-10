@@ -178,6 +178,7 @@ static struct fuse_req *__fuse_get_req(struct fuse_conn *fc, unsigned npages,
 	return ERR_PTR(err);
 }
 
+//分配一个新的req
 struct fuse_req *fuse_get_req(struct fuse_conn *fc, unsigned npages)
 {
 	return __fuse_get_req(fc, npages, false);
@@ -308,12 +309,15 @@ static u64 fuse_get_unique(struct fuse_conn *fc)
 
 	return fc->reqctr;
 }
-
+//把req加入fc->pending链表，唤醒fc->waitq上休眠的进程
 static void queue_request(struct fuse_conn *fc, struct fuse_req *req)
 {
+    //设置req->in.h.len
 	req->in.h.len = sizeof(struct fuse_in_header) +
 		len_args(req->in.numargs, (struct fuse_arg *) req->in.args);
+    //把req加入fc->pending链表
 	list_add_tail(&req->list, &fc->pending);
+    //设置req FUSE_REQ_PENDING状态
 	req->state = FUSE_REQ_PENDING;
 	if (!req->waiting) {
 		req->waiting = 1;
@@ -372,6 +376,7 @@ __releases(fc->lock)
 	req->end = NULL;
 	list_del(&req->list);
 	list_del(&req->intr_entry);
+    //设置req->state 为 FUSE_REQ_FINISHED
 	req->state = FUSE_REQ_FINISHED;
 	if (req->background) {
 		req->background = 0;
@@ -393,6 +398,7 @@ __releases(fc->lock)
 		flush_bg_queue(fc);
 	}
 	spin_unlock(&fc->lock);
+    //唤醒
 	wake_up(&req->waitq);
 	if (end)
 		end(fc, req);
@@ -424,11 +430,15 @@ __releases(fc->lock)
 __acquires(fc->lock)
 {
 	if (!fc->no_interrupt) {
+         //这里在req->waitq等待队列上休眠，可以被任何信号唤醒
 		/* Any signal may interrupt this */
 		wait_answer_interruptible(fc, req);
 
+        //被异常唤醒
 		if (req->aborted)
 			goto aborted;
+ 
+        //如果req->state==FUSE_REQ_FINISHED 表示req完成了
 		if (req->state == FUSE_REQ_FINISHED)
 			return;
 
@@ -442,11 +452,14 @@ __acquires(fc->lock)
 
 		/* Only fatal signals may interrupt this */
 		block_sigs(&oldset);
+        //这里休眠
 		wait_answer_interruptible(fc, req);
 		restore_sigs(&oldset);
 
+        //被异常唤醒
 		if (req->aborted)
 			goto aborted;
+        //如果req->state==FUSE_REQ_FINISHED 表示req完成了
 		if (req->state == FUSE_REQ_FINISHED)
 			return;
 
@@ -467,6 +480,7 @@ __acquires(fc->lock)
 	wait_event(req->waitq, req->state == FUSE_REQ_FINISHED);
 	spin_lock(&fc->lock);
 
+    //如果休眠不是异常终止
 	if (!req->aborted)
 		return;
 
@@ -483,7 +497,7 @@ __acquires(fc->lock)
 		spin_lock(&fc->lock);
 	}
 }
-
+//把req加入fc->pending链表，唤醒fc->waitq上休眠的进程，在req->waitq()等待队列上休眠，等待被唤醒。唤醒后，已经读取到数据到req.in
 static void __fuse_request_send(struct fuse_conn *fc, struct fuse_req *req)
 {
 	BUG_ON(req->background);
@@ -494,16 +508,18 @@ static void __fuse_request_send(struct fuse_conn *fc, struct fuse_req *req)
 		req->out.h.error = -ECONNREFUSED;
 	else {
 		req->in.h.unique = fuse_get_unique(fc);
+        //把req加入fc->pending链表，唤醒fc->waitq上休眠的进程
 		queue_request(fc, req);
 		/* acquire extra reference, since request is still needed
 		   after request_end() */
 		__fuse_get_request(req);
-
+        //在req->waitq()等待队列上休眠，等待被唤醒
 		request_wait_answer(fc, req);
 	}
 	spin_unlock(&fc->lock);
 }
-
+//常见的调用fuse_request_send的流程
+//业务程序fuse open:sys_open->do_last->lookup_fast->fuse_dentry_revalidate->fuse_request_send
 void fuse_request_send(struct fuse_conn *fc, struct fuse_req *req)
 {
 	req->isreply = 1;
@@ -630,22 +646,22 @@ static void unlock_request(struct fuse_conn *fc, struct fuse_req *req)
 		spin_unlock(&fc->lock);
 	}
 }
-
+//fuse_copy_init中初始化
 struct fuse_copy_state {
 	struct fuse_conn *fc;
-	int write;
+	int write;//fuse_dev_read置1，fuse_dev_write清0
 	struct fuse_req *req;
-	const struct iovec *iov;
+	const struct iovec *iov;//fuse_dev_read/fuse_dev_write->fuse_copy_init 中赋值为应用层来的iov，包含用户空间buf地址
 	struct pipe_buffer *pipebufs;
 	struct pipe_buffer *currbuf;
 	struct pipe_inode_info *pipe;
 	unsigned long nr_segs;
-	unsigned long seglen;
-	unsigned long addr;
-	struct page *pg;
-	void *mapaddr;
-	void *buf;
-	unsigned len;
+	unsigned long seglen;//fuse_copy_fill()中赋值为传输字节数，为cs->iov[0].iov_len，就是用户空间buf的长度
+	unsigned long addr;//fuse_copy_fill()中赋值为cs->iov[0].iov_base，用户空间buf，是用户空间的地址，会发生变化
+	struct page *pg;//fuse_copy_fill()中赋值，对应addr这个用户空间buf映射的物理地址page指针
+	void *mapaddr;//fuse_copy_fill()中赋值，是pg对应的内核态虚拟地址
+	void *buf;//fuse_copy_fill()中赋值，来自mapaddr，cs->mapaddr + offset，是用户空间buf的物理首地址
+	unsigned len;//cs->seglen是用户空间buf长度，PAGE_SIZE - offset是buf在物理页的地址到页尾的大小，cs->len取二者最小
 	unsigned move_pages:1;
 };
 
@@ -689,6 +705,7 @@ static void fuse_copy_finish(struct fuse_copy_state *cs)
  * Get another pagefull of userspace buffer, and map it to kernel
  * address space, and lock request
  */
+//填充fuse_copy_state，cs->addr，cs->addr，cs->pg,cs->buf等等
 static int fuse_copy_fill(struct fuse_copy_state *cs)
 {
 	unsigned long offset;
@@ -735,40 +752,49 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 	} else {
 		if (!cs->seglen) {
 			BUG_ON(!cs->nr_segs);
+            //用户空间buf的长度
 			cs->seglen = cs->iov[0].iov_len;
+            //用户空间buf，是用户空间的地址
 			cs->addr = (unsigned long) cs->iov[0].iov_base;
-			cs->iov++;
-			cs->nr_segs--;
+			cs->iov++;//cs->iov++，之后cs->iov就指向cs->iov[1]了
+			cs->nr_segs--;//处理一个iov减1
 		}
+        //获取用户空间数据buf所在page并保存到cs->pg
 		err = get_user_pages_fast(cs->addr, 1, cs->write, &cs->pg);
 		if (err < 0)
 			return err;
 		BUG_ON(err != 1);
 		offset = cs->addr % PAGE_SIZE;
-		cs->mapaddr = kmap(cs->pg);
-		cs->buf = cs->mapaddr + offset;
+		cs->mapaddr = kmap(cs->pg);//cs->pg这个page的内核态地址，内核态可以访问
+		cs->buf = cs->mapaddr + offset;//加上页内偏移才是用户空间buf的物理首地址
+		//cs->seglen是用户空间buf长度，PAGE_SIZE - offset是buf在物理页的地址到页尾的大小，cs->len取二者最小
 		cs->len = min(PAGE_SIZE - offset, cs->seglen);
-		cs->seglen -= cs->len;
-		cs->addr += cs->len;
+		cs->seglen -= cs->len;//cs->seglen减少cs->len
+		cs->addr += cs->len;//cs->addr偏移cs->len
 	}
 
 	return lock_request(cs->fc, cs->req);
 }
 
 /* Do as much copy to/from userspace buffer as we can */
+//cs->iov保存了fuse读写时用户空间buf首地址，cs->buf指向用户空间buf内核态地址，fuse read时把val指向内存的数据复制到cs->buf，
+//fuse write时把cs->buf指向内存的数据复制到val指向的内存。复制字节数ncpy,cs->buf跟着偏移指定大小
 static int fuse_copy_do(struct fuse_copy_state *cs, void **val, unsigned *size)
 {
+    //cs->buf代表用户空间buf的内核态虚拟地址，val来自req.in.h或者struct fuse_out_header
 	unsigned ncpy = min(*size, cs->len);
 	if (val) {
-		if (cs->write)
+		if (cs->write)//fuse_dev_do_read!!!!!!read时cs->write是1
+		   //fuse dev read，val来自req.in.h,把req.in.h对应的struct fuse_in_header结构的数据复制到fuse read传入的用户空间buf，即cs->buf
+		   //相当于fuse dev read时，只是把struct fuse_in_header复制到应用层buf，fuse_in_header里的opcode表示业务层fuse是读还是写等等
 			memcpy(cs->buf, *val, ncpy);
-		else
+		else//fuse_dev_do_write，把本次cs->buf中保存的本次write系统调用发送的数据复制到val，即struct fuse_out_header
 			memcpy(*val, cs->buf, ncpy);
 		*val += ncpy;
 	}
 	*size -= ncpy;
 	cs->len -= ncpy;
-	cs->buf += ncpy;
+	cs->buf += ncpy;//cs->buf跟着复制的字节数偏移
 	return ncpy;
 }
 
@@ -912,7 +938,7 @@ static int fuse_ref_page(struct fuse_copy_state *cs, struct page *page,
  * Copy a page in the request to/from the userspace buffer.  Must be
  * done atomically
  */
-static int fuse_copy_page(struct fuse_copy_state *cs, struct page **pagep,
+static int fuse_copy_page(struct fuse_copy_state *cs, struct page **pagep,//pagep来自req->pages[i]
 			  unsigned offset, unsigned count, int zeroing)
 {
 	int err;
@@ -931,6 +957,7 @@ static int fuse_copy_page(struct fuse_copy_state *cs, struct page **pagep,
 				if (err <= 0)
 					return err;
 			} else {
+			    //填充fuse_copy_state，cs->addr，cs->addr，cs->pg,cs->buf等等
 				err = fuse_copy_fill(cs);
 				if (err)
 					return err;
@@ -939,6 +966,7 @@ static int fuse_copy_page(struct fuse_copy_state *cs, struct page **pagep,
 		if (page) {
 			void *mapaddr = kmap_atomic(page);
 			void *buf = mapaddr + offset;
+            //buf来自fuse数据page
 			offset += fuse_copy_do(cs, &buf, &count);
 			kunmap_atomic(mapaddr);
 		} else
@@ -960,7 +988,7 @@ static int fuse_copy_pages(struct fuse_copy_state *cs, unsigned nbytes,
 		int err;
 		unsigned offset = req->page_descs[i].offset;
 		unsigned count = min(nbytes, req->page_descs[i].length);
-
+        //把cs->buf保存的用户空间数据复制到req->pages[i]
 		err = fuse_copy_page(cs, &req->pages[i], offset, count,
 				     zeroing);
 		if (err)
@@ -972,14 +1000,19 @@ static int fuse_copy_pages(struct fuse_copy_state *cs, unsigned nbytes,
 }
 
 /* Copy a single argument in the request to/from userspace buffer */
+//cs->iov保存了fuse读写时用户空间buf首地址，cs->buf指向用户空间buf内核态地址，fuse read时把val指向内存的数据复制到cs->buf，
+//fuse write时把cs->buf指向内存的数据复制到val指向的内存。复制字节数size,cs->buf跟着偏移指定大小
 static int fuse_copy_one(struct fuse_copy_state *cs, void *val, unsigned size)
 {
 	while (size) {
 		if (!cs->len) {
+            //填充fuse_copy_state，赋值cs->addr，cs->addr，cs->pg,cs->buf等等
 			int err = fuse_copy_fill(cs);
 			if (err)
 				return err;
 		}
+        //相当于fuse dev read时，只是把struct fuse_in_header复制到应用层cs->buf，fuse_in_header里的opcode表示业务层fuse是读还是写等等
+        //fuse_dev_do_write，把本次cs->buf中保存的本次write系统调用发送的数据复制到val，即struct fuse_out_header
 		fuse_copy_do(cs, &val, &size);
 	}
 	return 0;
@@ -1020,7 +1053,7 @@ __releases(fc->lock)
 __acquires(fc->lock)
 {
 	DECLARE_WAITQUEUE(wait, current);
-
+    //当前进程加入休眠等待队列头，并休眠
 	add_wait_queue_exclusive(&fc->waitq, &wait);
 	while (fc->connected && !request_pending(fc)) {
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -1211,6 +1244,7 @@ static ssize_t fuse_dev_do_read(struct fuse_conn *fc, struct file *file,
 	    !request_pending(fc))
 		goto err_unlock;
 
+    //在 fc->waitq 等待队列休眠，等待被唤醒
 	request_wait(fc);
 	err = -ENODEV;
 	if (!fc->connected)
@@ -1232,11 +1266,14 @@ static ssize_t fuse_dev_do_read(struct fuse_conn *fc, struct file *file,
 		if (fc->forget_batch <= -8)
 			fc->forget_batch = 16;
 	}
-
+    
+    //取出req，那req是什么时候添加到fc->pending链表的?在fuse_request_send()函数
 	req = list_entry(fc->pending.next, struct fuse_req, list);
+    //设置 req->state FUSE_REQ_READING，正在读
 	req->state = FUSE_REQ_READING;
 	list_move(&req->list, &fc->io);
 
+    //这里in已经填充好了
 	in = &req->in;
 	reqsize = in->h.len;
 	/* If request is too large, reply with an error and restart the read */
@@ -1250,6 +1287,10 @@ static ssize_t fuse_dev_do_read(struct fuse_conn *fc, struct file *file,
 	}
 	spin_unlock(&fc->lock);
 	cs->req = req;
+    
+    //把in->h即struct fuse_in_header复制到应用层buf，fuse_in_header里的opcode表示业务层fuse是读还是写等等。
+    //这是fuse库函数的线程执行的，相当于fuse库通过fuse_dev_do_read读取fuse_in_header，知道了业务层对fuse文件系统中的文件
+    //是读还是写。然后fuse库函数线程按照读或写指示，回调fuse文件系统注册的读或者写等函数。
 	err = fuse_copy_one(cs, &in->h, sizeof(in->h));
 	if (!err)
 		err = fuse_copy_args(cs, in->numargs, in->argpages,
@@ -1257,6 +1298,7 @@ static ssize_t fuse_dev_do_read(struct fuse_conn *fc, struct file *file,
 	fuse_copy_finish(cs);
 	spin_lock(&fc->lock);
 	req->locked = 0;
+    
 	if (req->aborted) {
 		request_end(fc, req);
 		return -ENODEV;
@@ -1267,9 +1309,9 @@ static ssize_t fuse_dev_do_read(struct fuse_conn *fc, struct file *file,
 		return err;
 	}
 	if (!req->isreply)
-		request_end(fc, req);
+		request_end(fc, req);//唤醒，设置req->state 为 FUSE_REQ_FINISHED
 	else {
-		req->state = FUSE_REQ_SENT;
+		req->state = FUSE_REQ_SENT;//fuse_dev_do_read()最后设置req FUSE_REQ_SENT状态
 		list_move_tail(&req->list, &fc->processing);
 		if (req->interrupted)
 			queue_interrupt(fc, req);
@@ -1286,11 +1328,14 @@ static ssize_t fuse_dev_read(struct kiocb *iocb, const struct iovec *iov,
 			      unsigned long nr_segs, loff_t pos)
 {
 	struct fuse_copy_state cs;
+    //获取file结构
 	struct file *file = iocb->ki_filp;
+    //获取fc
 	struct fuse_conn *fc = fuse_get_conn(file);
 	if (!fc)
 		return -EPERM;
-
+    
+    //设置cs->fc = fc;cs->write = write;cs->iov = iov;cs->nr_segs = nr_segs;
 	fuse_copy_init(&cs, fc, 1, iov, nr_segs);
 
 	return fuse_dev_do_read(fc, file, &cs, iov_length(iov, nr_segs));
@@ -1797,6 +1842,13 @@ static int copy_out_args(struct fuse_copy_state *cs, struct fuse_out *out,
  * it from the list and copy the rest of the buffer to the request.
  * The request is finished by calling request_end()
  */
+//fuse_dev_write(struct kiocb *iocb, const struct iovec *iov,unsigned long nr_segs, loff_t pos)->fuse_dev_do_write
+//fuse write最后调用的是writev，writev(int fd, const struct iovec *iov, int iovcnt)，是有两个iov，每个iov对应一个用户空间buf首地址
+//iov.iov_base是每个buf的首地址，下边的fuse_copy_one()是把第一片用户空间buf即iov0.iov_base指向的数据复制到struct fuse_out_header oh，
+//然后在下边执行copy_out_args把第二片用户空间buf即iov1.iov_base的指向数据复制到req.out指定的内存。
+//这是fuse库用户空间线程执行应用层fuse文件系统注册的file_operation的read/write函数，这才是fuse文件系统的核心函数，是用户业务进程读fuse
+//文件系统想要获取的真实数据来源。之后，fuse库用户空间线程执行writev把读取的数据写入req.out，这个req是应用进程send的req。之后用户业务
+//进程调用read系统调用，内核态是fuse_readpages函数，从req.out读取数据，终于读到了想要的数据。
 static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 				 struct fuse_copy_state *cs, size_t nbytes)
 {
@@ -1806,7 +1858,10 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 
 	if (nbytes < sizeof(struct fuse_out_header))
 		return -EINVAL;
-
+    
+    //把cs->buf中保存的本次write系统调用发送的数据复制到oh，即struct fuse_out_header，包含fuse读写指令
+    //这里只是复制了cs->buf开头的struct fuse_out_header结构体大小的字节数吧???????????????是的，这是把本次fuse write传递的第一片用户
+    //空间buf即iov0.iov_base指向的数据复制到struct fuse_out_header oh。此时cs->buf是iov0.iov_base用户空间buf映射的物理内存首地址
 	err = fuse_copy_one(cs, &oh, sizeof(oh));
 	if (err)
 		goto err_finish;
@@ -1833,6 +1888,8 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 	if (!fc->connected)
 		goto err_unlock;
 
+    //从fc->processing找到挂起的req，这个req推测就是业务层__fuse_request_send的req，这里取出这个req，然后下边再执行
+    //copy_out_args(cs, &req->out, nbytes)把本次用户空间第二片buf(即cs.iov[1].iov_base)数据复制到req->out指定的内存
 	req = request_find(fc, oh.unique);
 	if (!req)
 		goto err_unlock;
@@ -1859,16 +1916,21 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 		fuse_copy_finish(cs);
 		return nbytes;
 	}
-
+    //设置 req->state 为正在写入
 	req->state = FUSE_REQ_WRITING;
 	list_move(&req->list, &fc->io);
-	req->out.h = oh;
+	req->out.h = oh;//赋值struct fuse_out_header，这个是重点，包含了本次的write命令
 	req->locked = 1;
 	cs->req = req;
 	if (!req->out.page_replace)
 		cs->move_pages = 0;
 	spin_unlock(&fc->lock);
-
+    //上边的fuse_copy_one吧cs->buf开头的struct fuse_out_header结构体大小数据发送到req，这里应该是把后边的数据接着发送到req吧???????
+    //是的，这是把用户空间第2片buf即iov1.iov_base指向的数据复制到req.out指定的内存。此时cs->buf是iov1.iov_base用户空间buf映射的
+    //物理内存首地址。req.out指定的内存指定的内存是什么呢?看copy_out_args->fuse_copy_args，是req->out->args->value或者req->pages[i]，
+    //他们在哪里赋值?用户业务进程read系统调用读取数据是，fuse_readpages->fuse_readpages_fill中把本次read系统调用VFS层传入的保存本次
+    //read读取数据buf的page赋予req->pages[i]。执行copy_out_args，把fuse库线程writev系统调用传入的数据复制到req->pages[i]。之后用户业务
+    //进程从req->pages[i]就获取到了本次read的数据。绕来绕去，真的没啥意思!
 	err = copy_out_args(cs, &req->out, nbytes);
 	fuse_copy_finish(cs);
 
@@ -1879,6 +1941,7 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 			err = -ENOENT;
 	} else if (!req->aborted)
 		req->out.h.error = -EIO;
+    //唤醒req->waitq 等待队列上休眠的进程
 	request_end(fc, req);
 
 	return err ? err : nbytes;
@@ -1894,10 +1957,11 @@ static ssize_t fuse_dev_write(struct kiocb *iocb, const struct iovec *iov,
 			      unsigned long nr_segs, loff_t pos)
 {
 	struct fuse_copy_state cs;
+    //取出fc
 	struct fuse_conn *fc = fuse_get_conn(iocb->ki_filp);
 	if (!fc)
 		return -EPERM;
-
+    //初始化cs
 	fuse_copy_init(&cs, fc, 0, iov, nr_segs);
 
 	return fuse_dev_do_write(fc, &cs, iov_length(iov, nr_segs));

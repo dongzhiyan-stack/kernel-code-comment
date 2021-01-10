@@ -201,6 +201,7 @@ static int fuse_dentry_revalidate(struct dentry *entry, unsigned int flags)
 			return -ECHILD;
 
 		fc = get_fuse_conn(inode);
+        //分配一个req
 		req = fuse_get_req_nopages(fc);
 		if (IS_ERR(req))
 			return 0;
@@ -214,8 +215,10 @@ static int fuse_dentry_revalidate(struct dentry *entry, unsigned int flags)
 		attr_version = fuse_get_attr_version(fc);
 
 		parent = dget_parent(entry);
+        //初始化req，req.in，req.out
 		fuse_lookup_init(fc, req, get_node_id(parent->d_inode),
 				 &entry->d_name, &outarg);
+        //fuse send
 		fuse_request_send(fc, req);
 		dput(parent);
 		err = req->out.h.error;
@@ -1357,18 +1360,20 @@ static int fuse_readdir(struct file *file, void *dstbuf, filldir_t filldir)
 	int plus, err;
 	size_t nbytes;
 	struct page *page;
+    //得到file对应的inode
 	struct inode *inode = file_inode(file);
+    //得到fc
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_req *req;
 	u64 attr_version = 0;
 
 	if (is_bad_inode(inode))
 		return -EIO;
-
+    //得到req
 	req = fuse_get_req(fc, 1);
 	if (IS_ERR(req))
 		return PTR_ERR(req);
-
+    //分配page
 	page = alloc_page(GFP_KERNEL);
 	if (!page) {
 		fuse_put_request(fc, req);

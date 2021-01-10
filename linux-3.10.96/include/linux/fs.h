@@ -457,13 +457,13 @@ struct block_device {
     //块设备mmcblk0p4分区的bdev->bd_contains指向块设备主分区的bdev,主分区的bdev的
     //bdev->bd_contains指向主分区bdev
 	struct block_device *	bd_contains;
-    //bd_set_size()函数中赋值,块大小
+    //bd_set_size()函数中赋值,块设备大小
 	unsigned		bd_block_size;
     //在__blkdev_get对mmcblk0p4的bd_part赋值
 	struct hd_struct *	bd_part;
 	/* number of times partitions within this device have been opened. */
 	unsigned		bd_part_count;
-    //主分区register_disk中设置1，之后才会扫描块设备的主要分区
+    //主分区register_disk()中设置1，之后才会扫描块设备的分区
 	int			bd_invalidated;
     //__blkdev_get()赋值为当前分区对应的disk，里边有struct request_queue
 	struct gendisk *	bd_disk;

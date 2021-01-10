@@ -114,7 +114,7 @@ tags->bitmap_tags查找bit为是0的哪个?应该是这个意思。然后赋值req->tag =tag ，hctx
 
 2 从tags->bitmap_tags或者tags->breserved_tags分配的tag，其实是一个数字，表示本次分配的reg在static_rqs[]数组的下标。
 
-3 关于tags->breserved_tags和tags->bitmap_tags，有调度器使用tags->bitmap_tags，无调度器使用tags->breserved_tags。
+3 关于tags->breserved_tags和tags->bitmap_tags，
 看blk_mq_get_tag()函数if (data->flags & BLK_MQ_REQ_RESERVED)成立，则使用tags->breserved_tags，什么条件成立呢?
 
 submio执行blk_mq_make_request->blk_mq_sched_get_request，使用了调度器，则data->flags |= BLK_MQ_REQ_INTERNAL。
@@ -142,6 +142,9 @@ blk_mq_get_driver_tag()，if (blk_mq_tag_is_reserved(data.hctx->sched_tags, rq_au
 bt = &tags->breserved_tags和tag_offset = 0，则本次是从tags->breserved_tags这个reserved tag分配tag，并且tag+0是本次分配的req在
 static_rqs[]数组的下标。也就是说，static_rqs[]数组的0~tags->nr_reserved_tags是reserved tag的req的数组下标，tags->nr_reserved_tags以上
 的tag是非reserved tag的req的数组下标。
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!理解错了，看看这个理解req从初次分配，req始终没有变，但是tag分配释放再分配，tag早变了，tag还能唯一
+表示req在static_rqs[]数组的位置吗，不行吧req是固定的，但是tag变来变去
 
 5 凡是执行blk_mq_get_driver_tag()的情况，都是该req在第一次派发时遇到硬件队列繁忙，就把tag释放了，然后rq->tag=-1。
 接着启动异步派发，才会执行该函数

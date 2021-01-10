@@ -130,9 +130,9 @@ struct dentry {
 	void *d_fsdata;			/* fs-specific data */
 
 	struct list_head d_lru;		/* LRU list */
-    //该dentry作为父目录，其子目录或者子文件的dentry通过d_child链入父目录dentry的d_subdirs
+    //子目录或者子文件的dentry通过d_child链入父目录dentry的d_subdirs
 	struct list_head d_child;	/* child of parent list */
-
+    //子目录或者子文件的dentry通过d_child链入父目录dentry的d_subdirs
 	struct list_head d_subdirs;	/* our children */
 	/*
 	 * d_alias and d_rcu can share memory

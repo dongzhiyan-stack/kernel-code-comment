@@ -301,6 +301,7 @@ static inline void __SetPageUptodate(struct page *page)
 	__set_bit(PG_uptodate, &(page)->flags);
 }
 
+//已经读取到数据，设置page状态为PG_uptodate
 static inline void SetPageUptodate(struct page *page)
 {
 	/*

@@ -80,6 +80,7 @@ static void read_cache_pages_invalidate_pages(struct address_space *mapping,
  *
  * Hides the details of the LRU cache etc from the filesystems.
  */
+//fuse_readpages->read_cache_pages
 int read_cache_pages(struct address_space *mapping, struct list_head *pages,
 			int (*filler)(void *, struct page *), void *data)
 {
@@ -87,6 +88,7 @@ int read_cache_pages(struct address_space *mapping, struct list_head *pages,
 	int ret = 0;
 
 	while (!list_empty(pages)) {
+        //È¡³öpage
 		page = list_to_page(pages);
 		list_del(&page->lru);
 		if (add_to_page_cache_lru(page, mapping,
@@ -96,7 +98,7 @@ int read_cache_pages(struct address_space *mapping, struct list_head *pages,
 		}
 		page_cache_release(page);
 
-		ret = filler(data, page);
+		ret = filler(data, page);//¼´ fuse_readpages_fill
 		if (unlikely(ret)) {
 			read_cache_pages_invalidate_pages(mapping, pages);
 			break;

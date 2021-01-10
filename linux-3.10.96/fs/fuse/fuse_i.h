@@ -162,11 +162,12 @@ struct fuse_in_arg {
 	unsigned size;
 	const void *value;
 };
-
+//fuse_dev_do_read 模式下，是直接req = list_entry(fc->pending.next, struct fuse_req, list)取出req，然后req.in已经填充好了
+//fuse_send_read->fuse_read_fill中填充 req.in 和req.out。fuse_lookup_init()也会初始化一部分req成员
 /** The request input */
-struct fuse_in {
+struct fuse_in {//fuse_send_open也会填充该成员
 	/** The request header */
-	struct fuse_in_header h;
+	struct fuse_in_header h;//里边的opcode包含fuse操作码FUSE_READ、FUSE_WRITE 等
 
 	/** True if the data for the last argument is in req->pages */
 	unsigned argpages:1;
@@ -180,12 +181,12 @@ struct fuse_in {
 
 /** One output argument of a request */
 struct fuse_arg {
-	unsigned size;
+	unsigned size;//fuse_send_read()时，这是send的字节数
 	void *value;
 };
+//fuse_send_read->fuse_read_fill中填充 req.in 和req.out。fuse_lookup_init()也会初始化一部分req成员。fuse_send_open也会填充
 
-/** The request output */
-struct fuse_out {
+/** The request output */struct fuse_out {
 	/** Header returned from userspace */
 	struct fuse_out_header h;
 
@@ -223,11 +224,11 @@ struct fuse_page_desc {
 /** The request state */
 enum fuse_req_state {
 	FUSE_REQ_INIT = 0,
-	FUSE_REQ_PENDING,
-	FUSE_REQ_READING,
-	FUSE_REQ_SENT,
-	FUSE_REQ_WRITING,
-	FUSE_REQ_FINISHED
+	FUSE_REQ_PENDING,//queue_request()中设置req FUSE_REQ_PENDING状态
+	FUSE_REQ_READING,//fuse_dev_do_read()中间设置FUSE_REQ_READING
+	FUSE_REQ_SENT,//fuse_dev_do_read()最后设置req FUSE_REQ_SENT状态
+	FUSE_REQ_WRITING,//fuse_dev_do_write中设置为 FUSE_REQ_WRITING
+	FUSE_REQ_FINISHED//request_end()设置为FUSE_REQ_FINISHED
 };
 
 /** The request IO state (for asynchronous processing) */
@@ -268,7 +269,7 @@ struct fuse_req {
 	 */
 
 	/** True if the request has reply */
-	unsigned isreply:1;
+	unsigned isreply:1;//fuse_request_send()中赋值为1
 
 	/** Force sending of the request even if interrupted */
 	unsigned force:1;
@@ -280,25 +281,30 @@ struct fuse_req {
 	unsigned background:1;
 
 	/** The request has been interrupted */
-	unsigned interrupted:1;
+	unsigned interrupted:1;//request_wait_answer中被置1
 
 	/** Data is being copied to/from the request */
-	unsigned locked:1;
+	unsigned locked:1;//fuse_dev_do_write中设置为1
 
 	/** Request is counted as "waiting" */
 	unsigned waiting:1;
 
 	/** State of the request */
+    //queue_request()中设置为FUSE_REQ_PENDING
+    //fuse_dev_do_write()中设置为 FUSE_REQ_WRITING
+    //request_end()设置为FUSE_REQ_FINISHED
+    //fuse_dev_do_read中()设置为FUSE_REQ_READING，queue_request()中设置req FUSE_REQ_PENDING状态
+    //fuse_dev_do_read()中间设置FUSE_REQ_READING，fuse_dev_do_read()最后设置req FUSE_REQ_SENT状态。
 	enum fuse_req_state state;
 
 	/** The request input */
-	struct fuse_in in;
+	struct fuse_in in;//fuse_send_read->fuse_read_fill中填充 req.in 和req.out。fuse_lookup_init()也会初始化一部分req成员
 
 	/** The request output */
-	struct fuse_out out;
+	struct fuse_out out;//fuse_send_read->fuse_read_fill中填充 req.in 和req.out。
 
 	/** Used to wake up the task waiting for completion of request*/
-	wait_queue_head_t waitq;
+	wait_queue_head_t waitq;//在这里休眠
 
 	/** Data for asynchronous requests */
 	union {
@@ -325,6 +331,8 @@ struct fuse_req {
 	} misc;
 
 	/** page vector */
+    //fuse_readpages->read_cache_pages->fuse_readpages_fill 就是read时传入的应用层buf映射的物理地址buf
+    //fuse_readpage->  req->pages[0] = page，上层read传入的保存数据的page存入req->pages[0]
 	struct page **pages;
 
 	/** page-descriptor vector */
@@ -368,6 +376,7 @@ struct fuse_req {
  * destroyed, when the client device is closed and the filesystem is
  * unmounted.
  */
+//get_fuse_conn中获取fuse_conn结构
 struct fuse_conn {
 	/** Lock protecting accessess to  members of this structure */
 	spinlock_t lock;
@@ -394,10 +403,10 @@ struct fuse_conn {
 	unsigned max_write;
 
 	/** Readers of the connection are waiting on this */
-	wait_queue_head_t waitq;
+	wait_queue_head_t waitq;//在这里休眠
 
 	/** The list of pending requests */
-	struct list_head pending;
+	struct list_head pending;//__fuse_request_send()->queue_request() 中把req插入pending链表
 
 	/** The list of requests being processed */
 	struct list_head processing;
