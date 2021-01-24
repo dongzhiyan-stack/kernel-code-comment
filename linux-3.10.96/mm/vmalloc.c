@@ -437,7 +437,7 @@ found:
 	va->va_start = addr;
 	va->va_end = addr + size;
 	va->flags = 0;
-	__insert_vmap_area(va);
+	__insert_vmap_area(va);//把va插入vmap_area_root树
 	free_vmap_cache = &va->rb_node;
 	spin_unlock(&vmap_area_lock);
 
@@ -481,6 +481,7 @@ static void __free_vmap_area(struct vmap_area *va)
 			}
 		}
 	}
+    //从vmap_area_root剔除va
 	rb_erase(&va->rb_node, &vmap_area_root);
 	RB_CLEAR_NODE(&va->rb_node);
 	list_del_rcu(&va->list);
@@ -632,7 +633,7 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	if (nr) {
 		spin_lock(&vmap_area_lock);
 		list_for_each_entry_safe(va, n_va, &valist, purge_list)
-			__free_vmap_area(va);
+			__free_vmap_area(va);//__free_vmap_area 释放va
 		spin_unlock(&vmap_area_lock);
 	}
 	spin_unlock(&purge_lock);
@@ -1361,7 +1362,7 @@ static struct vm_struct *__get_vm_area_node(unsigned long size,
 	 */
 	size += PAGE_SIZE;
 
-	va = alloc_vmap_area(size, align, start, end, node, gfp_mask);
+	va = alloc_vmap_area(size, align, start, end, node, gfp_mask);//这里把va插入vmap_area_root树
 	if (IS_ERR(va)) {
 		kfree(area);
 		return NULL;
@@ -2728,7 +2729,7 @@ void get_vmalloc_info(struct vmalloc_info *vmi)
 
 		if (va->flags & (VM_LAZY_FREE | VM_LAZY_FREEING))
 			continue;
-
+        //vmalloc总内存数竟然是基于vmalloc映射的虚拟空间计算出来的
 		vmi->used += (va->va_end - va->va_start);
 
 		free_area_size = addr - prev_end;

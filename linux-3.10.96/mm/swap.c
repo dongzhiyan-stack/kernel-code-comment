@@ -763,7 +763,7 @@ void release_pages(struct page **pages, int nr, int cold)
 	if (zone)
 		spin_unlock_irqrestore(&zone->lru_lock, flags);
 
-	free_hot_cold_page_list(&pages_to_free, cold);
+	free_hot_cold_page_list(&pages_to_free, cold);//这里会更新NR_FREE_PAGES减少 1 << order
 }
 EXPORT_SYMBOL(release_pages);
 

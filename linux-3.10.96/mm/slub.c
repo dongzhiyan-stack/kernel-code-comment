@@ -1328,6 +1328,7 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 		return NULL;
     //kmem_cache 的slab obj总数
 	page->objects = oo_objects(oo);
+    //分配 slab  page时根据 kmem_cache 是否有可回收属性把page个数加入NR_SLAB_RECLAIMABLE或者NR_SLAB_UNRECLAIMABLE 内存计数
 	mod_zone_page_state(page_zone(page),
 		(s->flags & SLAB_RECLAIM_ACCOUNT) ?
 		NR_SLAB_RECLAIMABLE : NR_SLAB_UNRECLAIMABLE,
@@ -1414,7 +1415,7 @@ static void __free_slab(struct kmem_cache *s, struct page *page)
 	}
 
 	kmemcheck_free_shadow(page, compound_order(page));
-
+    //释放slab  page时根据 kmem_cache是否有可回收属性把page个数从NR_SLAB_RECLAIMABLE或者NR_SLAB_UNRECLAIMABLE 内存计数中减去
 	mod_zone_page_state(page_zone(page),
 		(s->flags & SLAB_RECLAIM_ACCOUNT) ?
 		NR_SLAB_RECLAIMABLE : NR_SLAB_UNRECLAIMABLE,
@@ -1427,6 +1428,7 @@ static void __free_slab(struct kmem_cache *s, struct page *page)
 	page_mapcount_reset(page);
 	if (current->reclaim_state)
 		current->reclaim_state->reclaimed_slab += pages;
+    //这里执行__free_pages()最终释放page
 	__free_memcg_kmem_pages(page, order);
 }
 

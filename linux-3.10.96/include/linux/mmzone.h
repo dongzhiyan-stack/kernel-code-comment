@@ -104,32 +104,32 @@ struct zone_padding {
 
 enum zone_stat_item {
 	/* First 128 byte cacheline (assuming 64 bit words) */
-	NR_FREE_PAGES,
+	NR_FREE_PAGES,//执行__mod_zone_freepage_state()更新当前free内存数量
 	NR_LRU_BASE,
-	NR_INACTIVE_ANON = NR_LRU_BASE, /* must match order of LRU_[IN]ACTIVE */
-	NR_ACTIVE_ANON,		/*  "     "     "   "       "         */
-	NR_INACTIVE_FILE,	/*  "     "     "   "       "         */
-	NR_ACTIVE_FILE,		/*  "     "     "   "       "         */
-	NR_UNEVICTABLE,		/*  "     "     "   "       "         */
-	NR_MLOCK,		/* mlock()ed pages found and moved off LRU */
-	NR_ANON_PAGES,	/* Mapped anonymous pages */
-	NR_FILE_MAPPED,	/* pagecache pages mapped into pagetables.
+	NR_INACTIVE_ANON = NR_LRU_BASE, /*1 must match order of LRU_[IN]ACTIVE */
+	NR_ACTIVE_ANON,		/*2  "     "     "   "       "         */
+	NR_INACTIVE_FILE,	/*3  "     "     "   "       "         */
+	NR_ACTIVE_FILE,		/*4  "     "     "   "       "         */
+	NR_UNEVICTABLE,		/*5  "     "     "   "       "         */
+	NR_MLOCK,		/*6 mlock()ed pages found and moved off LRU */
+	NR_ANON_PAGES,	/*7 Mapped anonymous pages */
+	NR_FILE_MAPPED,	/*8 pagecache pages mapped into pagetables.
 			   only modified from process context */
-	NR_FILE_PAGES,
-	NR_FILE_DIRTY,
+	NR_FILE_PAGES,//9
+	NR_FILE_DIRTY,//10
 	NR_WRITEBACK,
 	NR_SLAB_RECLAIMABLE,
 	NR_SLAB_UNRECLAIMABLE,
 	NR_PAGETABLE,		/* used for pagetables */
 	NR_KERNEL_STACK,
 	/* Second 128 byte cacheline */
-	NR_UNSTABLE_NFS,	/* NFS unstable pages */
+	NR_UNSTABLE_NFS,	/*16 NFS unstable pages */
 	NR_BOUNCE,
 	NR_VMSCAN_WRITE,
 	NR_VMSCAN_IMMEDIATE,	/* Prioritise for reclaim when writeback ends */
 	NR_WRITEBACK_TEMP,	/* Writeback using temporary buffers */
 	NR_ISOLATED_ANON,	/* Temporary isolated pages from anon lru */
-	NR_ISOLATED_FILE,	/* Temporary isolated pages from file lru */
+	NR_ISOLATED_FILE,	/*22 Temporary isolated pages from file lru */
 	NR_SHMEM,		/* shmem pages (included tmpfs/GEM pages) */
 	NR_DIRTIED,		/* page dirtyings since bootup */
 	NR_WRITTEN,		/* page writings since bootup */
@@ -163,7 +163,7 @@ enum lru_list {
 	LRU_ACTIVE_ANON = LRU_BASE + LRU_ACTIVE,
 	LRU_INACTIVE_FILE = LRU_BASE + LRU_FILE,
 	LRU_ACTIVE_FILE = LRU_BASE + LRU_FILE + LRU_ACTIVE,
-	LRU_UNEVICTABLE,
+	LRU_UNEVICTABLE,//page_add_new_anon_rmap->add_page_to_unevictable_list
 	NR_LRU_LISTS
 };
 
@@ -251,7 +251,7 @@ struct per_cpu_pageset {
 #endif
 #ifdef CONFIG_SMP
 	s8 stat_threshold;
-	s8 vm_stat_diff[NR_VM_ZONE_STAT_ITEMS];
+	s8 vm_stat_diff[NR_VM_ZONE_STAT_ITEMS];//最终统计各类型page使用计数是在这个数组
 #endif
 };
 
@@ -331,7 +331,7 @@ struct zone {
 	 * on the higher zones). This array is recalculated at runtime if the
 	 * sysctl_lowmem_reserve_ratio sysctl changes.
 	 */
-	unsigned long		lowmem_reserve[MAX_NR_ZONES];
+	unsigned long		lowmem_reserve[MAX_NR_ZONES];//低阶内存限制高阶内存分配
 
 	/*
 	 * This is a per-zone reserve of pages that should not be
@@ -447,16 +447,16 @@ struct zone {
 	/*
 	 * spanned_pages is the total pages spanned by the zone, including
 	 * holes, which is calculated as:
-	 * 	spanned_pages = zone_end_pfn - zone_start_pfn;
+	 * 	spanned_pages = zone_end_pfn - zone_start_pfn;包含空洞的总page数
 	 *
 	 * present_pages is physical pages existing within the zone, which
 	 * is calculated as:
-	 *	present_pages = spanned_pages - absent_pages(pages in holes);
+	 *	present_pages = spanned_pages - absent_pages(pages in holes);减去空洞的总page数
 	 *
 	 * managed_pages is present pages managed by the buddy system, which
 	 * is calculated as (reserved_pages includes pages allocated by the
 	 * bootmem allocator):
-	 *	managed_pages = present_pages - reserved_pages;
+	 *	managed_pages = present_pages - reserved_pages;减去空洞的总page数减去预留内存
 	 *
 	 * So present_pages may be used by memory hotplug or memory power
 	 * management logic to figure out unmanaged pages by checking
@@ -480,9 +480,11 @@ struct zone {
 	 * Any reader who can't tolerant drift of present_pages and
 	 * managed_pages should hold memory hotplug lock to get a stable value.
 	 */
-	unsigned long		spanned_pages;
-	unsigned long		present_pages;
-	unsigned long		managed_pages;
+	//cat /proc/zoneinfo 能看到每个zone的spanned、present、managed
+	unsigned long		spanned_pages;//该zone总内存page数，包含空洞page
+	unsigned long		present_pages;//该zone总内存减去空洞的page数
+	//present_pages-reserved_pages即减去reserved_pages后剩余的总page数，reserved_pages includes pages allocated by the bootmem allocator
+	unsigned long		managed_pages;//就理解成该zone可用的总page数
 
 	/*
 	 * rarely used fields:

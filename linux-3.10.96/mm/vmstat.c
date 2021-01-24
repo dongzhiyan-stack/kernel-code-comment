@@ -207,13 +207,15 @@ void set_pgdat_percpu_threshold(pg_data_t *pgdat,
  * For use when we know that interrupts are disabled.
  */
 void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
-				int delta)
+				int delta)//yes
 {
 	struct per_cpu_pageset __percpu *pcp = zone->pageset;
+    //根据item找到对应类型内存统计计数在pcp->vm_stat_diff 数组的位置，p指向它
 	s8 __percpu *p = pcp->vm_stat_diff + item;
 	long x;
 	long t;
 
+    //item类型内存使用计数累加delta，delta也可能是负数
 	x = delta + __this_cpu_read(*p);
 
 	t = __this_cpu_read(pcp->stat_threshold);
@@ -222,6 +224,7 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 		zone_page_state_add(x, zone, item);
 		x = 0;
 	}
+    //更新item类型内存使用计数
 	__this_cpu_write(*p, x);
 }
 EXPORT_SYMBOL(__mod_zone_page_state);
@@ -264,7 +267,7 @@ void __inc_zone_state(struct zone *zone, enum zone_stat_item item)
 		__this_cpu_write(*p, -overstep);
 	}
 }
-
+//__mod_zone_page_state
 void __inc_zone_page_state(struct page *page, enum zone_stat_item item)
 {
 	__inc_zone_state(page_zone(page), item);

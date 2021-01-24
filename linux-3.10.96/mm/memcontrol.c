@@ -3940,7 +3940,7 @@ static int mem_cgroup_charge_common(struct page *page, struct mm_struct *mm,
 		oom = false;
 	}
 
-	ret = __mem_cgroup_try_charge(mm, gfp_mask, nr_pages, &memcg, oom);//这里
+	ret = __mem_cgroup_try_charge(mm, gfp_mask, nr_pages, &memcg, oom);//这里cgroup内存统计
 	if (ret == -ENOMEM)
 		return ret;
 	__mem_cgroup_commit_charge(memcg, page, nr_pages, ctype, false);

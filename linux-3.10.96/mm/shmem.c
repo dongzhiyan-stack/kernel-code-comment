@@ -301,6 +301,8 @@ static int shmem_add_to_page_cache(struct page *page,
 								 page);
 	if (!error) {
 		mapping->nrpages++;
+        //这充分说明NR_SHMEM属于NR_FILE_PAGES，NR_SHMEM代表的是基于内存文件系统tmpfs的文件占用的内存，本质是内存
+        //，这部分不算是page cache
 		__inc_zone_page_state(page, NR_FILE_PAGES);
 		__inc_zone_page_state(page, NR_SHMEM);
 		spin_unlock_irq(&mapping->tree_lock);
@@ -866,6 +868,7 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 
 	if (add_to_swap_cache(page, swap, GFP_ATOMIC) == 0) {
 		swap_shmem_alloc(swap);
+        //先将page从shmem 移除，将page移动到swap cache
 		shmem_delete_from_page_cache(page, swp_to_radix_entry(swap));
 
 		spin_lock(&info->lock);
@@ -1157,7 +1160,7 @@ repeat:
 
 		error = mem_cgroup_cache_charge(page, current->mm,
 						gfp & GFP_RECLAIM_MASK);
-		if (!error) {
+		if (!error) {//把page加入NR_SHMEM
 			error = shmem_add_to_page_cache(page, mapping, index,
 						gfp, swp_to_radix_entry(swap));
 			/*
@@ -1366,7 +1369,7 @@ static int shmem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		spin_unlock(&inode->i_lock);
 	}
 
-	error = shmem_getpage(inode, vmf->pgoff, &vmf->page, SGP_CACHE, &ret);
+	error = shmem_getpage(inode, vmf->pgoff, &vmf->page, SGP_CACHE, &ret);//这里
 	if (error)
 		return ((error == -ENOMEM) ? VM_FAULT_OOM : VM_FAULT_SIGBUS);
 

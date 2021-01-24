@@ -576,6 +576,9 @@ long nr_blockdev_pages(void)
 	struct block_device *bdev;
 	long ret = 0;
 	spin_lock(&bdev_lock);
+    //do_sync_read->generic_file_aio_read->page_cache_async_readahead->->ondemand_readahead->
+    //__do_page_cache_readahead->read_pages->blkdev_readpage->block_read_full_page,在read_pages里执行add_to_page_cache_lru
+    //把page添加到NR_FILE_PAGES，所以直接读写block层的内存page属于NR_FILE_PAGES，不对吧，有问题??????
 	list_for_each_entry(bdev, &all_bdevs, bd_list) {
 		ret += bdev->bd_inode->i_mapping->nrpages;
 	}

@@ -737,7 +737,7 @@ static void free_one_page(struct zone *zone, struct page *page, int order,
       */
 	__free_one_page(page, zone, order, migratetype);
 	if (unlikely(!is_migrate_isolate(migratetype)))
-		__mod_zone_freepage_state(zone, 1 << order, migratetype);
+		__mod_zone_freepage_state(zone, 1 << order, migratetype);//更新 NR_FREE_PAGES 增加 1 << order
 	spin_unlock(&zone->lock);
 }
 
@@ -1283,6 +1283,7 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 			__mod_zone_page_state(zone, NR_FREE_CMA_PAGES,
 					      -(1 << order));
 	}
+    //更新 NR_FREE_PAGES 减少 i << order
 	__mod_zone_page_state(zone, NR_FREE_PAGES, -(i << order));
 	spin_unlock(&zone->lock);
 	return i;
@@ -1459,7 +1460,7 @@ void free_hot_cold_page(struct page *page, int cold)
 	 */
 	if (migratetype >= MIGRATE_PCPTYPES) {
 		if (unlikely(is_migrate_isolate(migratetype))) {
-			free_one_page(zone, page, 0, migratetype);
+			free_one_page(zone, page, 0, migratetype);//这里会更新NR_FREE_PAGES减少 1 << order
 			goto out;
 		}
 		migratetype = MIGRATE_MOVABLE;
@@ -1654,6 +1655,8 @@ again:
 		spin_unlock(&zone->lock);
 		if (!page)
 			goto failed;
+        
+        //更新 NR_FREE_PAGES 减少 i << order
 		__mod_zone_freepage_state(zone, -(1 << order),
 					  get_pageblock_migratetype(page));
 	}
@@ -5429,23 +5432,31 @@ static void calculate_totalreserve_pages(void)
 	struct pglist_data *pgdat;
 	unsigned long reserve_pages = 0;
 	enum zone_type i, j;
-
+    //遍历每个内存node
 	for_each_online_pgdat(pgdat) {
+	    //遍历内存node的每个zone，reserve_pages累加该zone的总预留page数。每个zone的总预留page数=该zone high水位page数 + 
+	    //该zone->lowmem_reserve[]限制高阶zone内存分配最大预留page数。reserve_pages累加完所有zone的总预留page数，就是系统总预留page数totalreserve_pages
 		for (i = 0; i < MAX_NR_ZONES; i++) {
 			struct zone *zone = pgdat->node_zones + i;
 			unsigned long max = 0;
 
 			/* Find valid and maximum lowmem_reserve in the zone */
+            //找到每个内存zone最大的预留内存zone->lowmem_reserve[j]赋于max，比如dma_zone->lowmem_reserve[0,1,2]={0,12,120}，dma zone
+            //限制dma32 zone、normal zone 在dma zone中分配内存时，dma zone最低要预留12、120个page，这个for循环选出最大的
+            //dma_zone->lowmem_reserve[2]=120作为dma zone的lowmem_reserve最大预留内存
 			for (j = i; j < MAX_NR_ZONES; j++) {
 				if (zone->lowmem_reserve[j] > max)
 					max = zone->lowmem_reserve[j];
 			}
 
 			/* we treat the high watermark as reserved pages. */
+            //预留内存再累加zone high水位page数
 			max += high_wmark_pages(zone);
 
 			if (max > zone->managed_pages)
 				max = zone->managed_pages;
+
+            //reserve_pages累加每个总的预留page数
 			reserve_pages += max;
 			/*
 			 * Lowmem reserves are not available to
@@ -5460,6 +5471,7 @@ static void calculate_totalreserve_pages(void)
 		}
 	}
 	dirty_balance_reserve = reserve_pages;
+    //最终设置系统总的预留内存数totalreserve_pages
 	totalreserve_pages = reserve_pages;
 }
 
@@ -5469,6 +5481,24 @@ static void calculate_totalreserve_pages(void)
  *	has a correct pages reserved value, so an adequate number of
  *	pages are left in the zone after a successful __alloc_pages().
  */
+//限制高阶zone进入低级zone分配page
+/*
+举例最实在
+sysctl_lowmem_reserve_ratio[0,1,2]="dma:256 dma32:256  normal:32"
+zone的总page数是pages_dma、pages_dma32、pages_normal，zone id依次是0、1、2。
+j=0,j代表dma zone,仅仅 dma_zone->lowmem_reserve[0] = 0;
+
+j=1,j代表dma32 zone,dma32_zone->lowmem_reserve[j=1] = 0。
+    第1次while循环,idx=0,dma_zone->lowmem_reserve[j=1]=pages_dma32/sysctl_lowmem_reserve_ratio[idx=0]
+
+j=2,j代表normal zone。normal_zone->lowmem_reserve[j=2] = 0。
+    第1次while循环,idx=1,dma32_zone->lowmem_reserve[j=2]=pages_normal/sysctl_lowmem_reserve_ratio[idx=1]
+    第2次while循环,idx=0,dma_zone->lowmem_reserve[j=2]=pages_normal/sysctl_lowmem_reserve_ratio[idx=0]
+
+    dma_zone->lowmem_reserve[0,1,2] = {0,pages_dma32/sysctl_lowmem_reserve_ratio[dma_zone_id=0],pages_normal/sysctl_lowmem_reserve_ratio[dma_zone_id=0]}
+    dma32_zone->lowmem_reserve[0,1,2]={0,0,pages_normal/sysctl_lowmem_reserve_ratio[dma32_zone_id=1}
+    normal_zone->lowmem_reserve[0,1,2] = {0,0,0}
+*/
 static void setup_per_zone_lowmem_reserve(void)
 {
 	struct pglist_data *pgdat;
@@ -5481,18 +5511,25 @@ static void setup_per_zone_lowmem_reserve(void)
 
 			zone->lowmem_reserve[j] = 0;
 
+            //j是当前zone id
 			idx = j;
 			while (idx) {
 				struct zone *lower_zone;
-
+                //idx--后是低阶zone id
 				idx--;
 
+                //sysctl_lowmem_reserve_ratio[0,1,2]="dma:256 dma32:256  normal:32"
 				if (sysctl_lowmem_reserve_ratio[idx] < 1)
 					sysctl_lowmem_reserve_ratio[idx] = 1;
 
+                //取出idx代表的低阶zone于lower_zone
 				lower_zone = pgdat->node_zones + idx;
+                //设置lower_zone这个低阶zone对j代表的当前zone的page限制，managed_pages是j代表的当前zone的可用总page数，
+                //sysctl_lowmem_reserve_ratio[idx]是lower_zone这个低阶zone对j代表的当前zone分配page的限制。
 				lower_zone->lowmem_reserve[j] = managed_pages /
 					sysctl_lowmem_reserve_ratio[idx];
+
+                //managed_pages 还要累加lower_zone低阶zone的page数
 				managed_pages += lower_zone->managed_pages;
 			}
 		}
@@ -5504,6 +5541,7 @@ static void setup_per_zone_lowmem_reserve(void)
 
 static void __setup_per_zone_wmarks(void)
 {
+    //pages_min:min_free_kbytes代表的page数
 	unsigned long pages_min = min_free_kbytes >> (PAGE_SHIFT - 10);
 	unsigned long lowmem_pages = 0;
 	struct zone *zone;
@@ -5512,6 +5550,7 @@ static void __setup_per_zone_wmarks(void)
 	/* Calculate total number of !ZONE_HIGHMEM pages */
 	for_each_zone(zone) {
 		if (!is_highmem(zone))
+            //lowmem_pages累加每个zone的managed_pages，managed_pages是每个zone可用总page数，lowmem_pages保存的是所有zone总page数，除去high mem zone
 			lowmem_pages += zone->managed_pages;
 	}
 
@@ -5519,8 +5558,11 @@ static void __setup_per_zone_wmarks(void)
 		u64 tmp;
 
 		spin_lock_irqsave(&zone->lock, flags);
+      //下边两行代码就是:tmp = (pages_min * zone->managed_pages)/lowmem_pages=pages_min*(zone->managed_pages/lowmem_pages)
+      //相当于tmp最后保存的是pages_min*该zone的page数于所有zone的page数的占比,这里是把pages_min分散到各个zone，比如 dma、normal分别有
+      // 10、50个page。min_free_kbytes设置的内存数11个page，则dma zone分去11*(10/60)个page，normal zone分去11*(50/60)个page。
 		tmp = (u64)pages_min * zone->managed_pages;
-		do_div(tmp, lowmem_pages);
+        do_div(tmp, lowmem_pages);//就是 tmp=tmp/lowmem_pages
 		if (is_highmem(zone)) {
 			/*
 			 * __GFP_HIGH and PF_MEMALLOC allocations usually don't
@@ -5540,11 +5582,16 @@ static void __setup_per_zone_wmarks(void)
 			/*
 			 * If it's a lowmem zone, reserve a number of pages
 			 * proportionate to the zone's size.
-			 */
+			 */// 
+		 //说白了，min_free_kbytes这个系统设置的min预留内存要按照各个zone的page数占比平摊到各个zone。
+         //zone min水位page数=min_free_kbytes*(该zone总page数/所有zone总page数)。low水位page数=min*(4/5),high水位page数=min(3/2)
+      
+			//该内存zone低水位，tmp就是每个zone的min水位
 			zone->watermark[WMARK_MIN] = tmp;
 		}
-
+        //low内存水位:其实就是tmp*(5/4)
 		zone->watermark[WMARK_LOW]  = min_wmark_pages(zone) + (tmp >> 2);
+        //high内存水位:其实就是tmp*(3/2)
 		zone->watermark[WMARK_HIGH] = min_wmark_pages(zone) + (tmp >> 1);
 
 		setup_zone_migrate_reserve(zone);
@@ -5552,6 +5599,7 @@ static void __setup_per_zone_wmarks(void)
 	}
 
 	/* update totalreserve_pages */
+    //计算 totalreserve_pages 
 	calculate_totalreserve_pages();
 }
 

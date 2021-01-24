@@ -357,6 +357,7 @@ out:
  *
  *	Insert an item into the radix tree at position @index.
  */
+//把item插入的radix树
 int radix_tree_insert(struct radix_tree_root *root,
 			unsigned long index, void *item)
 {
@@ -383,6 +384,7 @@ int radix_tree_insert(struct radix_tree_root *root,
 	while (height > 0) {
 		if (slot == NULL) {
 			/* Have to add a child node.  */
+            //分配一个radix_tree_node，下边赋于slot和node
 			if (!(slot = radix_tree_node_alloc(root)))
 				return -ENOMEM;
 			slot->height = height;
@@ -396,6 +398,7 @@ int radix_tree_insert(struct radix_tree_root *root,
 
 		/* Go a level down */
 		offset = (index >> shift) & RADIX_TREE_MAP_MASK;
+        //node = slot
 		node = slot;
 		slot = node->slots[offset];
 		shift -= RADIX_TREE_MAP_SHIFT;
@@ -407,6 +410,7 @@ int radix_tree_insert(struct radix_tree_root *root,
 
 	if (node) {
 		node->count++;
+        //把item保存到node->slots[offset]，即radix_tree_node
 		rcu_assign_pointer(node->slots[offset], item);
 		BUG_ON(tag_get(node, 0, offset));
 		BUG_ON(tag_get(node, 1, offset));

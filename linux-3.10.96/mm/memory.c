@@ -574,10 +574,12 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		vma = next;
 	}
 }
-
+//3级页表页目录为例，为pte页表分配一个page，该内存page物理机地址写入pmd指向的页表项，即完成了页表页目录映射。如果pmd指向的内存
+//已经赋值过页表了，则释放刚为pte页表分配的page
 int __pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
 		pmd_t *pmd, unsigned long address)
 {
+    //分配一个page
 	pgtable_t new = pte_alloc_one(mm, address);
 	int wait_split_huge_page;
 	if (!new)
@@ -600,6 +602,8 @@ int __pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	spin_lock(&mm->page_table_lock);
 	wait_split_huge_page = 0;
+    //*pmd为NULL，说明页表项pte为空，则把刚为pte分配的一个page的物理地址写入pmd指向的内存。3级也表页目录映射时，就是把页表的
+    //page的物理地址写入pgd指向的页目录项
 	if (likely(pmd_none(*pmd))) {	/* Has another populated it ? */
 		mm->nr_ptes++;
 		pmd_populate(mm, pmd, new);
@@ -607,7 +611,9 @@ int __pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
 	} else if (unlikely(pmd_trans_splitting(*pmd)))
 		wait_split_huge_page = 1;
 	spin_unlock(&mm->page_table_lock);
-	if (new)
+
+    
+	if (new)//这个if成立，说明pmd指向内存已经设置过页表了，释放刚才为pte分配的内存page
 		pte_free(mm, new);
 	if (wait_split_huge_page)
 		wait_split_huge_page(vma->anon_vma, pmd);
@@ -3220,6 +3226,7 @@ static inline int check_stack_guard_page(struct vm_area_struct *vma, unsigned lo
  * but allow concurrent faults), and pte mapped but not yet locked.
  * We return with mmap_sem still held, but pte unmapped and unlocked.
  */
+//应用层malloc分配内存，先分配应用层虚拟空间vma，然后读写时产生缺页异常，在这里分配实际的物理内存，分配后直接清0
 static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		unsigned long address, pte_t *page_table, pmd_t *pmd,
 		unsigned int flags)
@@ -3251,6 +3258,8 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	/* Allocate our own private page. */
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
+    
+    //分配一个物理内存page并清0
 	page = alloc_zeroed_user_highpage_movable(vma, address);
 	if (!page)
 		goto oom;
@@ -3261,20 +3270,25 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 */
 	__SetPageUptodate(page);
 
+    //cgroup内存统计
 	if (mem_cgroup_newpage_charge(page, mm, GFP_KERNEL))
 		goto oom_free_page;
-
+    
+    //entry保存页表属性
 	entry = mk_pte(page, vma->vm_page_prot);
 	if (vma->vm_flags & VM_WRITE)
 		entry = pte_mkwrite(pte_mkdirty(entry));
-
+    
+    //返回页表项给page_table，在这片内存保存下一步分配的物理内存页帧
 	page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
 	if (!pte_none(*page_table))
 		goto release;
 
 	inc_mm_counter_fast(mm, MM_ANONPAGES);
+    //统计匿名映射NR_ANON_PAGES和LRU_ACTIVE_ANON
 	page_add_new_anon_rmap(page, vma, address);
 setpte:
+    //把物理内存page页帧写入page_table指向的页表项，entry带着页表属性
 	set_pte_at(mm, address, page_table, entry);
 
 	/* No need to invalidate - it was non-present before */
@@ -3345,7 +3359,7 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	vmf.flags = flags;
 	vmf.page = NULL;
 
-	ret = vma->vm_ops->fault(vma, &vmf);
+	ret = vma->vm_ops->fault(vma, &vmf);//shm_fault
 	if (unlikely(ret & (VM_FAULT_ERROR | VM_FAULT_NOPAGE |
 			    VM_FAULT_RETRY)))
 		goto uncharge_out;
@@ -3713,9 +3727,11 @@ int handle_pte_fault(struct mm_struct *mm,
 	entry = *pte;
 	if (!pte_present(entry)) {
 		if (pte_none(entry)) {
-			if (vma->vm_ops)
+			if (vma->vm_ops)//文件映射走这里
 				return do_linear_fault(mm, vma, address,
 						pte, pmd, flags, entry);
+
+            //匿名映射
 			return do_anonymous_page(mm, vma, address,
 						 pte, pmd, flags);
 		}
@@ -3772,15 +3788,20 @@ static int __handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		return hugetlb_fault(mm, vma, address, flags);
 
 retry:
+    //根据虚拟地址address获取页目录项，pgd指向这个页目录项
 	pgd = pgd_offset(mm, address);
+    //3层页表页目录映射直接返回pgd。否则是分配一个内存page作为pud项，把该page内存的物理首地址记记录到pgd页表项，
+    //并根据address的pud字段的偏移计算出pud项，完成pud的映射。后令pud_t *pud指针指向这片内存
 	pud = pud_alloc(mm, pgd, address);
 	if (!pud)
 		return VM_FAULT_OOM;
+    //3层页表页目录映射直接返回pgd。否则是分配一个内存page作为pmd项，把该page内存的物理首地址记录到pud项，
+    //并根据address的pmd字段的偏移计算出pmd项，完成pmd的映射。后令pud_t *pud指针指向这片内存
 	pmd = pmd_alloc(mm, pud, address);
 	if (!pmd)
 		return VM_FAULT_OOM;
 	if (pmd_none(*pmd) && transparent_hugepage_enabled(vma)) {
-		if (!vma->vm_ops)
+		if (!vma->vm_ops)//应该是，页表和页目录使用huge page时走这里，不使用4K page
 			return do_huge_pmd_anonymous_page(mm, vma, address,
 							  pmd, flags);
 	} else {
@@ -3831,6 +3852,7 @@ retry:
 	 * run pte_offset_map on the pmd, if an huge pmd could
 	 * materialize from under us from a different thread.
 	 */
+	//分配页表项pte。分配一个page，把page内存的物理首地址写入pmd，完成页表页目录映射
 	if (unlikely(pmd_none(*pmd)) &&
 	    unlikely(__pte_alloc(mm, vma, pmd, address)))
 		return VM_FAULT_OOM;
@@ -3843,8 +3865,10 @@ retry:
 	 * read mode and khugepaged takes it in write mode. So now it's
 	 * safe to run pte_offset_map().
 	 */
+	// 3级页表页目录映射时，根据address中的页表片字段计算出页表项地址，pte指向这个页表项内存
 	pte = pte_offset_map(pmd, address);
 
+    //真正分配物理内存page，把物理内存页帧写入pte指向的页表项，真正完成映射
 	return handle_pte_fault(mm, vma, address, pte, pmd, flags);
 }
 

@@ -22,6 +22,8 @@
 
 #if BITS_PER_LONG == 64
 
+//__rem保存n/base的余数
+//n保存n/bash的除数
 # define do_div(n,base) ({					\
 	uint32_t __base = (base);				\
 	uint32_t __rem;						\

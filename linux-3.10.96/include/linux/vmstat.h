@@ -90,6 +90,7 @@ static inline void vm_events_fold_cpu(int cpu)
 /*
  * Zone based page accounting with per cpu differentials.
  */
+//vm_stat[]数组保存各个内存使用page数
 extern atomic_long_t vm_stat[NR_VM_ZONE_STAT_ITEMS];
 
 static inline void zone_page_state_add(long x, struct zone *zone,
@@ -182,7 +183,7 @@ extern void zone_statistics(struct zone *, struct zone *, gfp_t gfp);
 extern void inc_zone_state(struct zone *, enum zone_stat_item);
 
 #ifdef CONFIG_SMP
-void __mod_zone_page_state(struct zone *, enum zone_stat_item item, int);
+void __mod_zone_page_state(struct zone *, enum zone_stat_item item, int);//yes
 void __inc_zone_page_state(struct page *, enum zone_stat_item);
 void __dec_zone_page_state(struct page *, enum zone_stat_item);
 
@@ -260,6 +261,7 @@ static inline void drain_zonestat(struct zone *zone,
 static inline void __mod_zone_freepage_state(struct zone *zone, int nr_pages,
 					     int migratetype)
 {
+    //更新 NR_FREE_PAGES 减少 nr_pages
 	__mod_zone_page_state(zone, NR_FREE_PAGES, nr_pages);
 	if (is_migrate_cma(migratetype))
 		__mod_zone_page_state(zone, NR_FREE_CMA_PAGES, nr_pages);

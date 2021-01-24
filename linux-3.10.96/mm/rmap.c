@@ -1095,11 +1095,14 @@ void page_add_new_anon_rmap(struct page *page,
 	SetPageSwapBacked(page);
 	atomic_set(&page->_mapcount, 0); /* increment count (starts at -1) */
 	if (!PageTransHuge(page))
-		__inc_zone_page_state(page, NR_ANON_PAGES);
+		__inc_zone_page_state(page, NR_ANON_PAGES);//匿名映射非hugepage统计在NR_ANON_PAGES
 	else
-		__inc_zone_page_state(page, NR_ANON_TRANSPARENT_HUGEPAGES);
+		__inc_zone_page_state(page, NR_ANON_TRANSPARENT_HUGEPAGES);//匿名映射非hugepage统计在NR_ANON_PAGES
+
+    //page->mapping 和 page->index赋值
 	__page_set_anon_rmap(page, vma, address, 1);
-	if (!mlocked_vma_newpage(vma, page))
+    
+	if (!mlocked_vma_newpage(vma, page))//如果vma内存没有设置lock属性
 		lru_cache_add_lru(page, LRU_ACTIVE_ANON);
 	else
 		add_page_to_unevictable_list(page);

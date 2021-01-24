@@ -349,7 +349,7 @@ static int shm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	struct file *file = vma->vm_file;
 	struct shm_file_data *sfd = shm_file_data(file);
 
-	return sfd->vm_ops->fault(vma, vmf);
+	return sfd->vm_ops->fault(vma, vmf);//shmem_fault
 }
 
 #ifdef CONFIG_NUMA

@@ -133,7 +133,7 @@ void __delete_from_page_cache(struct page *page)
 	mapping->nrpages--;
 	__dec_zone_page_state(page, NR_FILE_PAGES);
 	if (PageSwapBacked(page))
-		__dec_zone_page_state(page, NR_SHMEM);
+		__dec_zone_page_state(page, NR_SHMEM);//与swap有关
 	BUG_ON(page_mapped(page));
 
 	/*
@@ -476,9 +476,10 @@ int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 		page->index = offset;
 
 		spin_lock_irq(&mapping->tree_lock);
+        //page插入address_space的radix_tree_root树
 		error = radix_tree_insert(&mapping->page_tree, offset, page);
 		if (likely(!error)) {
-			mapping->nrpages++;
+			mapping->nrpages++;//mapping->nrpages++，插入radix_tree_root树的page数加1
 			__inc_zone_page_state(page, NR_FILE_PAGES);
 			spin_unlock_irq(&mapping->tree_lock);
 			trace_mm_filemap_add_to_page_cache(page);

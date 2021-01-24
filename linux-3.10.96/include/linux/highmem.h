@@ -160,7 +160,7 @@ __alloc_zeroed_user_highpage(gfp_t movableflags,
 	struct page *page = alloc_page_vma(GFP_HIGHUSER | movableflags,
 			vma, vaddr);
 
-	if (page)
+	if (page)//page清0
 		clear_user_highpage(page, vaddr);
 
 	return page;
@@ -179,7 +179,7 @@ static inline struct page *
 alloc_zeroed_user_highpage_movable(struct vm_area_struct *vma,
 					unsigned long vaddr)
 {
-	return __alloc_zeroed_user_highpage(__GFP_MOVABLE, vma, vaddr);
+	return __alloc_zeroed_user_highpage(__GFP_MOVABLE, vma, vaddr);//应用层触发分配的页__GFP_MOVABLE，可移动
 }
 
 static inline void clear_highpage(struct page *page)

@@ -406,14 +406,14 @@ int pagecache_write_end(struct file *, struct address_space *mapping,
 struct backing_dev_info;
 struct address_space {
 	struct inode		*host;		/* owner: inode, block_device */
-	struct radix_tree_root	page_tree;	/* radix tree of all pages */
+	struct radix_tree_root	page_tree;	/* radix tree of all pages *///链接所有page，根root
 	spinlock_t		tree_lock;	/* and lock protecting it */
 	unsigned int		i_mmap_writable;/* count VM_SHARED mappings */
 	struct rb_root		i_mmap;		/* tree of private and shared mappings */
 	struct list_head	i_mmap_nonlinear;/*list VM_NONLINEAR mappings */
 	struct mutex		i_mmap_mutex;	/* protect tree, count, list */
 	/* Protected by tree_lock together with the radix tree */
-	unsigned long		nrpages;	/* number of total pages */
+	unsigned long		nrpages;	/* number of total pages *///分配的page数
 	pgoff_t			writeback_index;/* writeback starts here */
     //块设备的在bdget()函数赋值，inode->i_data.a_ops = &def_blk_aops;
 	const struct address_space_operations *a_ops;	/* methods */

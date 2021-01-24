@@ -119,6 +119,8 @@ extern struct page *empty_zero_page;
 #define pte_none(pte)		(!pte_val(pte))
 #define pte_clear(mm,addr,ptep)	set_pte(ptep, __pte(0))
 #define pte_page(pte)		(pfn_to_page(pte_pfn(pte)))
+//返回页表项。dir页目录项，里边保存了页表的物理内存首地址，__pte_index(addr)是根据虚拟空间计算出来的页表的偏移
+//二者相加就指向页表项的内存
 #define pte_offset_kernel(dir,addr)	(pmd_page_vaddr(*(dir)) + __pte_index(addr))
 
 #define pte_offset_map(dir,addr)	pte_offset_kernel((dir), (addr))
@@ -209,7 +211,7 @@ static inline void pmd_clear(pmd_t *pmdp)
 }
 
 static inline pte_t *pmd_page_vaddr(pmd_t pmd)
-{
+{//返回内核态虚拟地址
 	return __va(pmd_val(pmd) & PHYS_MASK & (s32)PAGE_MASK);
 }
 

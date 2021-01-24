@@ -128,10 +128,10 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
 		struct page *page = list_to_page(pages);
-		list_del(&page->lru);
+		list_del(&page->lru);//´ÓpageµÄlruÁ´±íÌŞ³ı
 		if (!add_to_page_cache_lru(page, mapping,
 					page->index, GFP_KERNEL)) {
-			mapping->a_ops->readpage(filp, page);
+			mapping->a_ops->readpage(filp, page);//blkdev_readpage
 		}
 		page_cache_release(page);
 	}

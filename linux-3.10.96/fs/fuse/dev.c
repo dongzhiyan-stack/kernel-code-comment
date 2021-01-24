@@ -1029,6 +1029,7 @@ static int fuse_copy_args(struct fuse_copy_state *cs, unsigned numargs,
 	for (i = 0; !err && i < numargs; i++)  {
 		struct fuse_arg *arg = &args[i];
 		if (i == numargs - 1 && argpages)
+            //fuse_copy_args时，打印证实没有执行fuse_copy_one()，那应该是fuse_copy_pages
 			err = fuse_copy_pages(cs, arg->size, zeroing);
 		else
 			err = fuse_copy_one(cs, arg->value, arg->size);
@@ -1308,7 +1309,7 @@ static ssize_t fuse_dev_do_read(struct fuse_conn *fc, struct file *file,
 		request_end(fc, req);
 		return err;
 	}
-	if (!req->isreply)
+	if (!req->isreply)//fuse_request_send()中赋值为1,这里应该不成立
 		request_end(fc, req);//唤醒，设置req->state 为 FUSE_REQ_FINISHED
 	else {
 		req->state = FUSE_REQ_SENT;//fuse_dev_do_read()最后设置req FUSE_REQ_SENT状态

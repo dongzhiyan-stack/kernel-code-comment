@@ -1290,6 +1290,7 @@ static inline void pgtable_page_dtor(struct page *page)
 #define pte_offset_map_lock(mm, pmd, address, ptlp)	\
 ({							\
 	spinlock_t *__ptl = pte_lockptr(mm, pmd);	\
+	//·µ»ØÒ³±íÏî
 	pte_t *__pte = pte_offset_map(pmd, address);	\
 	*(ptlp) = __ptl;				\
 	spin_lock(__ptl);				\
