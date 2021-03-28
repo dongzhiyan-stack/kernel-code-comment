@@ -95,14 +95,14 @@ unsigned long vm_dirty_bytes;
 /*
  * The interval between `kupdate'-style writebacks
  */
-unsigned int dirty_writeback_interval = 5 * 100; /* centiseconds */
+unsigned int dirty_writeback_interval = 5 * 100; /* centiseconds *///5s 周期性回写脏页
 
 EXPORT_SYMBOL_GPL(dirty_writeback_interval);
 
 /*
  * The longest time for which data is allowed to remain dirty
  */
-unsigned int dirty_expire_interval = 30 * 100; /* centiseconds */
+unsigned int dirty_expire_interval = 30 * 100; /* centiseconds *///30s 脏页在内存中保存30s就要回写到磁盘
 
 /*
  * Flag that makes the machine dump writes/reads and block dirtyings.
@@ -292,6 +292,7 @@ void global_dirty_limits(unsigned long *pbackground, unsigned long *pdirty)
 	else
 		dirty = (vm_dirty_ratio * available_memory) / 100;
 
+    //dirty_background_bytes 和 dirty_background_ratio都表示脏页阀值，对应/proc目录设置脏页阀值
 	if (dirty_background_bytes)
 		background = DIV_ROUND_UP(dirty_background_bytes, PAGE_SIZE);
 	else
@@ -306,6 +307,7 @@ void global_dirty_limits(unsigned long *pbackground, unsigned long *pdirty)
 	}
 	*pbackground = background;
 	*pdirty = dirty;
+    //这个trace可以直接打印
 	trace_global_dirty_state(background, dirty);
 }
 
@@ -1555,6 +1557,7 @@ int dirty_writeback_centisecs_handler(ctl_table *table, int write,
 void laptop_mode_timer_fn(unsigned long data)
 {
 	struct request_queue *q = (struct request_queue *)data;
+    //获取脏页数
 	int nr_pages = global_page_state(NR_FILE_DIRTY) +
 		global_page_state(NR_UNSTABLE_NFS);
 
@@ -1757,14 +1760,14 @@ int write_cache_pages(struct address_space *mapping,
 	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
 		tag = PAGECACHE_TAG_TOWRITE;
 	else
-		tag = PAGECACHE_TAG_DIRTY;
+		tag = PAGECACHE_TAG_DIRTY;//脏页在这里
 retry:
 	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
 		tag_pages_for_writeback(mapping, index, end);
 	done_index = index;
 	while (!done && (index <= end)) {
 		int i;
-        //取出cache page保存到pvec.pages[]
+        //从mapping->page_tree找到脏页page保存到pvec.pages[ ]
 		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
 			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 		if (nr_pages == 0)
@@ -1824,7 +1827,8 @@ continue_unlock:
 				goto continue_unlock;
 
 			trace_wbc_writepage(wbc, mapping->backing_dev_info);
-			ret = (*writepage)(page, wbc, data);//__writepage() 实际写page cache到硬盘
+            //__writepage()把该page的数据写入磁盘
+			ret = (*writepage)(page, wbc, data);
 			if (unlikely(ret)) {
 				if (ret == AOP_WRITEPAGE_ACTIVATE) {
 					unlock_page(page);
@@ -1886,7 +1890,7 @@ static int __writepage(struct page *page, struct writeback_control *wbc,
 		       void *data)
 {
 	struct address_space *mapping = data;
-	int ret = mapping->a_ops->writepage(page, wbc);
+	int ret = mapping->a_ops->writepage(page, wbc);//blkdev_writepage
 	mapping_set_error(mapping, ret);
 	return ret;
 }
@@ -1924,9 +1928,9 @@ int do_writepages(struct address_space *mapping, struct writeback_control *wbc)
 	if (wbc->nr_to_write <= 0)
 		return 0;
 	if (mapping->a_ops->writepages)
-		ret = mapping->a_ops->writepages(mapping, wbc);
+		ret = mapping->a_ops->writepages(mapping, wbc); 
 	else
-		ret = generic_writepages(mapping, wbc);
+		ret = generic_writepages(mapping, wbc);//回刷脏数据
 	return ret;
 }
 
@@ -1988,6 +1992,7 @@ void account_page_dirtied(struct page *page, struct address_space *mapping)
 	trace_writeback_dirty_page(page, mapping);
 
 	if (mapping_cap_account_dirty(mapping)) {
+        //增加脏页NR_FILE_DIRTY
 		__inc_zone_page_state(page, NR_FILE_DIRTY);
 		__inc_zone_page_state(page, NR_DIRTIED);
 		__inc_bdi_stat(mapping->backing_dev_info, BDI_RECLAIMABLE);

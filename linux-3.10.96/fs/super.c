@@ -910,6 +910,7 @@ struct dentry *mount_ns(struct file_system_type *fs_type, int flags,
 EXPORT_SYMBOL(mount_ns);
 
 #ifdef CONFIG_BLOCK
+//文件系统挂载时执行 ext4_mount->mount_bdev->sget->set_bdev_super
 static int set_bdev_super(struct super_block *s, void *data)
 {
 	s->s_bdev = data;
@@ -919,6 +920,7 @@ static int set_bdev_super(struct super_block *s, void *data)
 	 * We set the bdi here to the queue backing, file systems can
 	 * overwrite this in ->fill_super()
 	 */
+	//s->s_bdi来自块设备的运行队列的backing_dev_info
 	s->s_bdi = &bdev_get_queue(s->s_bdev)->backing_dev_info;
 	return 0;
 }

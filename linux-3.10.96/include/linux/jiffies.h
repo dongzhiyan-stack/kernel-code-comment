@@ -98,11 +98,14 @@ static inline u64 get_jiffies_64(void)
  * good compiler would generate better code (and a really good compiler
  * wouldn't care). Gcc is currently neither.
  */
+//a > b返回true
 #define time_after(a,b)		\
 	(typecheck(unsigned long, a) && \
 	 typecheck(unsigned long, b) && \
 	 ((long)((b) - (a)) < 0))
-#define time_before(a,b)	time_after(b,a)
+
+//前>后返回true
+#define time_before(a,b)	time_after(b,a)//b>a返回true
 
 #define time_after_eq(a,b)	\
 	(typecheck(unsigned long, a) && \
@@ -144,7 +147,7 @@ static inline u64 get_jiffies_64(void)
  */
 
 /* time_is_before_jiffies(a) return true if a is before jiffies */
-#define time_is_before_jiffies(a) time_after(jiffies, a)
+#define time_is_before_jiffies(a) time_after(jiffies, a)//jiffies > a 返回true
 
 /* time_is_after_jiffies(a) return true if a is after jiffies */
 #define time_is_after_jiffies(a) time_before(jiffies, a)

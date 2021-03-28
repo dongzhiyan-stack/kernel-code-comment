@@ -144,6 +144,7 @@ void __delete_from_page_cache(struct page *page)
 	 * having removed the page entirely.
 	 */
 	if (PageDirty(page) && mapping_cap_account_dirty(mapping)) {
+        //减少脏页NR_FILE_DIRTY
 		dec_zone_page_state(page, NR_FILE_DIRTY);
 		dec_bdi_stat(mapping->backing_dev_info, BDI_RECLAIMABLE);
 	}
@@ -473,10 +474,11 @@ int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 	if (error == 0) {
 		page_cache_get(page);
 		page->mapping = mapping;
+        //在文件内偏移作为page->index
 		page->index = offset;
 
 		spin_lock_irq(&mapping->tree_lock);
-        //page插入address_space的radix_tree_root树
+        //page插入文件自己的address_space的radix_tree_root树
 		error = radix_tree_insert(&mapping->page_tree, offset, page);
 		if (likely(!error)) {
 			mapping->nrpages++;//mapping->nrpages++，插入radix_tree_root树的page数加1
@@ -983,6 +985,7 @@ unsigned find_get_pages_tag(struct address_space *mapping, pgoff_t *index,
 
 	rcu_read_lock();
 restart:
+    //脏页时tag = PAGECACHE_TAG_DIRTY时，从mapping->page_tree找到脏页，写page cache时的page添加到mapping->page_tree
 	radix_tree_for_each_tagged(slot, &mapping->page_tree,
 				   &iter, *index, tag) {
 		struct page *page;

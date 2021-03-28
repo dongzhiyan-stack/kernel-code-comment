@@ -35,13 +35,13 @@
 
 
 #ifdef __KERNEL__
-#define RADIX_TREE_MAP_SHIFT	(CONFIG_BASE_SMALL ? 4 : 6)
+#define RADIX_TREE_MAP_SHIFT	(CONFIG_BASE_SMALL ? 4 : 6)//6
 #else
 #define RADIX_TREE_MAP_SHIFT	3	/* For more stressful testing */
 #endif
 
 #define RADIX_TREE_MAP_SIZE	(1UL << RADIX_TREE_MAP_SHIFT)
-#define RADIX_TREE_MAP_MASK	(RADIX_TREE_MAP_SIZE-1)
+#define RADIX_TREE_MAP_MASK	(RADIX_TREE_MAP_SIZE-1)//(1<<6  - 1)
 
 #define RADIX_TREE_TAG_LONGS	\
 	((RADIX_TREE_MAP_SIZE + BITS_PER_LONG - 1) / BITS_PER_LONG)
@@ -56,6 +56,62 @@ struct radix_tree_node {
 	void __rcu	*slots[RADIX_TREE_MAP_SIZE];
 	unsigned long	tags[RADIX_TREE_MAX_TAGS][RADIX_TREE_TAG_LONGS];
 };
+
+/**********来自linux-3.10.0-957.27.2.el7*******************************/
+static inline struct radix_tree_node *entry_to_node(void *ptr)
+{//仅仅ptr的bit0清0
+        return (void *)((unsigned long)ptr & ~RADIX_TREE_INTERNAL_NODE);
+}
+
+/*
+      radix_tree_root->rnode
+                               root radix_tree_node->slots[0,1,2,3,4,5,6...........63]
+  radix_tree_node_0->slots[0,1,2,3,4,5,6...........63]           radix_tree_node_1->slots[0,1,2,3,4,5,6...........63]
+  radix_tree_node_59->slots[0,1,2,3,4,5,6...........63]
+  radix tree的属性结构，radix_tree_root->rnode指向root radix_tree_node，即radix_tree_node_0。每个radix_tree_node的slots[64]要么保存
+  子radix_tree_node节点，要么保存待插入对象的指针。radix_tree_node_0、radix_tree_node_1、radix_tree_node_59是root radix_tree_node的
+  子节点，这里假设root radix_tree_node->slots[0]=radix_tree_node_0，root radix_tree_node->slots[1]=radix_tree_node_1，
+  root radix_tree_node->slots[59]=radix_tree_node_59。
+  
+  每一个对象是按照它的索引插入radix tree树，比如page是按照page->index插入radix tree。假设
+  page0->index是20，则page0指针存入radix_tree_node_0->slots[19]，即radix_tree_node_0->slots[19]=page0;
+  page1->index是64，则page0指针存入radix_tree_node_1->slots[0]，即radix_tree_node_1->slots[0]=page1;
+  page3->index是64*59+1，则page0指针存入radix_tree_node_59->slots[1]，即radix_tree_node_59->slots[1]=page3;
+
+  总结:这个radix tree有2层，root radix_tree_node并不保存待插入对象的page指针，而是保存子radix_tree_node结构指针，所以它一共有64个
+  子radix_tree_node。每个子radix_tree_node可以保存64个page对象指针，该radix tree可以保存64*64个page对象指针。
+  root radix_tree_node->slots[0]指向的子radix_tree_node的slots[0~63]保存page->index是0~63的page对象指针,
+  root radix_tree_node->slots[1]指向的子radix_tree_node的slots[0~63]保存page->index是64~(64*2-1)的page对象指针,其他类推。
+  root radix_tree_node的shift成员在本案例是6,2^6=64，就是说root radix_tree_node的一个slot能保存64个page对象
+*/
+struct radix_tree_node {
+        RH_KABI_REPLACE2(       /* shift & offset replaces path */
+                unsigned int    path,   /* Offset in parent & height from the bottom */
+                //2^shift应该表示该node一个slot能保存多少个对象吧，一般是6。觉得像是是倍率，倍率是2^6=64
+                unsigned char   shift,  /* Bits remaining in each slot */
+                //该节点在父节点中的偏移，就是父节点radix_tree_node[offset]保存的是当前节点指针
+                unsigned char   offset  /* Slot offset in parent */
+        )
+        //该节点有多少个对象或者节点
+        unsigned int    count;
+        union {
+                struct {
+                        /* Used when ascending tree */
+                        //父节点
+                        struct radix_tree_node *parent;
+                        /* For tree user */
+                        void *private_data;
+                };
+                /* Used when freeing node */
+                struct rcu_head rcu_head;
+        };
+        /* For tree user */
+        struct list_head private_list;
+        //保存每个子节点或者待插入对象的指针
+        void __rcu      *slots[RADIX_TREE_MAP_SIZE];
+        unsigned long   tags[RADIX_TREE_MAX_TAGS][RADIX_TREE_TAG_LONGS];
+}; 
+/*****************************************/
 
 #define RADIX_TREE_INDEX_BITS  (8 /* CHAR_BIT */ * sizeof(unsigned long))
 #define RADIX_TREE_MAX_PATH (DIV_ROUND_UP(RADIX_TREE_INDEX_BITS, \

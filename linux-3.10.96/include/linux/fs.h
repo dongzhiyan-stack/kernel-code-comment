@@ -406,6 +406,7 @@ int pagecache_write_end(struct file *, struct address_space *mapping,
 struct backing_dev_info;
 struct address_space {
 	struct inode		*host;		/* owner: inode, block_device */
+    //page cache的page添加到page_tree，见add_to_page_cache_locked()和replace_page_cache_page()，回刷脏数据时find_get_pages_tag()再取出
 	struct radix_tree_root	page_tree;	/* radix tree of all pages *///链接所有page，根root
 	spinlock_t		tree_lock;	/* and lock protecting it */
 	unsigned int		i_mmap_writable;/* count VM_SHARED mappings */
@@ -604,16 +605,18 @@ struct inode {
 #endif
 
 	/* Misc */
-    //新创建的位I_NEW
-	unsigned long		i_state;
+    //新创建的位I_NEW，inode_sleep_on_writeback()中，bit_waitqueue(&inode->i_state, __I_SYNC)这这个等待队列上休眠
+	unsigned long		i_state;//writeback_sb_inodes刷数据前设置I_SYNC，刷数据后inode_sync_complete清除I_SYNC标记
 	struct mutex		i_mutex;
-
+    //__mark_inode_dirty()中标记inode dirty被赋值jiffies，redirty_tail()也会更新
 	unsigned long		dirtied_when;	/* jiffies of first dirtying */
     /*
       inode结构有个杂凑表inode_hashtable，已经创建的inode 结构，都要通过其成员i_hash挂载到
       inode_hashtable某个链表头
       */
 	struct hlist_node	i_hash;
+    //requeue_io()靠inode->i_wb_list把inode移动到到wb->b_more_io链表，回写该inode对应文件的脏页
+    //__mark_inode_dirty()中把list_move(&inode->i_wb_list, &bdi->wb.b_dirty)把inode移动到bdi->wb.b_dirty
 	struct list_head	i_wb_list;	/* backing dev IO list */
 	struct list_head	i_lru;		/* inode LRU list */
     //inode通过其i_sb_list成员添加到超级块super_block的s_inodes链表
@@ -1318,7 +1321,7 @@ struct super_block {
 	int			s_nr_inodes_unused;	/* # of inodes on lru */
 
 	struct block_device	*s_bdev;
-	struct backing_dev_info *s_bdi;
+	struct backing_dev_info *s_bdi;//set_bdev_super中s->s_bdi来自块设备的运行队列的backing_dev_info
 	struct mtd_info		*s_mtd;
 	struct hlist_node	s_instances;
 	struct quota_info	s_dquot;	/* Diskquota specific options */
@@ -1772,9 +1775,9 @@ struct super_operations {
  *
  * Q: What is the difference between I_WILL_FREE and I_FREEING?
  */
-#define I_DIRTY_SYNC		(1 << 0)
+#define I_DIRTY_SYNC		(1 << 0)//inode脏
 #define I_DIRTY_DATASYNC	(1 << 1)
-#define I_DIRTY_PAGES		(1 << 2)
+#define I_DIRTY_PAGES		(1 << 2)//只是有脏page，inode可能是干净的
 #define __I_NEW			3
 #define I_NEW			(1 << __I_NEW)
 #define I_WILL_FREE		(1 << 4)

@@ -53,6 +53,7 @@ struct page {
 	/* Second double word */
 	struct {
 		union {
+            //add_to_page_cache_locked中page->index = offset，是在文件内的偏移
 			pgoff_t index;		/* Our offset within mapping. */
          /*
             1  当刚分配内存页new_slab是，首page被放到c->page，然后page->freelist设置为NULL，为

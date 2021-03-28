@@ -931,7 +931,7 @@ void add_timer_on(struct timer_list *timer, int cpu)
 	spin_lock_irqsave(&base->lock, flags);
 	timer_set_base(timer, base);
 	debug_activate(timer, timer->expires);
-	internal_add_timer(base, timer);
+	internal_add_timer(base, timer);//start a timer
 	/*
 	 * Check whether the other CPU is in dynticks mode and needs
 	 * to be triggered to reevaluate the timer wheel.

@@ -48,19 +48,25 @@ enum bdi_stat_item {
 
 #define BDI_STAT_BATCH (8*(1+ilog2(nr_cpu_ids)))
 
+//简称wb，bdi_writeback来自bdi结构,一个块设备一个，即便是像dm这种虚拟的块设备，也是一个dm一个wb
 struct bdi_writeback {
+    //指向块设备的bdi
 	struct backing_dev_info *bdi;	/* our parent bdi */
 	unsigned int nr;
-
+    //wb_check_old_data_flush()更新为当前系统时间
 	unsigned long last_old_flush;	/* last old data flush */
-
-	struct delayed_work dwork;	/* work item used for writeback *///work函数bdi_writeback_workfn()
+    //脏数据回写dwork。work对应函数是bdi_writeback_workfn()。bdi_queue_work()中第一次启动。
+	struct delayed_work dwork;	/* work item used for writeback */
+    //__mark_inode_dirty()中把list_move(&inode->i_wb_list, &bdi->wb.b_dirty)把inode移动到bdi->wb.b_dirty
 	struct list_head b_dirty;	/* dirty inodes */
+    //queue_io()把wb->b_more_io成员移动到wb->b_io
 	struct list_head b_io;		/* parked for writeback */
+    //保存临时没来得及传输的inode，下次传输。requeue_io()把inode->i_wb_list移动到到wb->b_more_io, queue_io()把wb->b_more_io成员移动到wb->b_io
 	struct list_head b_more_io;	/* parked for more writeback */
 	spinlock_t list_lock;		/* protects the b_* lists */
 };
-
+//struct backing_dev_info ，简称bdi，在块设备初始化时来自运行队列struct request_queue 的q->backing_dev_info，一个块设备一个，
+//即便是像dm这种虚拟的块设备，也是一个dm一个bdi
 struct backing_dev_info {
 	struct list_head bdi_list;
 	unsigned long ra_pages;	/* max readahead in PAGE_CACHE_SIZE units */
@@ -69,7 +75,7 @@ struct backing_dev_info {
 	congested_fn *congested_fn; /* Function pointer if device is md/dm */
 	void *congested_data;	/* Pointer to aux data for congested func */
 
-	char *name;
+	char *name;//打印结果是"device"
 
 	struct percpu_counter bdi_stat[NR_BDI_STAT_ITEMS];
 
@@ -93,15 +99,15 @@ struct backing_dev_info {
 
 	unsigned int min_ratio;
 	unsigned int max_ratio, max_prop_frac;
-
+    //wb在这里
 	struct bdi_writeback wb;  /* default writeback info for this bdi */
 	spinlock_t wb_lock;	  /* protects work_list & wb.dwork scheduling */
 
-	struct list_head work_list;
+	struct list_head work_list;//bdi_queue_work()中把wb_writeback_work加入该链表
 
 	struct device *dev;
 
-	struct timer_list laptop_mode_wb_timer;
+	struct timer_list laptop_mode_wb_timer;//bdi定时器，blk_alloc_queue_node中初始化,定时器函数是laptop_mode_timer_fn
 
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debug_dir;

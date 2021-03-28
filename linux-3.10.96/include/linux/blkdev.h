@@ -429,7 +429,7 @@ struct request_queue {
 	unsigned int		nr_hw_queues;//硬件队列数量，来自set->nr_hw_queues,blk_mq_realloc_hw_ctxs()最后被设置为1，不知道为啥???????
 
 	/*
-	 * Dispatch queue sorting
+	 * Dispatch queue sorting  struct backing_dev_info
 	 */
 	//elv_dispatch_add_tail  发送给驱动的req的结束扇区地址
 	sector_t		end_sector;
@@ -437,7 +437,7 @@ struct request_queue {
 	struct request		*boundary_rq;
 
 	/*
-	 * Delayed queue handling
+	 * Delayed queue handling  
 	 */
 	struct delayed_work	delay_work;//mmc的是work函数是blk_delay_work，blk_alloc_queue_node()中赋值
 

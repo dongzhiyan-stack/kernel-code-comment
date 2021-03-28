@@ -101,6 +101,7 @@ enum {
 struct work_struct {
 	atomic_long_t data;
 	struct list_head entry;
+    //work函数，INIT_DELAYED_WORK有赋值.参见bdi_wb_init()函数，将bdi_writeback_workfn 函数指针赋值于bdi dwork->work->func
 	work_func_t func;
 #ifdef CONFIG_LOCKDEP
 	struct lockdep_map lockdep_map;
@@ -112,8 +113,8 @@ struct work_struct {
 	ATOMIC_LONG_INIT(WORK_STRUCT_NO_POOL | WORK_STRUCT_STATIC)
 
 struct delayed_work {
-	struct work_struct work;
-	struct timer_list timer;
+	struct work_struct work;//work函数在里边
+	struct timer_list timer;//定时器
 
 	/* target workqueue and CPU ->timer uses to queue ->work */
 	struct workqueue_struct *wq;
@@ -242,8 +243,8 @@ static inline unsigned int work_static(struct work_struct *work) { return 0; }
 
 #define __INIT_DELAYED_WORK(_work, _func, _tflags)			\
 	do {								\
-		INIT_WORK(&(_work)->work, (_func));			\
-		__setup_timer(&(_work)->timer, delayed_work_timer_fn,	\
+		INIT_WORK(&(_work)->work, (_func));/*赋值dwork->work函数指针*/ 	\
+		__setup_timer(&(_work)->timer, delayed_work_timer_fn,/*初始化dwork定时器函数delayed_work_timer_fn*/	\
 			      (unsigned long)(_work),			\
 			      (_tflags) | TIMER_IRQSAFE);		\
 	} while (0)
@@ -481,7 +482,7 @@ static inline bool queue_work(struct workqueue_struct *wq,
 static inline bool queue_delayed_work(struct workqueue_struct *wq,
 				      struct delayed_work *dwork,
 				      unsigned long delay)
-{
+{//把dwork加入wq，定时delay 内核定时器执行dwork对应的线程
 	return queue_delayed_work_on(WORK_CPU_UNBOUND, wq, dwork, delay);
 }
 
@@ -497,7 +498,7 @@ static inline bool mod_delayed_work(struct workqueue_struct *wq,
 				    struct delayed_work *dwork,
 				    unsigned long delay)
 {
-	return mod_delayed_work_on(WORK_CPU_UNBOUND, wq, dwork, delay);
+	return mod_delayed_work_on(WORK_CPU_UNBOUND, wq, dwork, delay);//把dwork加入wq，如果delay则启动定时器
 }
 
 /**

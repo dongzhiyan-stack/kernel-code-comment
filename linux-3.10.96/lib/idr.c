@@ -817,6 +817,7 @@ EXPORT_SYMBOL(idr_get_next);
  *
  * The caller must serialize with writers.
  */
+//idp:pool->worker_idr  ptr:worker  id:worker->id。把worker按照worker->id保存到pool
 void *idr_replace(struct idr *idp, void *ptr, int id)
 {
 	int n;
@@ -837,12 +838,13 @@ void *idr_replace(struct idr *idp, void *ptr, int id)
 		p = p->ary[(id >> n) & IDR_MASK];
 		n -= IDR_BITS;
 	}
-
+    //id
 	n = id & IDR_MASK;
 	if (unlikely(p == NULL || !test_bit(n, p->bitmap)))
 		return ERR_PTR(-ENOENT);
 
 	old_p = p->ary[n];
+    //把ptr指向的worker结构保存p->ary[n]，p是idp，n是id
 	rcu_assign_pointer(p->ary[n], ptr);
 
 	return old_p;

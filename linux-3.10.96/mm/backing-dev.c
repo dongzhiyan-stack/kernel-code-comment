@@ -38,6 +38,7 @@ DEFINE_SPINLOCK(bdi_lock);
 LIST_HEAD(bdi_list);
 
 /* bdi_wq serves all asynchronous writeback tasks */
+//bdi_queue_work()或bdi_wakeup_thread()中执行mod_delayed_work(bdi_wq, &bdi->wb.dwork, 0)启动work
 struct workqueue_struct *bdi_wq;
 
 void bdi_lock_two(struct bdi_writeback *wb1, struct bdi_writeback *wb2)
@@ -294,10 +295,11 @@ int bdi_has_dirty_io(struct backing_dev_info *bdi)
 void bdi_wakeup_thread_delayed(struct backing_dev_info *bdi)
 {
 	unsigned long timeout;
-
+    //每5s回写一次脏页，dirty_writeback_interval默认5s
 	timeout = msecs_to_jiffies(dirty_writeback_interval * 10);
 	spin_lock_bh(&bdi->wb_lock);
 	if (test_bit(BDI_registered, &bdi->state))
+        //定时5s后，把bdi->wb.dwork加入到bdi_wq，之后脏页回写进程很快取出该dwork，再次执行bdi_writeback_workfn()函数
 		queue_delayed_work(bdi_wq, &bdi->wb.dwork, timeout);
 	spin_unlock_bh(&bdi->wb_lock);
 }
@@ -313,7 +315,7 @@ static void bdi_remove_from_list(struct backing_dev_info *bdi)
 
 	synchronize_rcu_expedited();
 }
-
+//bdi添加到bdi_list
 int bdi_register(struct backing_dev_info *bdi, struct device *parent,
 		const char *fmt, ...)
 {
@@ -342,7 +344,7 @@ int bdi_register(struct backing_dev_info *bdi, struct device *parent,
 	return 0;
 }
 EXPORT_SYMBOL(bdi_register);
-
+//bdi添加到bdi_list
 int bdi_register_dev(struct backing_dev_info *bdi, dev_t dev)
 {
 	return bdi_register(bdi, NULL, "%u:%u", MAJOR(dev), MINOR(dev));
@@ -430,6 +432,7 @@ static void bdi_wb_init(struct bdi_writeback *wb, struct backing_dev_info *bdi)
 	INIT_LIST_HEAD(&wb->b_io);
 	INIT_LIST_HEAD(&wb->b_more_io);
 	spin_lock_init(&wb->list_lock);
+    //初始化wb->dwork，bdi_writeback_workfn函数指针赋值于dwork->work->func,并初始化dwork定时器函数delayed_work_timer_fn
 	INIT_DELAYED_WORK(&wb->dwork, bdi_writeback_workfn);
 }
 
@@ -437,7 +440,7 @@ static void bdi_wb_init(struct bdi_writeback *wb, struct backing_dev_info *bdi)
  * Initial write bandwidth: 100 MB/s
  */
 #define INIT_BW		(100 << (20 - PAGE_SHIFT))
-
+//初始化bdi->wb->delayed_work，bdi_writeback_workfn函数指针赋值于dwork->work->func
 int bdi_init(struct backing_dev_info *bdi)
 {
 	int i, err;
@@ -451,6 +454,7 @@ int bdi_init(struct backing_dev_info *bdi)
 	INIT_LIST_HEAD(&bdi->bdi_list);
 	INIT_LIST_HEAD(&bdi->work_list);
 
+    //初始化bdi->wb->delayed_work，bdi_writeback_workfn函数指针赋值于dwork->work->func
 	bdi_wb_init(&bdi->wb, bdi);
 
 	for (i = 0; i < NR_BDI_STAT_ITEMS; i++) {
@@ -533,6 +537,7 @@ int bdi_setup_and_register(struct backing_dev_info *bdi, char *name,
 		return err;
 
 	sprintf(tmp, "%.28s%s", name, "-%d");
+    //bdi添加到bdi_list链表
 	err = bdi_register(bdi, NULL, tmp, atomic_long_inc_return(&bdi_seq));
 	if (err) {
 		bdi_destroy(bdi);

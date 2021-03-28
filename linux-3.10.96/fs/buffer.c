@@ -625,12 +625,13 @@ static void __set_page_dirty(struct page *page,
 	spin_lock_irqsave(&mapping->tree_lock, flags);
 	if (page->mapping) {	/* Race with truncate? */
 		WARN_ON_ONCE(warn && !PageUptodate(page));
+        //增加脏页NR_FILE_DIRTY
 		account_page_dirtied(page, mapping);
 		radix_tree_tag_set(&mapping->page_tree,
 				page_index(page), PAGECACHE_TAG_DIRTY);
 	}
 	spin_unlock_irqrestore(&mapping->tree_lock, flags);
-    //标记page脏
+    //标记page所属文件的inode脏
 	__mark_inode_dirty(mapping->host, I_DIRTY_PAGES);
 }
 
@@ -1775,6 +1776,7 @@ recover:
 	SetPageError(page);
 	BUG_ON(PageWriteback(page));
 	mapping_set_error(page->mapping, err);
+    //设置page的writeback状态
 	set_page_writeback(page);
 	do {
 		struct buffer_head *next = bh->b_this_page;

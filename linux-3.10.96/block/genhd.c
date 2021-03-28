@@ -620,7 +620,9 @@ void add_disk(struct gendisk *disk)
 	disk_alloc_events(disk);
 
 	/* Register BDI before referencing it from bdev */
+    //取出块设备运行队列的bdi
 	bdi = &disk->queue->backing_dev_info;
+    //bdi添加到bdi_list
 	bdi_register_dev(bdi, disk_devt(disk));
     //根据主次设备号把块设备添加到系统，类似字符设备的cdev_add吧????????
 	blk_register_region(disk_devt(disk), disk->minors, NULL,

@@ -138,14 +138,14 @@ enum {
  */
 
 /* struct worker is defined in workqueue_internal.h */
-
+//创建的struct worker结构保存到worker_pool的struct idr worker_idr
 struct worker_pool {
 	spinlock_t		lock;		/* the pool lock */
 	int			cpu;		/* I: the associated cpu */
 	int			node;		/* I: the associated node ID */
 	int			id;		/* I: pool ID */
 	unsigned int		flags;		/* X: flags */
-
+    //__queue_work()中把struct work_struct *work添加到worklist，worker_thread()中从worklist取出struct work_struct *work
 	struct list_head	worklist;	/* L: list of pending works */
 	int			nr_workers;	/* L: total number of workers */
 
@@ -163,6 +163,7 @@ struct worker_pool {
 	/* see manage_workers() for details on the two manager mutexes */
 	struct mutex		manager_arb;	/* manager arbitration */
 	struct mutex		manager_mutex;	/* manager exclusion */
+    //把worker按照worker->id保存到pool->worker_idr
 	struct idr		worker_idr;	/* MG: worker IDs and iteration */
 
 	struct workqueue_attrs	*attrs;		/* I: worker attributes */
@@ -228,7 +229,7 @@ struct wq_device;
  * The externally visible workqueue.  It relays the issued work items to
  * the appropriate worker_pool through its pool_workqueues.
  */
-struct workqueue_struct {
+struct workqueue_struct {//bdi的是struct workqueue_struct *bdi_wq
 	struct list_head	pwqs;		/* WR: all pwqs of this wq */
 	struct list_head	list;		/* PL: list of all workqueues */
 
@@ -781,9 +782,10 @@ static struct worker *first_worker(struct worker_pool *pool)
  */
 static void wake_up_worker(struct worker_pool *pool)
 {
+    //取出struct worker_pool *pool->idle_list链表上的worker
 	struct worker *worker = first_worker(pool);
 
-	if (likely(worker))
+	if (likely(worker))//唤醒worker线程，比如bdi回刷脏数据进程"kworker/u128:2"
 		wake_up_process(worker->task);
 }
 
@@ -1256,6 +1258,7 @@ static void insert_work(struct pool_workqueue *pwq, struct work_struct *work,
 
 	/* we own @work, set data and link */
 	set_work_pwq(work, pwq, extra_flags);
+    //把struct work_struct *work添加到head
 	list_add_tail(&work->entry, head);
 	get_pwq(pwq);
 
@@ -1267,7 +1270,7 @@ static void insert_work(struct pool_workqueue *pwq, struct work_struct *work,
 	smp_mb();
 
 	if (__need_more_worker(pool))
-		wake_up_worker(pool);
+		wake_up_worker(pool);//唤醒worker线程，比如bdi回刷脏数据进程"kworker/u128:2"
 }
 
 /*
@@ -1376,12 +1379,13 @@ retry:
 	if (likely(pwq->nr_active < pwq->max_active)) {
 		trace_workqueue_activate_work(work);
 		pwq->nr_active++;
+        //取出worker_pool的worklist
 		worklist = &pwq->pool->worklist;
 	} else {
 		work_flags |= WORK_STRUCT_DELAYED;
 		worklist = &pwq->delayed_works;
 	}
-
+    //把struct work_struct *work添加到worklist，在这里唤醒work对应的进程
 	insert_work(pwq, work, worklist, work_flags);
 
 	spin_unlock(&pwq->pool->lock);
@@ -1424,13 +1428,13 @@ void delayed_work_timer_fn(unsigned long __data)
 	__queue_work(dwork->cpu, dwork->wq, &dwork->work);
 }
 EXPORT_SYMBOL(delayed_work_timer_fn);
-
+//如果delay是0，直接把dwork加入wq，唤醒dwork对应的进程。否则把dwork加入内核定时器，定时delay
 static void __queue_delayed_work(int cpu, struct workqueue_struct *wq,
 				struct delayed_work *dwork, unsigned long delay)
 {
 	struct timer_list *timer = &dwork->timer;
 	struct work_struct *work = &dwork->work;
-
+    //dwork->timer 定时器函数delayed_work_timer_fn
 	WARN_ON_ONCE(timer->function != delayed_work_timer_fn ||
 		     timer->data != (unsigned long)dwork);
 	WARN_ON_ONCE(timer_pending(timer));
@@ -1442,21 +1446,21 @@ static void __queue_delayed_work(int cpu, struct workqueue_struct *wq,
 	 * expire is on the closest next tick and delayed_work users depend
 	 * on that there's no such delay when @delay is 0.
 	 */
-	if (!delay) {
+	if (!delay) {//如果不delay，直接把work加入wq，唤醒进程
 		__queue_work(cpu, wq, &dwork->work);
 		return;
 	}
 
 	timer_stats_timer_set_start_info(&dwork->timer);
 
-	dwork->wq = wq;
+	dwork->wq = wq;//workqueue
 	/* timer isn't guaranteed to run in this cpu, record earlier */
 	if (cpu == WORK_CPU_UNBOUND)
 		cpu = raw_smp_processor_id();
 	dwork->cpu = cpu;
-	timer->expires = jiffies + delay;
+	timer->expires = jiffies + delay;//定时时间
 
-	add_timer_on(timer, cpu);
+	add_timer_on(timer, cpu);//启动定时器
 }
 
 /**
@@ -1681,6 +1685,7 @@ static struct worker *alloc_worker(void)
  * RETURNS:
  * Pointer to the newly created worker.
  */
+//创建worker,并把worker按照worker->id保存到struct worker_pool *pool->worker_idr
 static struct worker *create_worker(struct worker_pool *pool)
 {
 	struct worker *worker = NULL;
@@ -1695,14 +1700,14 @@ static struct worker *create_worker(struct worker_pool *pool)
 	 */
 	idr_preload(GFP_KERNEL);
 	spin_lock_irq(&pool->lock);
-
+    //从pool->worker_idr为worker分配一个id
 	id = idr_alloc(&pool->worker_idr, NULL, 0, 0, GFP_NOWAIT);
 
 	spin_unlock_irq(&pool->lock);
 	idr_preload_end();
 	if (id < 0)
 		goto fail;
-
+    //分配worker
 	worker = alloc_worker();
 	if (!worker)
 		goto fail;
@@ -1713,9 +1718,10 @@ static struct worker *create_worker(struct worker_pool *pool)
 	if (pool->cpu >= 0)
 		snprintf(id_buf, sizeof(id_buf), "%d:%d%s", pool->cpu, id,
 			 pool->attrs->nice < 0  ? "H" : "");
-	else
+	else//线程名字"kworker/u128:0"
 		snprintf(id_buf, sizeof(id_buf), "u%d:%d", pool->id, id);
 
+    //创建内核进程，task结构赋于worker->task，线程函数入口是worker_thread()
 	worker->task = kthread_create_on_node(worker_thread, worker, pool->node,
 					      "kworker/%s", id_buf);
 	if (IS_ERR(worker->task))
@@ -1741,6 +1747,7 @@ static struct worker *create_worker(struct worker_pool *pool)
 
 	/* successful, commit the pointer to idr */
 	spin_lock_irq(&pool->lock);
+    //把worker按照worker->id保存到pool->worker_idr
 	idr_replace(&pool->worker_idr, worker, worker->id);
 	spin_unlock_irq(&pool->lock);
 
@@ -1770,6 +1777,7 @@ static void start_worker(struct worker *worker)
 	worker->flags |= WORKER_STARTED;
 	worker->pool->nr_workers++;
 	worker_enter_idle(worker);
+    //线程函数入口是worker_thread()
 	wake_up_process(worker->task);
 }
 
@@ -1784,11 +1792,11 @@ static int create_and_start_worker(struct worker_pool *pool)
 	struct worker *worker;
 
 	mutex_lock(&pool->manager_mutex);
-
+    //创建worker,并把worker按照worker->id保存到struct worker_pool *pool->worker_idr
 	worker = create_worker(pool);
 	if (worker) {
 		spin_lock_irq(&pool->lock);
-		start_worker(worker);
+		start_worker(worker);//唤醒worker的进程
 		spin_unlock_irq(&pool->lock);
 	}
 
@@ -2140,6 +2148,7 @@ __acquires(&pool->lock)
 	debug_work_deactivate(work);
 	hash_add(pool->busy_hash, &worker->hentry, (unsigned long)work);
 	worker->current_work = work;
+    //worker->current_func函数指针来自work->func，bdi的是bdi_writeback_workfn()
 	worker->current_func = work->func;
 	worker->current_pwq = pwq;
 	work_color = get_work_color(work);
@@ -2173,6 +2182,7 @@ __acquires(&pool->lock)
 	lock_map_acquire_read(&pwq->wq->lockdep_map);
 	lock_map_acquire(&lockdep_map);
 	trace_workqueue_execute_start(work);
+    //真正执行work函数，worker->current_func函数指针来自work->func。回刷脏数据bdi的是 bdi_writeback_workfn()
 	worker->current_func(work);
 	/*
 	 * While we must be careful to not use "work" after this, the trace
@@ -2291,13 +2301,14 @@ recheck:
 	worker_clr_flags(worker, WORKER_PREP | WORKER_REBOUND);
 
 	do {
+        //循环从pool->worklist取出struct work_struct *work
 		struct work_struct *work =
 			list_first_entry(&pool->worklist,
 					 struct work_struct, entry);
 
 		if (likely(!(*work_data_bits(work) & WORK_STRUCT_LINKED))) {
 			/* optimization path, not strictly necessary */
-			process_one_work(worker, work);
+			process_one_work(worker, work);//process_one_work
 			if (unlikely(!list_empty(&worker->scheduled)))
 				process_scheduled_works(worker);
 		} else {
@@ -2319,10 +2330,11 @@ sleep:
 	 * event.
 	 */
 	worker_enter_idle(worker);
+    //可中断休眠
 	__set_current_state(TASK_INTERRUPTIBLE);
 	spin_unlock_irq(&pool->lock);
-	schedule();
-	goto woke_up;
+	schedule();//休眠
+	goto woke_up;//唤醒后继续执行
 }
 
 /**

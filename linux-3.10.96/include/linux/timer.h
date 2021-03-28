@@ -138,8 +138,8 @@ static inline void init_timer_on_stack_key(struct timer_list *timer,
 #define __setup_timer(_timer, _fn, _data, _flags)			\
 	do {								\
 		__init_timer((_timer), (_flags));			\
-		(_timer)->function = (_fn);				\
-		(_timer)->data = (_data);				\
+		(_timer)->function = (_fn);/*定时器函数*/				\
+		(_timer)->data = (_data);/*定时器函数执行传参*/				\
 	} while (0)
 
 #define __setup_timer_on_stack(_timer, _fn, _data, _flags)		\

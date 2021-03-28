@@ -22,7 +22,7 @@
 
 static DEFINE_SPINLOCK(kthread_create_lock);
 static LIST_HEAD(kthread_create_list);
-struct task_struct *kthreadd_task;
+struct task_struct *kthreadd_task;//线程函数是kthreadd()
 
 struct kthread_create_info
 {
@@ -176,7 +176,7 @@ static int kthread(void *_create)
 {
 	/* Copy data: it's on kthread's stack */
 	struct kthread_create_info *create = _create;
-	int (*threadfn)(void *data) = create->threadfn;
+	int (*threadfn)(void *data) = create->threadfn;//就是worker_thread()
 	void *data = create->data;
 	struct kthread self;
 	int ret;
@@ -190,6 +190,7 @@ static int kthread(void *_create)
 	/* OK, tell user we're spawned, wait for stop or wakeup */
 	__set_current_state(TASK_UNINTERRUPTIBLE);
 	create->result = current;
+    //唤醒等待的进程
 	complete(&create->done);
 	schedule();
 
@@ -220,6 +221,7 @@ static void create_kthread(struct kthread_create_info *create)
 #ifdef CONFIG_NUMA
 	current->pref_node_fork = create->node;
 #endif
+    //进程创建后执行kthread()
 	/* We want our own signal handler (we take no signals by default). */
 	pid = kernel_thread(kthread, create, CLONE_FS | CLONE_FILES | SIGCHLD);
 	if (pid < 0) {
@@ -257,16 +259,19 @@ struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 {
 	struct kthread_create_info create;
 
-	create.threadfn = threadfn;
+	create.threadfn = threadfn;//内核线程函数
 	create.data = data;
 	create.node = node;
 	init_completion(&create.done);
 
 	spin_lock(&kthread_create_lock);
+    //struct kthread_create_info create加入kthread_create_list链表
 	list_add_tail(&create.list, &kthread_create_list);
 	spin_unlock(&kthread_create_lock);
 
+    //唤醒kthreadd_task，线程函数是kthreadd()，在这个函数里创建内核进程
 	wake_up_process(kthreadd_task);
+    //等待进程创建后，在kthread()函数被kthreadd_task唤醒，create.result保存创建的进程task结构
 	wait_for_completion(&create.done);
 
 	if (!IS_ERR(create.result)) {
@@ -464,12 +469,12 @@ int kthreadd(void *unused)
 		spin_lock(&kthread_create_lock);
 		while (!list_empty(&kthread_create_list)) {
 			struct kthread_create_info *create;
-
+            //取出struct kthread_create_info结构
 			create = list_entry(kthread_create_list.next,
 					    struct kthread_create_info, list);
 			list_del_init(&create->list);
 			spin_unlock(&kthread_create_lock);
-
+            //创建内核进程，进程创建后执行kthread()
 			create_kthread(create);
 
 			spin_lock(&kthread_create_lock);
