@@ -414,11 +414,11 @@ static void blk_account_io_merge(struct request *req)
 /*
  * Has to be called with the request spinlock acquired
  */
-//把next合并到req后边，并更新IO使用率数据。然后调用IO调度算法的elevator_merge_req_fn回调函数，当为mq-deadline调度算法时，执行过程是:
-//next已经合并到了req后,在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,
-//还更新dd->next_rq[]赋值next的下一个req。因为rq合并了next，扇区结束地址变大了，则rq从hash队列中删除掉再重新按照扇区结束地址在hash队列中排序。
+//尝试把next合并到req后边，并更新IO使用率数据。然后调用IO调度算法的elevator_merge_req_fn回调函数，当为deadline调度算法时，执行过程是:
+//next已经合并到了req后,在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,还更新dd->next_rq[]
+//赋值next的下一个req。因为rq合并了next，扇区结束地址变大了，则rq从hash队列中删除掉再重新按照扇区结束地址在hash队列中排序。
 static int attempt_merge(struct request_queue *q, struct request *req,
-			  struct request *next)
+			  struct request *next)//把next合并到req后边，req来自比如q->last_merge或hash队列的req
 {
 	if (!rq_mergeable(req) || !rq_mergeable(next))
 		return 0;
@@ -471,8 +471,9 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	 * the merged requests to be the current request
 	 * for accounting purposes.
 	 */
-	if (time_after(req->start_time, next->start_time))
+	if (time_after(req->start_time, next->start_time))//如果next->start_time更小则赋值于req->start_time
 		req->start_time = next->start_time;
+    
     //一个req对应了多个bio，req->biotail应该是指向next上的第一个bio吧
 	req->biotail->bi_next = next->bio;
     //biotail貌似指向了next的最后一个bio??????????
@@ -491,14 +492,14 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	//next合并打了req，没用了，这个next从in flight队列剔除掉，顺便执行part_round_stats更新io_ticks IO使用率计数
 	blk_account_io_merge(next);
     
-    //req优先级?????????????
+    //req优先级，cfq调度算法的概念
 	req->ioprio = ioprio_best(req->ioprio, next->ioprio);
 	if (blk_rq_cpu_valid(next))
 		req->cpu = next->cpu;
 
 	/* owner-ship of bio passed from next to req */
 	next->bio = NULL;
-    //释放next
+    //释放next这个req
 	__blk_put_request(q, next);
 	return 1;
 }
@@ -506,9 +507,11 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 //blk_queue_bio->attempt_back_merge 传说中的更高阶的合并吧，比如原IO调度算法队列挨着的req1和req2，代表的磁盘空间范围分别是req1:0~5，
 //req2:11~16，新的待合并的bio的磁盘空间是6~10,则先执行bio_attempt_back_merge()把bio后项合并到req1,此时req1:0~10，显然此时req1和req2可以
 //进行二次合并，attempt_back_merge()函数就是这个作用吧，该函数的struct request *next就像举例的req2。合并成功返回1，否则0
+
+//之前req发生了后项合并,req的磁盘空间向后增大,从算法队列(比如deadline的红黑树队列)取出req的下一个req即next,再次尝试把next合并到req后边
 int attempt_back_merge(struct request_queue *q, struct request *rq)
 {
-    //只是从IO调度算法队列里取出rq的下一个rq给next
+    //只是从IO调度算法队列里取出rq的下一个rq给next，调用的函数elv_rb_latter_request(deadline算法)或noop_latter_request(noop算法)
 	struct request *next = elv_latter_request(q, rq);
 
     //这是尝试把next(举例中的req2)合并到rq(举例中的合并bio后的req1)，我有个疑问，既然会发生二次合并，那也可以发生三次合并呀，这里应该是
@@ -516,9 +519,10 @@ int attempt_back_merge(struct request_queue *q, struct request *rq)
 	if (next)
 		return attempt_merge(q, rq, next);//把next合并到req，把next剔除掉，做一些剔除next的收尾处理,并更新IO使用率数据
 
+    //如果req没有next req，只能返回0
 	return 0;
 }
-
+//之前req发生了前项合并,req的磁盘空间向前增大,从算法队列(比如deadline的红黑树队列)取出req的上一个req即prev,再次尝试把req合并到prev后边
 int attempt_front_merge(struct request_queue *q, struct request *rq)
 {
     //红黑树中取出req原来的前一个req,即prev
@@ -529,21 +533,21 @@ int attempt_front_merge(struct request_queue *q, struct request *rq)
 
 	return 0;
 }
-//把next合并到req后边，并更新IO使用率数据。然后调用IO调度算法的elevator_merge_req_fn回调函数，当为mq-deadline调度算法时，执行过程是:
-//next已经合并到了req后,在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,
-//还更新dd->next_rq[]赋值next的下一个req。因为rq合并了next，扇区结束地址变大了，则rq从hash队列中删除掉再重新按照扇区结束地址在hash队列中排序。
-int blk_attempt_req_merge(struct request_queue *q, struct request *rq,
-			  struct request *next)
+//尝试把next合并到req后边，并更新IO使用率数据。然后调用IO调度算法的elevator_merge_req_fn回调函数，当为deadline调度算法时，执行过程是:
+//next已经合并到了req后,在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,还更新dd->next_rq[]
+//赋值next的下一个req。因为rq合并了next，扇区结束地址变大了，则rq从hash队列中删除掉再重新按照扇区结束地址在hash队列中排序。
+int blk_attempt_req_merge(struct request_queue *q, struct request *rq,//rq是合并母体，比如q->last_merge或hash队列的req
+			  struct request *next)//next是本次新的req
 {
-	return attempt_merge(q, rq, next);
+	return attempt_merge(q, rq, next);//注意，这是把next后项合并到rq，只有后项合并!!!!!!为什么没有前项合并呢???????????????????
 }
-//对本次新的bio能否合并到rq链表已有的rq做各个前期检查，检查通过返回true
+//对本次新的bio能否合并到rq做各个前期检查，检查通过返回true
 bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 {
     //rq和bio必须属于文件系统
 	if (!rq_mergeable(rq) || !bio_mergeable(bio))
 		return false;
-    //还是检车二者属性吧
+    //还是检查二者属性吧
 	if (!blk_check_merge_flags(rq->cmd_flags, bio->bi_rw))
 		return false;
 
@@ -569,7 +573,7 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 
 	return true;
 }
-//检查bio和rq代表的磁盘范围是否挨着，挨着则可以合并
+//检查bio和rq的磁盘范围是否挨着，挨着则可以合并，分为前项合并和后项合并
 int blk_try_merge(struct request *rq, struct bio *bio)
 {
     //rq的磁盘结束地址挨着bio的磁盘开始地址，rq向后合并本次的bio

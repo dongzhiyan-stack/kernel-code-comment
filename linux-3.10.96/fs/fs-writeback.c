@@ -437,7 +437,7 @@ static void requeue_inode(struct inode *inode, struct bdi_writeback *wb,
 		//wbc->nr_to_write <= 0 表示本次预期的脏数据已经刷回磁盘了，一般不成立吧
 		if (wbc->nr_to_write <= 0) {
 			/* Slice used up. Queue for next turn. */
-            //把inode临时移动到wb->b_more_io，下次回写脏页再把b_more_io上的脏页移动到b_io
+             //把inode临时移动到wb->b_more_io，下次回写脏页再把wb->b_more_io链表上的脏inode移动到wb->b_io链表
 			requeue_io(inode, wb);
 		} else {
 			/*
@@ -457,11 +457,11 @@ static void requeue_inode(struct inode *inode, struct bdi_writeback *wb,
 		 * such as delayed allocation during submission or metadata
 		 * updates after data IO completion.
 		 */
-		//把inode移动到wb->b_dirty
+		//把inode移动到wb->b_dirty链表
 		redirty_tail(inode, wb);
 	} else {
 		/* The inode is clean. Remove from writeback lists. */
-        //inode没有脏数据，把inode从脏页链表wb->b_more_io或者wb->b_dirty清除掉
+        //inode没有脏页，把inode从脏页链表wb->b_more_io或者wb->b_dirty清除掉
 		list_del_init(&inode->i_wb_list);
 	}
 }
@@ -653,7 +653,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 	long wrote = 0;  /* count both pages and inodes */
 
 	while (!list_empty(&wb->b_io)) {
-        //从wb->b_io.prev取出有脏页的inode
+    //从wb->b_io.prev取出有脏页的inode，这是先从wb->b_io的链表尾取出脏inode，why?因为链表尾的inode脏的更久，应该先回写它的脏页
 		struct inode *inode = wb_inode(wb->b_io.prev);
 
         //这个if会成立吗?wb->b_io上的inode应该都是一个块设备里文件系统的inode，不应该成立吧????????????
@@ -685,11 +685,11 @@ static long writeback_sb_inodes(struct super_block *sb,
         //如果inode是I_NEW状态，或者inode对应文件关闭正在释放文件数据
 		if (inode->i_state & (I_NEW | I_FREEING | I_WILL_FREE)) {
 			spin_unlock(&inode->i_lock);
-            //把inode移动到wb->b_dirty
+            //把inode移动到wb->b_dirty,终止本轮脏页回写
 			redirty_tail(inode, wb);
 			continue;
 		}
-        //如果inode的脏页在回写，并且是wb_check_old_data_flush和wb_check_background_flush发起的脏页回写
+        //如果inode的脏页已经在回写，并且是wb_check_old_data_flush和wb_check_background_flush发起的脏页回写
 		if ((inode->i_state & I_SYNC) && wbc.sync_mode != WB_SYNC_ALL) {
 			/*
 			 * If this inode is locked for writeback and we are not
@@ -720,13 +720,13 @@ static long writeback_sb_inodes(struct super_block *sb,
 			spin_lock(&wb->list_lock);
 			continue;
 		}
-        //inode->i_state设置I_SYNC标记
+        //inode->i_state设置I_SYNC标记，表示在进行脏页回写
 		inode->i_state |= I_SYNC;
 		spin_unlock(&inode->i_lock);
 
-        //计算本次预期回收page数
+        //计算本次预期回写脏页数
 		write_chunk = writeback_chunk_size(wb->bdi, work);
-        //wbc.nr_to_write初值是本次预期回收page数
+        //wbc.nr_to_write初值是本次预期回写脏页数
 		wbc.nr_to_write = write_chunk;
 		wbc.pages_skipped = 0;
 
@@ -736,7 +736,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 		 */
 		__writeback_single_inode(inode, &wbc);//这里真正回刷脏页
 
-        //write_chunk是本次循环预期回收的page数，wbc.nr_to_write是还剩下的待回写的page数，相减就是已经回写的脏页数
+        //write_chunk是本次循环预期回写脏页数，wbc.nr_to_write是还剩下的待回写的脏页数，相减就是已经回写的脏页数
 		work->nr_pages -= write_chunk - wbc.nr_to_write;
 		wrote += write_chunk - wbc.nr_to_write;//wrote累计回刷的page总数
 		spin_lock(&wb->list_lock);
@@ -746,7 +746,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 		if (!(inode->i_state & I_DIRTY))
 			wrote++;
         
-        //如果inode还有脏页，把inode移动到到wb->b_more_io或者wb->b_dirty。如果inode没有脏数据则把inode从脏页链表清除掉
+        //如果inode还有脏页，把inode移动到到wb->b_more_io或者wb->b_dirty。如果inode没有脏页则把inode从脏页链表清除掉
 		requeue_inode(inode, wb, &wbc);
         
         //清除I_SYNC，wake_up_bit(&inode->i_state, __I_SYNC)
@@ -909,7 +909,7 @@ static long wb_writeback(struct bdi_writeback *wb,
 		 * For background writeout, stop when we are below the
 		 * background dirty threshold
 		 */
-		//background_flush模式work->for_background是1，这里是判断脏页总数超过阀值则停止回写脏页
+		//background_flush模式work->for_background是1，这里是判断脏页总数小于脏页阀值则停止回写脏页
 		if (work->for_background && !over_bground_thresh(wb->bdi))
 			break;
 

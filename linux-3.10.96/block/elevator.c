@@ -70,7 +70,7 @@ static int elv_iosched_allow_merge(struct request *rq, struct bio *bio)
  */
 bool elv_rq_merge_ok(struct request *rq, struct bio *bio)
 {
-    //¶Ô±¾´ÎĞÂµÄbioÄÜ·ñºÏ²¢µ½rqÁ´±íÒÑÓĞµÄrq×ö¸÷¸öÇ°ÆÚ¼ì²é£¬¼ì²éÍ¨¹ı·µ»Øtrue
+    //¶Ô±¾´ÎĞÂµÄbioÄÜ·ñºÏ²¢µ½rq×ö¸÷¸öÇ°ÆÚ¼ì²é£¬¼ì²éÍ¨¹ı·µ»Øtrue
 	if (!blk_rq_merge_ok(rq, bio))
 		return 0;
 
@@ -274,9 +274,9 @@ static void elv_rqhash_reposition(struct request_queue *q, struct request *rq)
     //ÔÙÌí¼Óreq£¬Ó¦¸ÃÊÇreqÓĞÁËĞÂµÄºÏ²¢£¬ËùÒÔÒªÖØĞÂÅÅĞòreq°É
 	elv_rqhash_add(q, rq);
 }
-//ĞÂ¼ÓÈëIOµ÷¶È¶ÓÁĞµÄreq»á×öhashË÷Òı£¬ÕâÓ¦¸ÃÊÇÊÇ¸ù¾İbioµÄÉÈÇøÆğÊ¼µØÖ·ÔÚhash±íÕÒreq°É£¬È»ºórq_hash_key(rq)ÓëoffsetÏàµÈ¾ÍÊÇÕÒµ½µÄrq
-//Èç¹ûÕÒµ½Æ¥ÅäµÄreq£¬ÔòreqµÄÉÈÇø½áÊøµØÖ·µÈÓÚbioµÄÉÈÇøÆğÊ¼µØÖ·£¬ÕâÑùbio¾ÍÊÇºóÏîºÏ²¢µ½req
-static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)//offsetÊÇbio->bi_sector£¬
+//±éÀúhash¶ÓÁĞµÄreq£¬Èç¹ûÕâ¸öreqµÄÉÈÇø½áÊøµØÖ·µÈÓÚĞÂµÄreq(»òÕßbio)µÄÉÈÇøÆğÊ¼µØÖ·£¬ËµÃ÷ĞÂµÄreq(»òÕßbio)¿ÉÒÔºóÏîºÏ²¢µ½Õâ¸öhash¶ÓÁĞµÄreq
+//µ÷ÓÃÂ·¾¶ÊÇ:elv_merge->elv_rqhash_find ºÍ elv_attempt_insert_merge->elv_rqhash_find
+static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)//offsetĞÂµÄreq(»òÕßbio)µÄÉÈÇøÆğÊ¼µØÖ·
 {
 	struct elevator_queue *e = q->elevator;
 	struct hlist_node *next;
@@ -291,8 +291,8 @@ static struct request *elv_rqhash_find(struct request_queue *q, sector_t offset)
 			__elv_rqhash_del(rq);
 			continue;
 		}
-        //rq_hash_key(rq)reqµÄÉÈÇø½áÊøµØÖ·µÈÓÚoffset¡£offsetÊÇbioµÄÉÈÇøÆğÊ¼µØÖ·(¸Ãº¯Êı´«²ÎÊÇoffset=blk_rq_pos(rq))£¬
-        //ÕâÑùbio¾ÍÊÇºóÏîºÏ²¢µ½req¡£hash keyÊÇreqµÄÉÈÇøÆğÊ¼µØÖ·
+        //rq_hash_key(rq)ÊÇ±¾´ÎËÑË÷µ½µÄhash¶ÓÁĞµÄreqµÄÉÈÇø½áÊøµØÖ·£¬offsetÊÇ±¾´ÎĞÂµÄreqµÄÉÈÇøÆğÊ¼µØÖ·£¬¶şÕßÏàµÈËµÃ÷ĞÂµÄreq¿ÉÒÔºóÏîºÏ²¢
+        //µ½Õâ¸öhash¶ÓÁĞreq¡£reqÊÇÒÔÉÈÇøÆğÊ¼µØÖ·×÷Îªhash key¼ÓÈëhash¶ÓÁĞµÄ!
 		if (rq_hash_key(rq) == offset)
 			return rq;
 	}
@@ -337,10 +337,11 @@ void elv_rb_del(struct rb_root *root, struct request *rq)
 EXPORT_SYMBOL(elv_rb_del);
 
 
-//¸Ãº¯ÊıÊÇÔÚµ÷¶ÈËã·¨µÄ ¶Á»òĞ´ºìºÚÊ÷¶ÓÁĞÀï£¬±éÀúreq,ÕÒµ½reqÆğÊ¼ÉÈÇøµØÖ·µÈÓÚbio_end_sector(bio)µÄreq·µ»Ø£¬·ñÔò·µ»ØNULL
+//ÔÚµ÷¶ÈËã·¨µÄºìºÚÊ÷¶ÓÁĞÀï±éÀúreq,Èç¹û¸ÃreqÆğÊ¼ÉÈÇøµØÖ·µÈÓÚbioµÄÉÈÇø½áÊøµØÖ·Ôò·µ»Ø¸Ãreq£¬·ñÔò·µ»ØNULL
+
 //struct rb_root *rootµ÷¶È¶ÓÁĞ±£´æreqµÄºìºÚÊ÷Í·½áµã°É£¬ÓĞÁ½¸ö£¬Ò»¸ö¶Á£¬Ò»¸öĞ´¡£ºìºÚÊ÷¶ÓÁĞÖĞµÄreqÅÅĞòµÄ¹æÔòÊÇreqµÄ´ÅÅÌÆğÊ¼ÉÈÇø£¬
-//¿ÉÒÔÈÏÎªÊÇ°´ÕÕ´ÅÅÌÆğÊ¼ÉÈÇø´ÓĞ¡µ½´óÅÅÁĞµÄ°É¡£sectorÊÇbio_end_sector(bio)£¬bio´ú±íµÄ´ÅÅÌÉÈÇøµÄ½áÊøµØÖ·¡£
-struct request *elv_rb_find(struct rb_root *root, sector_t sector)
+//¿ÉÒÔÈÏÎªÊÇ°´ÕÕ´ÅÅÌÆğÊ¼ÉÈÇø´ÓĞ¡µ½´óÅÅÁĞµÄ°É¡£
+struct request *elv_rb_find(struct rb_root *root, sector_t sector)//sectorÊÇbio_end_sector(bio)£¬¼´bio´ÅÅÌÉÈÇøµÄ½áÊøµØÖ·
 {
 	struct rb_node *n = root->rb_node;
 	struct request *rq;
@@ -350,10 +351,10 @@ struct request *elv_rb_find(struct rb_root *root, sector_t sector)
 		rq = rb_entry(n, struct request, rb_node);
         //bioµÄÉÈÇø½áÊøµØÖ·sector Ğ¡ÓÚ reqµÄÆğÊ¼ÉÈÇøµØÖ·£¬Ôò±éÀú×ó×ÓÊ÷£¬ºÜÃ÷ÏÔ£¬ºìºÚÊ÷¶ÓÁĞµÄreqÅÅÁĞ¹æÔòÊÇ£¬Ë­µÄÆğÊ¼ÉÈÇøµØÖ·Ğ¡Ë­¿¿×ó
 		if (sector < blk_rq_pos(rq))
-			n = n->rb_left;
+			n = n->rb_left;//ÕâÀï¿ÉÄÜÊÇn = n->rb_left=NULLÔòËµÃ÷Ã»ÓĞÕÒµ½Æ¥ÅäµÄreq
         //bioµÄÉÈÇø½áÊøµØÖ·sector ´óÓÚ  reqµÄÆğÊ¼ÉÈÇøµØÖ·£¬Ôò±éÀúÓÒ×ÓÊ÷
 		else if (sector > blk_rq_pos(rq))
-			n = n->rb_right;
+			n = n->rb_right;//ÕâÀï¿ÉÄÜÊÇn = n->rb_right=NULLÔòËµÃ÷Ã»ÓĞÕÒµ½Æ¥ÅäµÄreq
 		else//ÎÒÈ¥£¬ÕâÊÇbioµÄÉÈÇø½áÊøµØÖ·sector = reqµÄÆğÊ¼ÉÈÇøµØÖ·Ñ½£¬ËùÊ¾Òª°ÑbioºÏ²¢µ½reqÇ°±ß£¬ÕâÊÇÇ°ÏîºÏ²¢
 			return rq;
 	}
@@ -418,7 +419,7 @@ void elv_dispatch_add_tail(struct request_queue *q, struct request *rq)
 {
 	if (q->last_merge == rq)
 		q->last_merge = NULL;
-
+    //req´Óhash¶ÓÁĞÌŞ³ı
 	elv_rqhash_del(q, rq);
     //
 	q->nr_sorted--;
@@ -432,6 +433,9 @@ EXPORT_SYMBOL(elv_dispatch_add_tail);
 
 //ÔÚelvµ÷¶ÈÆ÷Àï²éÕÒÊÇ·ñÓĞ¿ÉÒÔºÏ²¢µÄreq£¬ÕÒµ½Ôò¿ÉÒÔbioºóÏî»òÇ°ÏîºÏ²¢µ½req¡£Õâ¸öÊÇµ÷ÓÃ¾ßÌåµÄIOµ÷¶ÈËã·¨º¯ÊıÑ°ÕÒ¿ÉÒÔºÏ²¢µÄreq¡£
 //º¯Êı·µ»ØÖµ ELEVATOR_BACK_MERGE(Ç°ÏîºÏ²¢µÄreq)¡¢ELEVATOR_FRONT_MERGE(Ç°ÏîºÏ²¢)¡¢ELEVATOR_NO_MERGE(Ã»ÓĞÕÒµ½¿ÉÒÔºÏ²¢µÄreq)
+
+//³¢ÊÔ3´ÎºÏ²¢:1 bioÄÜ·ñÇ°Ïî»òÕßºóÏîºÏ²¢µ½q->last_merge;2 bioÄÜ·ñºóÏîºÏ²¢µ½hash¶ÓÁĞµÄreq;3:bioÄÜ·ñÇ°ÏîºÏ²¢µ½deadlineµ÷¶È
+//Ëã·¨ºìºÚÊ÷¶ÓÁĞµÄreq£¬·µ»ØÖµELEVATOR_BACK_MERGE»òELEVATOR_FRONT_MERGE¡£Èç¹ûÈıÕß¶¼²»ÄÜºÏ²¢Ö»ÓĞ·µ»ØELEVATOR_NO_MERGE¡£
 int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 {
 	struct elevator_queue *e = q->elevator;
@@ -452,7 +456,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	 */
 	//ÊÇ·ñ¿ÉÒÔ°ÑbioºÏ²¢µ½q->last_merge£¬ÉÏ´Îrq¶ÓÁĞºÏ²¢¹ıµÄrq£¬elv_rq_merge_okÊÇ×öÒ»Ğ©È¨ÏŞ¼ì²éÉ¶µÄ
 	if (q->last_merge && elv_rq_merge_ok(q->last_merge, bio)) {
-        //¼ì²ébioºÍrq´ú±íµÄ´ÅÅÌ·¶Î§ÊÇ·ñ°¤×Å£¬°¤×ÅÔò¿ÉÒÔºÏ²¢bioµ½q->last_merge
+        //¼ì²ébioºÍq->last_merge´ú±íµÄreq´ÅÅÌ·¶Î§ÊÇ·ñ°¤×Å£¬°¤×ÅÔò¿ÉÒÔºÏ²¢bioµ½q->last_merge£¬·ÖÎªÇ°ÏîºÏ²¢ºÍºóÏîºÏ²¢
 		ret = blk_try_merge(q->last_merge, bio);
 		if (ret != ELEVATOR_NO_MERGE) {
 			*req = q->last_merge;
@@ -466,21 +470,22 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	/*
 	 * See if our hash lookup can find a potential backmerge.
 	 */
-	 //ĞÂ¼ÓÈëIOµ÷¶È¶ÓÁĞµÄreq»á×öhashË÷Òı£¬ÕâÓ¦¸ÃÊÇÊÇ¸ù¾İbioµÄÉÈÇøÆğÊ¼µØÖ·ÔÚhash±íÕÒreq°É£¬È»ºórq_hash_key(rq)ÓëoffsetÏàµÈ¾ÍÊÇÕÒµ½µÄrq
-	 //Èç¹ûÕÒµ½Æ¥ÅäµÄreq£¬ÔòreqµÄÉÈÇø½áÊøµØÖ·µÈÓÚbioµÄÉÈÇøÆğÊ¼µØÖ·£¬ÕâÑùbio¾ÍÊÇºóÏîºÏ²¢µ½req
+	 //ĞÂ¼ÓÈëIOµ÷¶È¶ÓÁĞµÄreq»á×öhashË÷Òı£¬ÕâÓ¦¸ÃÊÇÊÇ¸ù¾İbioµÄÉÈÇøÆğÊ¼µØÖ·ÔÚhash±íÕÒÆ¥ÅäµÄreq°É£¬
+	 
+	 //±éÀúhash¶ÓÁĞreq£¬Èç¹û¸ÃreqµÄÉÈÇø½áÊøµØÖ·µÈÓÚbioµÄÉÈÇøÆğÊ¼µØÖ·£¬bio¿ÉÒÔºóÏîºÏ²¢µ½req
 	__rq = elv_rqhash_find(q, bio->bi_sector);
 	if (__rq && elv_rq_merge_ok(__rq, bio)) {
 		*req = __rq;
-		return ELEVATOR_BACK_MERGE;//°¥£¬ELEVATOR_BACK_MERGEÕâÀïÊÇºóÏîºÏ²¢
+		return ELEVATOR_BACK_MERGE;//ÕÒµ½¿ÉÒÔºÏ²¢µÄreq£¬ÕâÀï·µ»ØELEVATOR_BACK_MERGE£¬±íÊ¾ºóÏîºÏ²¢
 	}
-/*   
-   ¾ßÌåIOµ÷¶ÈËã·¨º¯Êıcfq_merge»òÕßdeadline_merge£¬ÕÒµ½¿ÉÒÔºÏ²¢µÄbioµÄreq¡£ÕâÀï·µ»ØELEVATOR_FRONT_MERGE£¬Ç°ÏîºÏ²¢
-*/
-#ifdef CONFIG_3.10.96
-	if (e->type->ops.elevator_merge_fn)
-		return e->type->ops.elevator_merge_fn(q, req, bio);
 
-#else// ÕâÊÇÊÇ3.10.0.957.27ÄÚºË£¬¾ÍÔö¼ÓÁËe->aux->ops.mq.request_merge
+    //¾ßÌåIOµ÷¶ÈËã·¨º¯Êıcfq_merge»òÕßdeadline_merge£¬ÕÒµ½¿ÉÒÔºÏ²¢µÄbioµÄreq£¬ÕâÀïÊÇ°ÑbioÇ°ÏîºÏ²¢µ½req
+	if (e->type->ops.elevator_merge_fn)
+        //deadlineÊÇÔÚºìºÚÊ÷¶ÓÁĞÀï±éÀúreq,Èç¹û¸ÃreqÆğÊ¼ÉÈÇøµØÖ·µÈÓÚbioµÄÉÈÇø½áÊøµØÖ·£¬·µ»ØÇ°ÏîºÏ²¢(bioºÏ²¢µ½reqµÄÇ°±ß)
+        //reqÊÇ¸öË«ÖØÖ¸Õë£¬±£´æÕâ¸öºìºÚÊ÷¶ÓÁĞÀïÆ¥Åäµ½µÄreq
+		return e->type->ops.elevator_merge_fn(q, req, bio);//deadline_merge£¬ÕâÀï·µ»ØELEVATOR_FRONT_MERGE£¬Ç°ÏîºÏ²¢
+/*
+    // ÕâÊÇÊÇ3.10.0.957.27ÄÚºË£¬¾ÍÔö¼ÓÁËe->aux->ops.mq.request_merge
     if (e->uses_mq && e->aux->ops.mq.request_merge)
        //dd_request_merge ºÍ deadline_mergeµÄº¯ÊıÔ´Âë¾ÍÊÇÒ»ÑùµÄ£¬¾ÍÊÇÔÚµ÷¶ÈËã·¨µÄ ¶Á»òĞ´ºìºÚÊ÷¶ÓÁĞÀï£¬ÕÒµ½µÈÓÚbio_end_sector(bio)µÄreq
        //ÕÒµ½ËµÃ÷bioµÄÉÈÇø½áÊøµØÖ·µÈÓÚreqµÄÉÈÇøÆğÊ¼µØÖ·£¬Ôò·µ»ØÇ°ÏîºÏ²¢ELEVATOR_FRONT_MERGE
@@ -489,7 +494,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
     //¾ßÌåIOµ÷¶ÈËã·¨º¯Êıcfq_merge»òÕßdeadline_merge£¬¸Ãº¯ÊıÊÇÔÚµ÷¶ÈËã·¨µÄ ¶Á»òĞ´ºìºÚÊ÷¶ÓÁĞÀï£¬±éÀúreq,ÕÒµ½reqÆğÊ¼ÉÈÇøµØÖ·
     //µÈÓÚbio_end_sector(bio)µÄreq£¬Èç¹ûÕÒµ½Æ¥ÅäµÄreq£¬ËµÃ÷bioµÄÉÈÇø½áÊøµØÖ·µÈÓÚreqµÄÉÈÇøÆğÊ¼µØÖ·£¬Ôò·µ»ØÇ°ÏîºÏ²¢ELEVATOR_FRONT_MERGE
           return e->aux->ops.sq.elevator_merge_fn(q, req, bio);
-#endif
+*/
 
 	return ELEVATOR_NO_MERGE;
 }
@@ -502,8 +507,8 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
  * Returns true if we merged, false otherwise
  */
 //Ê×ÏÈ³¢ÊÔ½«rqºóÏîºÏ²¢µ½q->last_merge£¬ÔÙ³¢ÊÔ½«rqºóÏîºÏ²¢µ½hash¶ÓÁĞµÄÄ³Ò»¸ö__rq£¬ºÏ²¢¹æÔòÊÇrqµÄÉÈÇøÆğÊ¼µØÖ·µÈÓÚq->last_merge»ò__rq
-//µÄÉÈÇø½áÊøµØÖ·£¬¶¼ÊÇµ÷ÓÃblk_attempt_req_merge()½øĞĞºÏ²¢¡£²¢¸üĞÂIOÊ¹ÓÃÂÊµÈÊı¾İ¡£Èç¹ûÊ¹ÓÃÁËdeadlineµ÷¶ÈËã·¨£¬¸üĞÂºÏ²¢ºóµÄreqÔÚ
-//hash¶ÓÁĞÖĞµÄÎ»ÖÃ¡£»¹»á´Ófifo¶ÓÁĞÌŞ³ıµôrq£¬¸üĞÂdd->next_rq[]¸³ÖµrqµÄÏÂÒ»¸öreq¡£
+//µÄÉÈÇø½áÊøµØÖ·£¬¶¼ÊÇµ÷ÓÃblk_attempt_req_merge()½øĞĞºÏ²¢¡£²¢¸üĞÂIOÊ¹ÓÃÂÊµÈÊı¾İ,¸üĞÂºÏ²¢ºóµÄreqÔÚhash¶ÓÁĞÖĞµÄÎ»ÖÃ¡£Èç¹ûÊ¹ÓÃÁË
+//deadlineµ÷¶ÈËã·¨£¬»¹»á´Ófifo¶ÓÁĞÌŞ³ıµôrq£¬¸üĞÂdd->next_rq[]¸³ÖµrqµÄÏÂÒ»¸öreq¡£
 static bool elv_attempt_insert_merge(struct request_queue *q,
 				     struct request *rq)
 {
@@ -516,11 +521,12 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 	/*
 	 * First try one-hit cache.
 	 */
-//³¢ÊÔ°ÑrqºÏ²¢µ½q->last_mergeºó±ß£¬²¢¸üĞÂIOÊ¹ÓÃÂÊÊı¾İ¡£È»ºóµ÷ÓÃIOµ÷¶ÈËã·¨µÄelevator_merge_req_fn»Øµ÷º¯Êı£¬µ±Îªmq-deadlineµ÷¶ÈËã·¨Ê±£¬Ö´ĞĞ¹ı³ÌÊÇ:
-//rqÒÑ¾­ºÏ²¢µ½ÁËq->last_mergeºó,ÔÚfifo¶ÓÁĞÀï£¬°Ñq->last_mergeÒÆ¶¯µ½rq½ÚµãµÄÎ»ÖÃ£¬¸üĞÂq->last_mergeµÄ³¬Ê±Ê±¼ä¡£´Ófifo¶ÓÁĞºÍºìºÚÊ÷ÌŞ³ırq,
-//»¹¸üĞÂdd->next_rq[]¸³ÖµrqµÄÏÂÒ»¸öreq¡£ÒòÎªq->last_mergeºÏ²¢ÁËrq£¬ÉÈÇø½áÊøµØÖ·±ä´óÁË£¬Ôòq->last_merge´Óhash¶ÓÁĞÖĞÉ¾³ıµôÔÙÖØĞÂ°´ÕÕÉÈÇø½áÊøµØÖ·ÔÚhash¶ÓÁĞÖĞÅÅĞò¡£
+//³¢ÊÔ°ÑreqºÏ²¢µ½q->last_mergeºó±ß£¬²¢¸üĞÂIOÊ¹ÓÃÂÊÊı¾İ¡£È»ºóµ÷ÓÃIOµ÷¶ÈËã·¨µÄelevator_merge_req_fn»Øµ÷º¯Êı£¬
+//µ±Îªdeadlineµ÷¶ÈËã·¨Ê±£¬Ö´ĞĞ¹ı³ÌÊÇ:rqÒÑ¾­ºÏ²¢µ½ÁËq->last_mergeºó,ÔÚfifo¶ÓÁĞÀï£¬°Ñq->last_mergeÒÆ¶¯µ½rq½ÚµãµÄÎ»ÖÃ£¬
+//¸üĞÂq->last_mergeµÄ³¬Ê±Ê±¼ä¡£´Ófifo¶ÓÁĞºÍºìºÚÊ÷ÌŞ³ırq,»¹¸üĞÂdd->next_rq[]¸³ÖµrqµÄÏÂÒ»¸öreq¡£
+//ÒòÎªq->last_mergeºÏ²¢ÁËrq£¬ÉÈÇø½áÊøµØÖ·±ä´óÁË£¬Ôòq->last_merge´Óhash¶ÓÁĞÖĞÉ¾³ıµôÔÙÖØĞÂ°´ÕÕÉÈÇø½áÊøµØÖ·ÔÚhash¶ÓÁĞÖĞÅÅĞò¡£
 	if (q->last_merge && blk_attempt_req_merge(q, q->last_merge, rq))
-		return true;
+		return true;//ºÏ²¢³É¹¦ÕâÀïÖ±½Ó·µ»Ø
 
 	if (blk_queue_noxmerges(q))
 		return false;
@@ -530,10 +536,12 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 	 * See if our hash lookup can find a potential backmerge.
 	 */
 	while (1) {
-     //ĞÂ¼ÓÈëIOµ÷¶È¶ÓÁĞµÄreq»á×öhashË÷Òı£¬ÕâÓ¦¸ÃÊÇÊÇ¸ù¾İrqµÄÉÈÇøÆğÊ¼µØÖ·ÔÚhash±íÕÒ__rq°É£¬È»ºórq_hash_key(__rq)ÓëoffsetÏàµÈ¾ÍÊÇÕÒµ½µÄreq£¬
-     //rq_hash_key(rq)ÊÇÉÈÇø½áÊøµØÖ·¡£¾ÍÊÇËµ£¬¸ÃrqµÄÉÈÇøÆğÊ¼µØÖ·Óëhash¶ÓÁĞÀï__rqµÄÉÈÇø½áÊøÏàµÈ£¬µ±È»¿ÉÓĞ°ÑrqºóÏîºÏ²¢µ½__rq
-		__rq = elv_rqhash_find(q, blk_rq_pos(rq));
-        //ÔÙ´ÎÖ´ĞĞblk_attempt_req_merge½«rqºóÏîºÏ²¢µ½__rq
+        //±éÀúhash¶ÓÁĞµÄreq(¼´__rq)£¬Èç¹ûÕâ¸ö__rqµÄÉÈÇø½áÊøµØÖ·µÈÓÚ±¾´ÎĞÂµÄreq(¼´rq)µÄÉÈÇøÆğÊ¼µØÖ·£¬ËµÃ÷ĞÂµÄreq¿ÉÒÔºóÏîºÏ²¢µ½
+        //Õâ¸öhash¶ÓÁĞµÄreq
+		__rq = elv_rqhash_find(q, blk_rq_pos(rq));//blk_rq_pos(rq)ÊÇreqµÄÉÈÇøÆğÊ¼µØÖ·
+        //ÕâÀïÒ²ÊÇÖ´ĞĞblk_attempt_req_merge½«±¾´ÎĞÂµÄreq(¼´rq)ºóÏîºÏ²¢µ½hash¶ÓÁĞµÄreq(¼´__rq),ºÏ²¢Ê§°ÜÖ±½Óbreak·µ»Ø£¬ºÏ²¢³É¹¦µÄ»°
+        //ÔòÔÚhash¶ÓÁĞÀïËÑË÷ÓĞÄÄ¸öreqÄÜ·ñºÏ²¢__rq¡£´ËÊ±µÄ__rqÉÈÇø½áÊøµØÖ·Ôö´ó£¬µ«ÉÈÇøÆğÊ¼µØÖ·Ã»±ä£¬²»ÄÜºóÏîºÏ²¢µ½hash¶ÓÁĞµÄÆäËûreq°É?
+        //ÓĞºÏ²¢µÄÒâÒåÂğ?Ò²Ğíhash¶ÓÁĞµÄreq²¢²»ÊÇÈ«²¿ºÏ²¢¹ıµÄ??????
 		if (!__rq || !blk_attempt_req_merge(q, __rq, rq))
 			break;
 
@@ -544,7 +552,8 @@ static bool elv_attempt_insert_merge(struct request_queue *q,
 
 	return ret;
 }
-//¿´×ÅÃ»É¶£¬reqÓĞÁËĞÂµÄºÏ²¢£¬Ôò¶ÔreqÔÚIOµ÷¶ÈËã·¨¶ÓÁĞÀïÖØĞÂÅÅĞò
+//req·¢ÉúÁËÇ°Ïî»òÕßºóÏîºÏ²¢£¬reqµÄÉÈÇøÆğÊ¼»òÕß½áÊøµØÖ·Ôö´ó£¬ĞèÒª°Ñreq´Óµ÷¶ÈËã·¨deadlineºìºÚÊ÷¶ÓÁĞ»òÕßhash¶ÓÁĞÖĞÌŞ³ı£¬
+//ÔÙ°´ÕÕreqĞÂµÄÉÈÇøÆğÊ¼»òÕß½áÊøµØÖ·²åÈë¶ÓÁĞ
 void elv_merged_request(struct request_queue *q, struct request *rq, int type)
 {
 	struct elevator_queue *e = q->elevator;
@@ -555,51 +564,54 @@ void elv_merged_request(struct request_queue *q, struct request *rq, int type)
 	  ¶ÔÇ°ÏîºÏ²¢ºóµÄreq½øĞĞÖØĞÂÅÅĞò£¬ÒòÎªÇ°ÏîºÏ²¢ºóµÄreqÉÈÇøÆğÊ¼µØÖ·±äĞ¡ÁË£¬¼ÈÈ»ºìºÚÊ÷¶ÓÁĞ¶ÔreqÅÅĞò¹æÔòÊÇË­µÄÉÈÇøÆğÊ¼µØÖ·Ğ¡Ë­¿¿×ó,
 	  ÄÇ¾ÍÒª¶ÔÕâ¸öreqÖØĞÂÔÙºìºÚÊ÷¶ÓÁĞÀïÅÅĞò¡£
 	  
-	  Í¬ÑùµÄ£¬deadlineµ÷¶ÈËã·¨µÄhash¶ÓÁĞ£¬Ò²ÊÇÒ»ÖÖreq¶ÓÁĞ£¬µ«ÅÅĞò¹æÔòÊÇreqµÄÉÈÇø½áÊøµØÖ·£¬ÎªÊ²Ã´ÕâÃ´Ëµ£¬
+	  Í¬ÑùµÄ£¬deadlineµ÷¶ÈËã·¨µÄhash¶ÓÁĞ£¬Ò²ÊÇÒ»ÖÖreq¶ÓÁĞ¡£´íÁË£¬hash¶ÓÁĞ²»ÊÇdeadlineËã·¨µÄ£¬ÊÇÄ¬ÈÏµÄelvµ÷¶ÈËã·¨µÄIO¶ÓÁĞ¡£Ò»Ö±ÓĞ¸ö
+	  ÈÏÖª´íÎó£¬Èç¹û²»ÉèÖÃdeadlineµ÷¶ÈËã·¨£¬ÄÑµÀ¾ÍÃ»ÓĞµ÷¶ÈËã·¨¶ÓÁĞÂğ?´íÁË£¬¼´±ã²»ÉèÖÃdeadlineÒ²ÓĞÄ¬ÈÏµÄelvµ÷¶ÈËã·¨hash¶ÓÁĞ¡£
+	  hash¶ÓÁĞµÄreqÅÅĞò¹æÔòÊÇreqµÄÉÈÇø½áÊøµØÖ·£¬ÎªÊ²Ã´ÕâÃ´Ëµ£¬
 	  ¿´hashÌí¼ÓÊ±µÄelv_rqhash_addº¯ÊıÀïµÄhash_add(e->hash, &rq->hash, rq_hash_key(rq))£¬rq_hash_key(rq)¾ÍÊÇhash key£¬reqÉÈÇø½áÊøµØÖ·¡£
 	  ËùÒÔÔÚelv_merged_request->elv_rqhash_repositionÖĞ£¬ÊÇreq½øĞĞÁËºóÏîºÏ²¢£¬ÉÈÇø½áÊøµØÖ·±ä´óÁË£¬ÄÇ¾ÍÒª¶ÔÕâ¸öreq½øĞĞÔÚhash±íÖĞ³åÏ´ÅÅĞò¡£
 	  blk_queue_bio->add_acct_request->__elv_add_request->elv_rqhash_addÌí¼Ó£¬elv_merge->elv_rqhash_find±éÀú
 	  blk_mq_sched_try_merge->elv_merged_request->elv_rqhash_repositionÖØĞÂÅÅĞò¡£¶ÔºóÏîºÏ²¢ºóµÄreq½øĞĞÒ»´ÎÖØĞÂÅÅĞò
 	*/
 
-    //·¢ÉúÁËÇ°ÏîºÏ²¢£¬IOµ÷¶ÈËã·¨¶ÓÁĞ
+    //¸Õreq·¢ÉúÁËÇ°ÏîºÏ²¢£¬reqÉÈÇøÆğÊ¼µØÖ·Ôö´ó£¬°Ñreq´ÓdeadlineµÄºìºÚÊ÷¶ÓÁĞÉ¾³ıÔÙ°´ÕÕĞÂµÄÉÈÇøÆğÊ¼µØÖ·²åÈëºìºÚÊ÷¶ÓÁĞ
 	if (e->type->ops.elevator_merged_fn)//cfq_merged_requestºÍdeadline_merged_request£¬mqÃ»ÓĞ
 		e->type->ops.elevator_merged_fn(q, rq, type);
 
 	if (type == ELEVATOR_BACK_MERGE)
-		elv_rqhash_reposition(q, rq);//reqÓĞÁËĞÂµÄºÏ²¢£¬¶ÔreqÖØĞÂÅÅĞò
+        //¸Õreq·¢ÉúÁËºóÏîºÏ²¢£¬reqÉÈÇø½áÊøµØÖ·Ôö´ó£¬°Ñreq´Óhash¶ÓÁĞÉ¾³ıÔÙ°´ÕÕĞÂµÄÉÈÇø½áÊøµØÖ·²åÈëhash¶ÓÁĞ
+		elv_rqhash_reposition(q, rq);
 
+    //q->last_merge±£´æ¸Õ·¢ÉúºÏ²¢µÄreq
 	q->last_merge = rq;
 }
 //ÔÚÕâÀï£¬nextÒÑ¾­ºÏ²¢µ½ÁËrq,ÔÚfifo¶ÓÁĞÀï£¬°ÑreqÒÆ¶¯µ½next½ÚµãµÄÎ»ÖÃ£¬¸üĞÂreqµÄ³¬Ê±Ê±¼ä¡£´Ófifo¶ÓÁĞºÍºìºÚÊ÷ÌŞ³ınext,
 //»¹¸üĞÂdd->next_rq[]¸³ÖµnextµÄÏÂÒ»¸öreq¡£ÒòÎªrqºÏ²¢ÁËnext£¬ÉÈÇø½áÊøµØÖ·±ä´óÁË£¬Ôòrq´Óhash¶ÓÁĞÖĞÉ¾³ıµôÔÙÖØĞÂÔÙhashÖĞÅÅĞò
 void elv_merge_requests(struct request_queue *q, struct request *rq,
-			     struct request *next)
+			     struct request *next)//rqÊÇºÏ²¢Ä¸Ìå£¬±ÈÈçq->last_merge»òhash¶ÓÁĞµÄreq£¬nextÊÇ±¾´ÎĞÂµÄreq
 {
 	struct elevator_queue *e = q->elevator;
 	const int next_sorted = next->cmd_flags & REQ_SORTED;
 
-
-
     //ÔÚfifo¶ÓÁĞÀï£¬°ÑreqÒÆ¶¯µ½next½ÚµãµÄÎ»ÖÃ£¬¸üĞÂreqµÄ³¬Ê±Ê±¼ä¡£´Ófifo¶ÓÁĞºÍºìºÚÊ÷ÌŞ³ınext,»¹¸üĞÂdd->next_rq[]¸³ÖµnextµÄÏÂÒ»¸öreq
 	if (next_sorted && e->type->ops.elevator_merge_req_fn)
 		e->type->ops.elevator_merge_req_fn(q, rq, next);//deadline_merged_requests »ònoop_merged_requests»òcfq_merged_requests
-
+/*
     //3.10.0.957.27ÄÚºËĞÂÔöµÄ£¬Ìí¼ÓÕë¶ÔµÄmq-deadlineµÄ
     //ÔÚfifo¶ÓÁĞÀï£¬°ÑreqÒÆ¶¯µ½next½ÚµãµÄÎ»ÖÃ£¬¸üĞÂreqµÄ³¬Ê±Ê±¼ä¡£´Ófifo¶ÓÁĞºÍºìºÚÊ÷ÌŞ³ınext,»¹¸üĞÂdd->next_rq[]¸³ÖµnextµÄÏÂÒ»¸öreq
     if (e->uses_mq && e->aux->ops.mq.requests_merged)
 		e->aux->ops.mq.requests_merged(q, rq, next);//dd_merged_requests£¬ËüµÄÔ­Àí¸údeadline_merged_requestsº¯ÊıºÜ½Ó½ü
-		
+*/		
 
-    //Ã²ËÆÊÇ°ÑrqÉ¾³ıºóÖØĞÂÌí¼Óµ½µ÷¶ÈÆ÷hash¶ÓÁĞ
+    //reqÉÈÇøºó±ßÍÌ²¢ÁËnext£¬ÉÈÇø½áÊøµØÖ·Ôö´ó£¬°Ñreq´ÓÉÈÇøhash¶ÓÁĞÉ¾³ı£¬ÔÙ°´ÕÕĞÂµÄÉÈÇø½áÊøµØÖ·¼ÓÈëhash¶ÓÁĞ
 	elv_rqhash_reposition(q, rq);
 
 	if (next_sorted) {
-        //É¾³ınext
+        //°Ñnext´Óhash¶ÓÁĞÌŞ³ı
 		elv_rqhash_del(q, next);
+        //elv¶ÓÁĞreq¸öÊı¼õ1£¬Êµ¼ÊÉÏ¾ÍÊÇelv hash¶ÓÁĞµÄreq¸öÊı¼õ1
 		q->nr_sorted--;
 	}
-
+    //q->last_mergeÖ¸ÏòºÏ²¢ºóµÄreq
 	q->last_merge = rq;
 }
 
@@ -657,8 +669,9 @@ void elv_drain_elevator(struct request_queue *q)
 	static int printed;
 
 	lockdep_assert_held(q->queue_lock);
-//Ñ¡µÄºÏÊÊ´ıÅÉ·¢¸øÇı¶¯´«ÊäµÄreq,È»ºó°ÑreqÌí¼Óµ½rqµÄqueue_head¶ÓÁĞ£¬ÉèÖÃĞÂµÄnext_rq£¬²¢°Ñreq´Ófifo¶ÓÁĞºÍºìºÚÊ÷¶ÓÁĞÌŞ³ı£¬½«À´´ÅÅÌÇı¶¯³ÌĞò¾ÍÊÇ´Óqueue_headÁ´±íÈ¡³öreq´«ÊäµÄ
-//Õâ¸öºÏÊÊµÄreq£¬À´Ô´ÓĞ:ÉÏ´ÎÅÉ·¢ÉèÖÃµÄnext_rq;read reqÅÉ·¢¹ı¶à¶øÑ¡ÔñµÄwrite req;fifo ¶ÓÁĞÉÏ³¬Ê±Òª´«ÊäµÄreq£¬Í¬ÊÖ¼æ¹Ë£¬ÓĞ¹Ì¶¨²ßÂÔ
+//Ñ¡ÔñºÏÊÊ´ıÅÉ·¢¸øÇı¶¯´«ÊäµÄreq,È»ºó°ÑreqÌí¼Óµ½rqµÄqueue_head¶ÓÁĞ£¬ÉèÖÃĞÂµÄnext_rq£¬²¢°Ñreq´Ófifo¶ÓÁĞºÍºìºÚÊ÷¶ÓÁĞÌŞ³ı£¬
+//½«À´´ÅÅÌÇı¶¯³ÌĞò¾ÍÊÇ´Óqueue_headÁ´±íÈ¡³öreq´«ÊäµÄÕâ¸öºÏÊÊµÄreq£¬Õâ¸öreqµÄÀ´Ô´ÓĞ:
+//1:ÉÏ´ÎÅÉ·¢ÉèÖÃµÄnext_rq; 2:read reqÅÉ·¢¹ı¶à¶øÑ¡ÔñµÄwrite req; 3:fifo ¶ÓÁĞÉÏ³¬Ê±Òª´«ÊäµÄreq£¬Ç°ºó¼æ¹Ë£¬ÓĞ¹Ì¶¨²ßÂÔ
 	while (q->elevator->type->ops.elevator_dispatch_fn(q, 1))//deadline_dispatch_requests
 		;
 	if (q->nr_sorted && printed++ < 10) {
@@ -691,13 +704,12 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 	case ELEVATOR_INSERT_REQUEUE:
 	case ELEVATOR_INSERT_FRONT://Ç°ÏòºÏ²¢
 		rq->cmd_flags |= REQ_SOFTBARRIER;
-		list_add(&rq->queuelist, &q->queue_head);//req²åÈëq->queue_head
+		list_add(&rq->queuelist, &q->queue_head);//reqÖ±½Ó²åÈëq->queue_head¶ÓÁĞÍ·¶øÒÑ£¬²¢Ã»ÓĞ½øĞĞreqºÏ²¢
 		break;
 
 	case ELEVATOR_INSERT_BACK://ºóÏòºÏ²¢
 		rq->cmd_flags |= REQ_SOFTBARRIER;
-        //Ñ¡µÄºÏÊÊ´ıÅÉ·¢¸øÇı¶¯´«ÊäµÄreq,È»ºó°ÑreqÌí¼Óµ½rqµÄqueue_head¶ÓÁĞ£¬ÉèÖÃĞÂµÄnext_rq£¬²¢°Ñreq´Ófifo¶ÓÁĞºÍºìºÚÊ÷¶ÓÁĞÌŞ³ı£¬½«À´´ÅÅÌÇı¶¯³ÌĞò¾ÍÊÇ´Óqueue_headÁ´±íÈ¡³öreq´«ÊäµÄ
-        //Õâ¸öºÏÊÊµÄreq£¬À´Ô´ÓĞ:ÉÏ´ÎÅÉ·¢ÉèÖÃµÄnext_rq;read reqÅÉ·¢¹ı¶à¶øÑ¡ÔñµÄwrite req;fifo ¶ÓÁĞÉÏ³¬Ê±Òª´«ÊäµÄreq£¬Í¬ÊÖ¼æ¹Ë£¬ÓĞ¹Ì¶¨²ßÂÔ
+        //Ñ­»·µ÷ÓÃdeadlineËã·¨µÄelevator_dispatch_fn½Ó¿ÚÒ»Ö±Ñ¡ÔñÅÉ·¢µÄreqÖ±µ½¶ÓÁĞ
 		elv_drain_elevator(q);
 		list_add_tail(&rq->queuelist, &q->queue_head);
 		/*
@@ -720,7 +732,7 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		 * queue already, we are done - rq has now been freed,
 		 * so no need to do anything further.
 		 */
-		if (elv_attempt_insert_merge(q, rq))
+		if (elv_attempt_insert_merge(q, rq))//°Ñ
 			break;
 	case ELEVATOR_INSERT_SORT://ĞÂ·ÖÅäµÄreq²åÈëµÄIOµ÷¶ÈËã·¨¶ÓÁĞ×ßÕâÀï
 		BUG_ON(rq->cmd_type != REQ_TYPE_FS);
@@ -740,8 +752,8 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		 * elevator_add_req_fn.
 		 */
 		//°Ñreq²åÈëµ½IOµ÷¶ÈËã·¨¶ÓÁĞÀï£¬deadlineÊÇ²åÈëµ½ºìºÚÊ÷¶ÓÁĞºÍfifo¶ÓÁĞ
-		//mq-deadlineÃ»ÓĞÕâ¸öº¯Êı,»¹ÓĞÃ»ÓĞIOµ÷¶ÈËã·¨µÄ³¡¾°£¬Ç¿ÖÆÖ´ĞĞÕâ¸öº¯ÊıÆñ²»ÊÇ»á±ÀÀ££?¹À¼Æ¾Í²»»á×ßcase ELEVATOR_INSERT_SORT·ÖÖ§!!!!!
-		q->elevator->type->ops.elevator_add_req_fn(q, rq);//deadline_add_request
+		//mq-deadlineÃ»ÓĞÕâ¸öº¯Êı,»¹ÓĞÃ»ÓĞIOµ÷¶ÈËã·¨µÄ³¡¾°ÊÇnoop_add_requestº¯Êı
+		q->elevator->type->ops.elevator_add_req_fn(q, rq);//deadline_add_request/noop_add_request
 		break;
 
 	case ELEVATOR_INSERT_FLUSH:

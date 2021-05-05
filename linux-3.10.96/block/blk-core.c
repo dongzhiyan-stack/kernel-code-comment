@@ -68,7 +68,7 @@ struct kmem_cache *blk_requestq_cachep;
  */
 static struct workqueue_struct *kblockd_workqueue;
 
-static void drive_stat_acct(struct request *rq, int new_io)//高版本变为 blk_account_io_start
+static void drive_stat_acct(struct request *rq, int new_io)//高版本内核函数是 blk_account_io_start
 {
 	struct hd_struct *part;
 	int rw = rq_data_dir(rq);
@@ -1551,17 +1551,16 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
     //在elv调度器里查找是否有可以合并的req，这是合并bio的req,是调用具体的IO调度算法函数寻找可以合并的req。
     //这些req所在的IO调度算法队列是多进程共享的，就像上边所述，进程访问这些队列要加锁，其他进程要等待。
     //函数返回值 ELEVATOR_BACK_MERGE(前项合并的req)、ELEVATOR_FRONT_MERGE(前项合并)、ELEVATOR_NO_MERGE(没有找到可以合并的req)
-	el_ret = elv_merge(q, &req, bio);
+	el_ret = elv_merge(q, &req, bio);/*req保存bio可以合并的req指针*/
 	if (el_ret == ELEVATOR_BACK_MERGE) {
 	    //后项合并，bio合并到req对应的磁盘空间范围后边
 		if (bio_attempt_back_merge(q, req, bio)) {
             //调用IO调度算法的elevator_bio_merged_fn函数，即cfq_bio_merged，貌似只有增加一部分统计数据
 			elv_bio_merged(q, req, bio);
-            //传说中的更高阶的合并吧，比如原IO调度算法队列挨着的req1和req2，代表的磁盘空间范围分别是req1:0~5，req2:11~16，
-            //bio的磁盘空间是6~10,则先执行bio_attempt_back_merge()把bio后项合并到req1,此时req1:0~10，显然此时req1和req2可以
-            //进行二次合并，attempt_back_merge()函数就是这个作用吧，合并成功返回1，否则0
+            
+          //之前req发生了后项合并,req的磁盘空间向后增大,从算法队列(比如deadline的红黑树队列)取出req的下一个req即next,再次尝试把next合并到req后边
 			if (!attempt_back_merge(q, req))
-                //走到这里，应该是二次合并失败了，调用IO调度算法的elevator_merged_fn函数，对req在IO调度算法队列里冲洗排序
+                //走到这里，应该是二次合并失败了，对deadline算法红黑树队列、elv hash队列的req进行重新排序，因为刚发生了req合并
 				elv_merged_request(q, req, el_ret);
 			goto out_unlock;
 		}
@@ -1570,9 +1569,10 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 		if (bio_attempt_front_merge(q, req, bio)) {
             //增加一部分统计数据
 			elv_bio_merged(q, req, bio);
-            //二次合并，看能否把req合并到IO调度队列里的前一个req
+            
+          //之前req发生了前项合并,req的磁盘空间向前增大,从算法队列(比如deadline的红黑树队列)取出req的上一个req即prev,再次尝试把req合并到prev后边
 			if (!attempt_front_merge(q, req))
-                //二次合并失败，因为req至少合并了bio，对req在IO调度队列里重新排序
+                //二次合并失败，对deadline算法红黑树队列、elv hash队列的req进行重新排序，因为刚发生了req合并
 				elv_merged_request(q, req, el_ret);
 			goto out_unlock;
 		}
@@ -1641,7 +1641,7 @@ get_rq:
 		spin_lock_irq(q->queue_lock);
         //新分配的rq添加到rq队列
         //更新主块设备和块设备分区的time_in_queue和io_ticks数据，增加队列flight中req计数
-		add_acct_request(q, req, where);
+		add_acct_request(q, req, where);//where是ELEVATOR_INSERT_SORT或者ELEVATOR_INSERT_FLUSH
         //启动rq队列，通知底层驱动，新的IO要传输
 		__blk_run_queue(q);
 out_unlock:

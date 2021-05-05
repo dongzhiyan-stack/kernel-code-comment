@@ -205,6 +205,8 @@ struct elevator_queue
     //新的req靠这个hash添加到IO调度算法的hash链表里，看elv_rqhash_add()和elv_rqhash_find()
     //做hash索引是为了在IO算法队列里搜索可以合并的req时，提高搜索速度
 	DECLARE_HASHTABLE(hash, ELV_HASH_BITS);
+    
+    //deadline红黑树队列的req只考虑前项合并。hash队列的req只考虑后项合并，规则
     /*deadline调度算法的红黑树，在插入req时，就是按照req代表的扇区起始地址来对比，谁的扇区起始地址小，谁排列靠左.
 	  见 deadline_add_request->deadline_add_rq_rb->elv_rb_add插入req和elv_merge->deadline_merge->elv_rb_find遍历req。
 	  blk_mq_sched_try_merge->elv_merged_request->deadline_merged_request重新req排序，针对deadline调度算法的红黑树队列，

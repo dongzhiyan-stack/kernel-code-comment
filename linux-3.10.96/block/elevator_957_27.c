@@ -621,6 +621,7 @@ void elv_merge_requests(struct request_queue *q, struct request *rq,
 	bool next_sorted = false;
 
 	if (e->uses_mq && e->aux->ops.mq.requests_merged)
+        //在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,还更新dd->next_rq[]赋值next的下一个req
 		e->aux->ops.mq.requests_merged(q, rq, next);//dd_merged_requests
 	else if (e->aux->ops.sq.elevator_merge_req_fn) {
 		next_sorted = (__force bool)(next->cmd_flags & REQ_SORTED);

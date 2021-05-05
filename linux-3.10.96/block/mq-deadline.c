@@ -32,7 +32,7 @@ static const int writes_starved = 2;    /* max times reads can starve a write */
 static const int fifo_batch = 16;       /* # of sequential requests treated as one
 				     by the above parameters. For throughput. */
 
-struct deadline_data {
+struct deadline_data {//这是多队列的，单队列见deadline-iosched.c
 	/*
 	 * run time data
 	 */
@@ -56,7 +56,7 @@ struct deadline_data {
 	int fifo_expire[2];
 	int fifo_batch;
 	int writes_starved;
-	int front_merges;
+	int front_merges;//应该在deadline_init_queue()中被赋值1
 
 	spinlock_t lock;
     //dd_insert_request中，把req添加到该dispatch 队列
@@ -180,7 +180,7 @@ deadline_move_request(struct deadline_data *dd, struct request *rq)
 	/*
 	 * take it off the sort and fifo list
 	 */
-	//只有把req从fifo队列和红黑树队列剔除
+	//只是把req从fifo队列和红黑树队列剔除
 	deadline_remove_request(rq->q, rq);
 }
 

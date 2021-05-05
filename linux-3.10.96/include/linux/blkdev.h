@@ -212,7 +212,8 @@ struct request {
 	unsigned short nr_integrity_segments;
 #endif
 
-	unsigned short ioprio;
+	unsigned short ioprio;//ioprio是cfq调度算法的概念
+
     //scsi_get_cmd_from_req()指向分配的scsi命令结构体
 	void *special;		/* opaque pointer available for LLD use */
     //该req对应的bh的内存page地址,还考虑了页内offset，看blk_update_request()后半段
@@ -384,6 +385,8 @@ struct request_queue {
 	//触发驱动程序取出queue_head上待传输的req的函数路径是
 	//__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn->blk_fetch_request->blk_peek_request->__elv_next_request
 	struct list_head	queue_head;
+    
+    //attempt_merge->elv_merge_requests函数中，把next这个rq合并到新产生的req，然后赋值last_merge=req
 	struct request		*last_merge;//上一次合并过的rq，见elv_merge()或elv_merge_requests()函数
 	struct elevator_queue	*elevator;//每个IO调度算法的总代表
 	int			nr_rqs[2];	/* # allocated [a]sync rqs */

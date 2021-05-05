@@ -57,17 +57,17 @@ struct deadline_data {
 	/*
 	 * next in sort order. read, write or both are NULL
 	 */
-	//每次从红黑树选取一个req发给驱动传输，这个req的下一个req保存在next_rq。
+	//deadline算法选择派发的req时优先找next_rq[]的req进行派发
 	//elv_merge_requests->dd_merged_requests->deadline_remove_request->deadline_del_rq_rb 中赋值也赋值dd->next_rq[]。
 	//下次deadline_dispatch_requests()选择req发给驱动时，直接使用这个next_rq。赋值见deadline_del_rq_rb
-	struct request *next_rq[2];//两个成员，一个读一个写
+	struct request *next_rq[2];//两个成员，一个保存读属性req，一个保存写属性req
 	
     //如果batching大于等于fifo_batch，不再使用next_rq，否则会一直只向后使用红黑树队列的req向驱动发送传输，队列前边的req得不到发送
-    //见deadline_dispatch_requests()
+    //见deadline_dispatch_requests()。batching是为了保证不一直使用next_rq[]指向的req而导致IO队列靠前的req不被传输的计数变量
 	unsigned int batching;		/* number of sequential requests made */
     //req的磁盘空间end地址,见deadline_move_request()
-	sector_t last_sector;		/* head position */
-    //见下方的writes_starved，write req得不到选择而饥饿的次数
+	sector_t last_sector;		/* head position */ 
+    //见下方的writes_starved，write req得不到传输而饥饿的次数。starved是为了保证不一直使用read req而导致write req不被传输的计数变量
 	unsigned int starved;		/* times reads have starved writes */
 
 	/*
@@ -115,15 +115,18 @@ deadline_add_rq_rb(struct deadline_data *dd, struct request *rq)
     //把rq添加到树里，就是按照每个req的起始扇区排序的
 	elv_rb_add(root, rq);
 }
-
+//如果req原本是dd->next_rq[]保存req，则要找到req在红黑树的下一个req赋值给dd->next_rq[]，然后把req从红黑树中剔除
 static inline void
 deadline_del_rq_rb(struct deadline_data *dd, struct request *rq)
 {
 	const int data_dir = rq_data_dir(rq);
 
+    //这个if判断是说rq原本是dd->next_rq[]保存req，现在rq马上要从红黑树中剔除，则要找到rq在红黑树的下一个req赋值给dd->next_rq[]，
+    //deadline算法选择派发的req时会优先选择dd->next_rq[]保存的req
 	if (dd->next_rq[data_dir] == rq)
 		dd->next_rq[data_dir] = deadline_latter_request(rq);
-
+    
+    //deadline_rb_root(dd, rq)是取出调度算法的读或者写红黑树队列头rb_root，然后把req从这个红黑树队列剔除掉
 	elv_rb_del(deadline_rb_root(dd, rq), rq);
 }
 
@@ -150,18 +153,17 @@ deadline_add_request(struct request_queue *q, struct request *rq)
 /*
  * remove rq from rbtree and fifo.
  */
-//从fifo队列剔除rq,从红黑树剔除rq。给dd->next_rq[]赋值req的下一个req，下一次从红黑树选择req发给驱动时用到
+//deadline算法从fifo队列和红黑树剔除req。剔除前如果req原本是dd->next_rq[]保存req，还要找到req在红黑树的下一个req赋值给dd->next_rq[]
 static void deadline_remove_request(struct request_queue *q, struct request *rq)
 {
 	struct deadline_data *dd = q->elevator->elevator_data;
     //从fifo队列剔除rq
 	rq_fifo_clear(rq);
-    //给dd->next_rq[]赋值req的下一个req，下一次从红黑树选择req发给驱动时用到。并且把req从红黑树中剔除
+    //如果req原本是dd->next_rq[]保存req，则要找到req在红黑树的下一个req赋值给dd->next_rq[]，然后把req从红黑树中剔除
 	deadline_del_rq_rb(dd, rq);
 }
 
-//该函数是在调度算法的 读或写红黑树队列里，遍历req,找到req起始扇区地址等于bio_end_sector(bio)的req，
-//如果找到匹配的req，说明bio的扇区结束地址等于req的扇区起始地址，则返回前项合并
+//在调度算法的红黑树队列里遍历req,如果该req起始扇区地址等于bio的扇区结束地址，返回前项合并(bio合并到req的前边)，否则返回ELEVATOR_NO_MERGE
 static int
 deadline_merge(struct request_queue *q, struct request **req, struct bio *bio)
 {
@@ -172,10 +174,10 @@ deadline_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	/*
 	 * check for front merge
 	 */
-	if (dd->front_merges) {
-		sector_t sector = bio_end_sector(bio);
+	if (dd->front_merges) {//默认应该成立
+		sector_t sector = bio_end_sector(bio);//sector是bio的扇区结束地址
         
-         //该函数是在调度算法的 读或写红黑树队列里，遍历req,找到req起始扇区地址等于bio_end_sector(bio)的req返回，否则返回NULL
+         //在调度算法的红黑树队列里遍历req,如果该req起始扇区地址等于bio的扇区结束地址则返回该req，否则返回NULL
 		__rq = elv_rb_find(&dd->sort_list[bio_data_dir(bio)], sector);
 		if (__rq) {
 			BUG_ON(sector != blk_rq_pos(__rq));
@@ -203,13 +205,15 @@ static void deadline_merged_request(struct request_queue *q,
 	 */
 
     //如果是前项合并，则把要把req从调度算法队列红黑树里剔除掉，重新插入到红黑树。为什么只针对前项合并才对req重排，后项不合并呢?
+    //因为红黑树队列的req只考虑前项合并，hash队列的req只考虑后项合并，规则
     if (type == ELEVATOR_FRONT_MERGE) {
 		elv_rb_del(deadline_rb_root(dd, req), req);//也是删除req原来位置
 		//按照req的磁盘起始地址把req添加到红黑树队列里，这个红黑树里req的排列规则是，谁的磁盘起始地址小谁靠左
 		deadline_add_rq_rb(dd, req);
 	}
 }
-//在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,还更新dd->next_rq[]赋值next的下一个req
+//deadline算法,如果next在fifo队列的超时时间比req早，则在fifo队列链表里把req移动到next后边，更新req的fifo超时时间为next的。
+//接着从fifo队列和红黑树剔除next,剔除前如果next原本是dd->next_rq[]保存req，还要找到next在红黑树的下一个req赋值给dd->next_rq[]。
 static void
 deadline_merged_requests(struct request_queue *q, struct request *req,
 			 struct request *next)
@@ -218,10 +222,11 @@ deadline_merged_requests(struct request_queue *q, struct request *req,
 	 * if next expires before rq, assign its expire time to rq
 	 * and move into next position (next will be deleted) in fifo
 	 */
-	//如果next的超时时间早于req，更新到rq超时时间里
-	if (!list_empty(&req->queuelist) && !list_empty(&next->queuelist)) {
+	//如果next在fifo队列超时时间早于req，则更新req的fifo超时时间为next的，在fifo队列链表里把req移动到next后边
+	if (!list_empty(&req->queuelist) && !list_empty(&next->queuelist))//req和next应该都在deadline的fifo队列吧，这个判断有必要吗?
+    {
 		if (time_before(rq_fifo_time(next), rq_fifo_time(req))) {
-            //在fifo队里，把req移动到next的位置后边
+            //在fifo队里，把req移动到next的后边，就是说，
 			list_move(&req->queuelist, &next->queuelist);
             //设置req的超时时间
 			rq_set_fifo_time(req, rq_fifo_time(next));
@@ -231,7 +236,7 @@ deadline_merged_requests(struct request_queue *q, struct request *req,
 	/*
 	 * kill knowledge of next, this one is a goner
 	 */
-	//从fifo队列和红黑树剔除next,还更新dd->next_rq[]赋值next的下一个req
+	//deadline算法从fifo队列和红黑树剔除next。剔除前如果next原本是dd->next_rq[]保存req，还要找到next在红黑树的下一个req赋值给dd->next_rq[]
 	deadline_remove_request(q, next);
 }
 
@@ -288,7 +293,7 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
 	/*
 	 * rq is expired!
 	 */
-	//rq超时时间到了
+	//req超时时间到了
 	if (time_after_eq(jiffies, rq_fifo_time(rq)))
 		return 1;
 
@@ -305,9 +310,9 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
 static int deadline_dispatch_requests(struct request_queue *q, int force)
 {
 	struct deadline_data *dd = q->elevator->elevator_data;
-    //如果fifo队列有read req,list_emptyf返回0，reads为1
+    //如果fifo队列有read req,list_empty返回0，reads为1
 	const int reads = !list_empty(&dd->fifo_list[READ]);
-    //如果fifo队列有write req,list_emptyf返回0，writes为1
+    //如果fifo队列有write req,list_empty返回0，writes为1
 	const int writes = !list_empty(&dd->fifo_list[WRITE]);
 	struct request *rq;
 	int data_dir;
@@ -315,12 +320,14 @@ static int deadline_dispatch_requests(struct request_queue *q, int force)
 	/*
 	 * batches are currently reads XOR writes
 	 */
-    //每次从红黑树选取一个req发给驱动传输，这个req的下一个req保存在next_rq，现在又向驱动发送req传输，先从next_rq取出req
+    //每次从红黑树选取一个req发给驱动传输，这个req的下一个req保存在next_rq[]，现在又向驱动发送req传输，优先先从next_rq取出req
 	if (dd->next_rq[WRITE])
 		rq = dd->next_rq[WRITE];
 	else
 		rq = dd->next_rq[READ];
- //如果dd->batching大于等于dd->fifo_batch，不再使用next_rq，否则会一直只向后使用红黑树队列的req向驱动发送传输，队列前边的req得不到发送
+    
+    //如果dd->batching大于等于dd->fifo_batch，不再使用next_rq，否则会一直只向后使用红黑树队列的req向驱动发送传输，
+    //队列前边的req得不到发送
 	if (rq && dd->batching < dd->fifo_batch)
 		/* we have a next request are still entitled to batch */
 		goto dispatch_request;
@@ -329,7 +336,7 @@ static int deadline_dispatch_requests(struct request_queue *q, int force)
 	 * at this point we are not running a batch. select the appropriate
 	 * data direction (read / write)
 	 */
-    //这应该是选择选择read或write req，因为一直选择read req给驱动传输，那write req就starve饿死了
+    //这应该是选择read或write req，因为一直选择read req给驱动传输，那write req就starve饿死了
     //fifo队列有read req，fifo队列有write req要传送给驱动，错了，fifo和红黑树是一体的，只是用处不一样
 	if (reads) {
 		BUG_ON(RB_EMPTY_ROOT(&dd->sort_list[READ]));
@@ -366,7 +373,7 @@ dispatch_find_request:
 	/*
 	 * we are not running a batch, find best request for selected data_dir
 	 */
-	//deadline_check_fifo如果deadline fifo队列有超时的req要传输返回1，或者next_rq没有暂存req，那就从fifo队列头取出req
+	//deadline_check_fifo:如果deadline fifo队列有超时的req要传输返回1，或者next_rq没有暂存req，if都成立。则从fifo队列头取出req
 	if (deadline_check_fifo(dd, data_dir) || !dd->next_rq[data_dir]) {
 		/*
 		 * A deadline has expired, the last request was in the other
@@ -392,6 +399,7 @@ dispatch_request://调到这里，req直接来自next_rq或者fifo队列，这个req就要被发给驱
 	 */
 	//batching加1
 	dd->batching++;
+    
     //把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
     //将来磁盘驱动程序就是从queue_head链表取出req传输的
 	deadline_move_request(dd, rq);
