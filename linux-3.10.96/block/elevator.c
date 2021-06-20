@@ -682,7 +682,8 @@ void elv_drain_elevator(struct request_queue *q)
 }
 //新分配的req插入IO算法队列，或者是把当前进程plug链表上req全部插入到IO调度算法队列
 void __elv_add_request(struct request_queue *q, struct request *rq, int where)
-{//blk_flush_plug_list调用时，req有(REQ_FLUSH | REQ_FUA)和属性，则是where是ELEVATOR_INSERT_FLUSH，否则是ELEVATOR_INSERT_SORT
+{//blk_flush_plug_list调用时，req有(REQ_FLUSH | REQ_FUA)和属性，则是where是ELEVATOR_INSERT_FLUSH，否则是ELEVATOR_INSERT_SORT_MERGE
+//blk_queue_bio单独提交IO是ELEVATOR_INSERT_SORT
 	trace_block_rq_insert(q, rq);
 
 	blk_pm_add_request(q, rq);

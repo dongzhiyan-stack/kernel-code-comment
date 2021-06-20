@@ -112,6 +112,11 @@ static struct workqueue_struct *cgroup_destroy_wq;
 //展开就是cpu或者mem等的struct cgroup_subsys结构
 static struct cgroup_subsys *subsys[CGROUP_SUBSYS_COUNT] = {
 #include <linux/cgroup_subsys.h>
+/*展开就是
+[cpuset_subsys_id] = cpuset_subsys,
+[mem_cgroup_subsys_id] = mem_cgroupt_subsys,
+[blkio_subsys_id] = blkio_subsys,
+*/
 };
 
 /*
@@ -126,8 +131,8 @@ static struct cgroupfs_root rootnode;
  */
 //保存了一个cgroup控制文件的基本信息，创建文件时cgroup_add_file()中赋值
 struct cfent {
-	struct list_head		node;
-	struct dentry			*dentry;
+	struct list_head		node;//cgroup_add_file()将该cgroup file的cfent的node添加到struct cgroup结构的files链表
+	struct dentry			*dentry;//cgroup控制文件dentry
     //指向该文件对应的struct cftype结构，struct cftype包含了该文件的读写控制函数，如echo设置进程运行时间要调用的函数
 	struct cftype			*type;
 
@@ -200,7 +205,7 @@ struct cgroup_event {
 /* The list of hierarchy roots */
 
 static LIST_HEAD(roots);
-static int root_count;
+static int root_count;//与cgroup子系统个数一致，12
 
 static DEFINE_IDA(hierarchy_ida);
 static int next_hierarchy_id;
@@ -330,7 +335,7 @@ static void check_for_release(struct cgroup *cgrp);
 //进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应，find_css_set()函数详细讲解他们的关系
 //然后每个struct cgroup又与task_cgroup或者mem_cgroup控制单元一一对应，这样通过每个进程的task_struct
 //结构就能找到这个进程绑定的task_cgroup或者mem_cgroup控制单元
-struct cg_cgroup_link {
+struct cg_cgroup_link {//link_css_set()中赋值
 	/*
 	 * List running through cg_cgroup_links associated with a
 	 * cgroup, anchored on cgroup->css_sets
@@ -373,8 +378,10 @@ static int css_set_count;
  * account cgroups in empty hierarchies.
  */
 #define CSS_SET_HASH_BITS	7
+//css_set_table hash表的使用在find_css_set()
 static DEFINE_HASHTABLE(css_set_table, CSS_SET_HASH_BITS);
 
+//以所有struct cgroup_subsys_state *css[]所有的cgroup子系统cgroup_subsys_state指针累加值作为hash key
 static unsigned long css_set_hash(struct cgroup_subsys_state *css[])
 {
 	int i;
@@ -469,6 +476,27 @@ static inline void put_css_set_taskexit(struct css_set *cg)
  * Returns true if "cg" matches "old_cg" except for the hierarchy
  * which "new_cgrp" belongs to, for which it should match "new_cgrp".
  */
+
+/* cgroup_attach_task->find_css_set->find_existing_css_set->compare_css_sets() 进程绑定新的cgroup
+
+   执行到这个函数，struct css_set *cg 是从css_set_table链表上找到的css_set,struct css_set *old_cg是进程之前绑定的css_set，
+   struct cgroup *new_cgrp 是进程本次要绑定到cgroup，struct cgroup_subsys_state *template[]在find_existing_css_set()里被赋值为
+
+   compare_css_sets()循环遍历struct css_set *cg和struct css_set *oldcg的cg_links链表上的cg_cgroup_link指向的cgroup，简单说就是css_set
+   绑定的struct cgroup而已。然后结合本次进程要绑定的struct cgroup *cgrp，判断3者是否相等。具体规则是:每次循环，遍历到
+   struct css_set *cg和struct css_set *oldcg上的cgroup如果不相等，直接返回false ; 如果本次循环从struct css_set *cg遍历到的
+   cgroup与本次进程要绑定的struct cgroup *cgrp都属于同一个cgroup子系统(cgroup->cgroupfs_root相等)，但是两个cgroup不相等，
+   说明不是同一个cgroup目录，返回false。如果经过前边的判断全都不成立，则返回true。这说明struct css_set *cg就是本次进程要
+   绑定的css_set。
+
+   每一个进程绑定的css_set的 cg_links链表上，一定有12个struct cg_cgroup_link，对应12个cgroup子系统的cgroup目录。这些12个cgroup子系统
+   的cgroup目录是按照cgroup子系统的编号顺序排列在css_set的 cg_links链表上。compare_css_sets的for循环就是取出struct css_set *cg
+   和struct css_set *old_cg这两个css_set的cg_links链表的struct cg_cgroup_link对应的cgorup目录结构的struct cgroup，由于cgroup是按照
+   cgroup子系统编号顺序排列在css_set的 cg_links链表上，所以每轮循环从struct css_set *cg和struct css_set *old_cg取出的struct cgroup
+   一定属于同一个cgroup子系统，所以BUG_ON(cg1->root != cg2->root)一定不成立。并且，这两个css_set肯定都只有12个cgroup，所以
+   BUG_ON(l2 != &old_cg->cg_links)也不成立。但是每轮循环从struct css_set *cg和struct css_set *old_cg取出的struct cgroup结构不一定一样，
+   因为对应的两个进程绑定的cgroup目录不一定一样，这样就匹配失败。
+*/
 static bool compare_css_sets(struct css_set *cg,
 			     struct css_set *old_cg,
 			     struct cgroup *new_cgrp,
@@ -476,6 +504,8 @@ static bool compare_css_sets(struct css_set *cg,
 {
 	struct list_head *l1, *l2;
 
+    //如果template[]和cg->subsys的这两个struct cgroup_subsys_state[]数组保存的各个cgroup子系统的cgroup_subsys_state有一个不相等，
+    //就直接返回false
 	if (memcmp(template, cg->subsys, sizeof(cg->subsys))) {
 		/* Not all subsystems matched */
 		return false;
@@ -489,15 +519,16 @@ static bool compare_css_sets(struct css_set *cg,
 	 * avoid the need for this more expensive check on almost all
 	 * candidates.
 	 */
-
+	 
+    //l1和l2指向css_set的 struct list_head cg_links
 	l1 = &cg->cg_links;
 	l2 = &old_cg->cg_links;
 	while (1) {
 		struct cg_cgroup_link *cgl1, *cgl2;
 		struct cgroup *cg1, *cg2;
-
-		l1 = l1->next;
-		l2 = l2->next;
+        //l1 = l1->next赋值后，l1才指向struct cg_cgroup_link的cg_link_list成员，然后list_entry()再找到struct cg_cgroup_link。l2同理
+		l1 = l1->next;//下边list_entry()由l1指向的cg_link_list得到cg_cgroup_link
+		l2 = l2->next;//下边list_entry()由l2指向的cg_link_list得到cg_cgroup_link
 		/* See if we reached the end - both lists are equal length. */
 		if (l1 == &cg->cg_links) {
 			BUG_ON(l2 != &old_cg->cg_links);
@@ -506,8 +537,10 @@ static bool compare_css_sets(struct css_set *cg,
 			BUG_ON(l2 == &old_cg->cg_links);
 		}
 		/* Locate the cgroups associated with these links. */
+        //由l1和l2指向的cg_link_list分别得到各自的cg_cgroup_link
 		cgl1 = list_entry(l1, struct cg_cgroup_link, cg_link_list);
 		cgl2 = list_entry(l2, struct cg_cgroup_link, cg_link_list);
+        //再由cg_cgroup_link得到cgroup
 		cg1 = cgl1->cgrp;
 		cg2 = cgl2->cgrp;
 		/* Hierarchies should be linked in the same order. */
@@ -520,14 +553,19 @@ static bool compare_css_sets(struct css_set *cg,
 		 * hierarchy, then this css_set should point to the
 		 * same cgroup as the old css_set.
 		 */
+		//cg1->root == new_cgrp->root，说明本次循环遍历到的css_set_table链表上的css_set的cg_links链表上的cgroup和本次的new_cgrp属于
+		//同一个cgroup子系统.那就再看看这两个cgroup是否是cgroup目录(即if(cg1 != new_cgrp))，如果不是同一个cgroup，返回flase
 		if (cg1->root == new_cgrp->root) {
 			if (cg1 != new_cgrp)
 				return false;
 		} else {
+		//其他情况，css_set_table链表上的css_set的cg_links链表上的cgroup和old_cg的cg_links链表上的cgroup不相等，直接返回false
 			if (cg1 != cg2)
 				return false;
 		}
 	}
+
+    
 	return true;
 }
 
@@ -544,10 +582,141 @@ static bool compare_css_sets(struct css_set *cg,
  * template: location in which to build the desired set of subsystem
  * state objects for the new cgroup group
  */
+
+/* cgroup_attach_task->find_css_set->find_existing_css_set->compare_css_sets() 进程绑定新的cgroup
+
+   1 struct css_set *oldcg 是进程之前绑定的css_set
+   2 struct cgroup *cgrp是进程本次绑定的cgroup目录
+
+   find_existing_css_set()是结合进程之前绑定的oldcg和本次绑定的cgroup目录cgrp，在css_set_table链表找到一个匹配的css_set，
+   找到则返回css_set，否则返回NULL。查找规则是什么呢?
+   
+   1 在for (i = 0; i < CGROUP_SUBSYS_COUNT; i++)循环那里使用cgrp->subsys[i]和oldcg->subsys[i]的cgroup_subsys_state填充
+     template[CGROUP_SUBSYS_COUNT]数组。除了for循环遍历到了本次进程要绑定的struct cgroup *cgrp对应的cgroup子系统，是从
+     从cgrp->subsys[i]取出cgroup_subsys_state赋于template[i]，即template[i] = cgrp->subsys[i]。其他都是template[i] = oldcg->subsys[i]
+
+   2 之后template[i]的cgroup_subsys_state就结合了老css_set和本次要绑定进程的cgroup的cgroup_subsys_state，以template[i]为key在
+     css_set_table链表查找匹配的css_set，这里称为css_set_new。css_set_new->subsys[i]和template[i]的cgroup_subsys_state应该完全一样，
+     毕竟是以template[i]的cgroup_subsys_state为key在css_set_table链表找到的css_set_new。
+
+   3 接着执行compare_css_sets()循环遍历css_set_new和struct css_set *oldcg的cg_links链表上的cg_cgroup_link指向的cgroup，简单说就是css_set
+     绑定的struct cgroup而已。然后结合本次进程要绑定的struct cgroup *cgrp，判断3者是否相等。具体规则是:每次循环，遍历到css_set_new和
+     struct css_set *oldcg上的cgroup如果不相等，直接返回false ; 如果本次循环从css_set_new遍历到的cgroup与本次进程要绑定的
+     struct cgroup *cgrp都属于同一个cgroup子系统(cgroup->cgroupfs_root相等)，但是两个cgroup不相等，说明不是同一个cgroup目录，返回false。
+     如果经过前边的判断全都不成立，则返回true。这说明css_set_new就是本次进程绑定的css_set。
+*/
+
+//进程"echo 进程ID >cpu/tasks"绑定cgroup目录时，内核流程cgroup_attach_task->find_css_set->find_existing_css_set->compare_css_sets()详解
+//以及css_set的深层解释
+/* 
+    关键词:css_set、css_set->subsys[]、cgroup_subsys_state、cgroup结构、cgroup结构的cgroup_subsys_state成员
+
+    进程"echo 进程ID >cpu/tasks"绑定cgroup目录,执行函数cgroup_attach_task->find_css_set->find_existing_css_set->compare_css_sets()，
+    如果找到匹配的css_set，直接把进程task_struct与css_set建立关系即可。如果找不到就要分配新的css_set、struct cg_cgroup_link，然后用
+    进程之前绑定的old css_set的cg_links链表上的cg_cgroup_link对应的cgroup结构以及本次绑定的cgorup目录结构，建立3者的关系。最后，
+    建立进程task_stuct与新的css_set的关系
+
+       1 首先是find_existing_css_set函数里，向css_set的subsys[i]数组保存cgroup_subsys_state:进程绑定cgroup目录时执行到
+       cgroup_attach_task->find_css_set->find_existing_css_set()函数，该函数里执行template[i] = cgrp->subsys[i]。cgrp是本次进程要绑定
+       的cgroup目录结构，i是本次进程要绑定的cgroup目录对应的cgroup子系统编号，cgrp->subsys[i]就是cgroup目录对应的cgroup_subsys_state。
+
+       后边在find_css_set()里会把template[i]的所有cgroup_subsys_state复制到css_set的subsys[i]数组,下边有讲。
+ 
+      !!!所以css_set->subsys[]里的cgroup_subsys_state来自进程要绑定的cgroup目录结构struct cgroup的cgroup_subsys_state成员。如果一个进程
+      没有绑定cgroup目录，那对应css_set->subsys[i]里的cgroup_subsys_state都是从父进程继承的默认的cgroup_subsys_state。之后进程每绑定一个
+      cgroup目录，就要把这个cgroup目录结构的成员cgroup_subsys_state按照该cgroup子系统编号保存到css_set->subsys[i]，i是cgroup子系统编号。
+       
+       2 如果在find_css_set->find_existing_css_set()中找到了进程要绑定css_set则直接返回该css_set,然后在cgroup_attach_task()将进程的
+       task_struct结构绑定到返回的css_set即可(见2.6)。如果没有找到要绑定的css_set，则find_css_set->find_existing_css_set()返回NULL，这
+       种情况很复杂，需要分配新的css_set。并且要把进程之前绑定的old css_set的成员cg_links链表上的cg_cgroup_link指向的所有cgroup结构
+       迁移到新的css_set，说到底就是要把进程之前绑定的所有其他cgroup子系统的cgroup目录结构转移到新的css_set。这些是在find_css_set()
+       函数后期执行的，步骤是:
+       
+       2.1 执行 struct css_set *res = kmalloc(sizeof(*res), GFP_KERNEL)分配新的css_set
+       2.2 执行 allocate_cg_links(root_count, &tmp_cg_links) 为新的css_set分配新的struct cg_cgroup_link
+       2.3 执行 memcpy(res->subsys, template, sizeof(res->subsys))把template[]所有的cgroup_subsys_state复制到
+         struct css_set *res的subsys[]数组。
+       2.4 执行 link_css_set(&tmp_cg_links, res, c) 建立新的css_set、新的struct cg_cgroup_link、进程之前绑定的old css_set的cg_links
+           链表上的cg_cgroup_link对应的cgroup结构以及本次绑定的cgorup目录结构，三者的关系。
+       
+       2.5 执行 key = css_set_hash(res->subsys) 和 hash_add(css_set_table, &res->hlist, key)，以新的css_set的subsys[]保存
+           的cgroup_subsys_state为key，把新的css_set加入css_set_table链表。每个css_set都是以这种形式加入到css_set_table链表，
+           将来也是按照同样方法计算css_set的key，然后从css_set_table链表链表找到对应的css_set。
+       2.6 接着从cgroup_attach_task->find_css_set()返回到cgroup_attach_task函数，执行cgroup_task_migrate(tc->cgrp, tc->task, tc->cg)建立
+          本次要绑定cgroup目录的进程的task_struct结构与新的css_set的关系。
+*/
+
+// !!!!!!! css_set 的存在意义
+/*
+       什么意思呢?css_set的存在就是为了记录进程绑定的所有的cgroup目录结构，一个进程可以绑定到cpu、blkio、memory等12个cgroup子系统。
+       准确说，一个新创建的进程默认就绑定了12个cgroup子系统，对应1个struct css_set，12个struct cg_cgroup_link，12个struct cgroup，
+       12个struct cgroup按照他们的cgroup子系统编号顺序链入struct cg_cgroup_link，struct cg_cgroup_link再链入struct css_set的cg_links
+       成员。所以说，css_set的cg_links的链表上的cg_cgroup_link对应的sturct cgroup,第一个的cgroup子系统编号是0，第2个cgroup子系统编号
+       是1，其他类推,总之这些struct cgroup就是按照cgroup子系统编号排列的。
+
+       之后进程1绑定cpu、blkio、memory等新的cgroup目录时(比如cpu/test/tasks)，需要分配新一个css_set，12个struct cg_cgroup_link,然后
+       把进程之前绑定old css_set的cg_links的链表上的cg_cgroup_link对应的sturct cgroup和本次进程要绑定的新cgroup目录的struct cgroup
+       (碰到同一个cgroup子系统的struct cgroup，要踢掉old css_set的这个struct croup，而使用本次要绑定的新cgroup目录的struct cgroup),
+       按照cgroup子系统编号依次转移到新分配的12个struct cg_cgroup_link上，这12个struct cg_cgroup_link再按照顺序链入新分配
+       的css_set的cg_links链表。这个过程就对应find_css_set->find_existing_css_set()没有找到匹配css_set的情况。
+
+       然后再有创建的进程2，把它绑定也绑定到"cpu/test/tasks",此时进程1和进程绑定的cgroup子系统和cgroup目录完全一样，直接找到了上一步
+       分配css_set直接返回即可。这个过程就对应find_css_set->find_existing_css_set()找到匹配css_set的情况。
+*/
+
+/*    
+      关于css_set有写疑问，进程绑定的css_set有什么规律?
+      1 进程绑定cgroup时，一定是从一个老的cgroup转移到新的cgroup，进程的cgroup信息继承父进程的，原始父进程绑定的有默认的cgroup。
+      
+      2 两个进程绑定到cgroup层级、cgroup子系统、cgroup目录完全一致时，二者绑定的css_set是同一个。进程1绑定cpu/tasks，进程2
+        绑定memory/tasks,二者绑定的css_set不相同。进程1绑定cpu/tasks和memory/tasks，进程2绑定cpu/tasks和memory/test/tasks，二者
+        绑定的css_set也不相同。
+      3 一个进程只会绑定一个see_set，不管绑定多少个cgroup子系统、绑定到哪个cgroup目录，无非绑定的css_set变来变去。并且进程绑定一个
+         cgroup目录后，它绑定的css_set的subsys[]数组要保存该cgroup目录的cgroup_subsys_state，保存在数组什么位置呢?由该cgroup目录对应的
+         cgroup子系统编号决定。
+         
+      举例，重点来了。进程1绑定"cpu/tasks"(cgroup目录是cgroup1)和"memory/tasks"(cgroup目录是cgroup2)，绑定css_set1。
+       进程2绑定"cpu/tasks"(cgroup目录是cgroup1)和"memory/test/tasks"(cgroup目录是cgroup3)，绑定css_set2。
+       
+       css_set1->subsys[12]={...,cgroup1的cgroup_subsys_state,...,cgroup2的cgroup_subsys_state,}  
+       css_set2->subsys[12]={...,cgroup1的cgroup_subsys_state,...,cgroup3的cgroup_subsys_state,}
+
+       这两个css_set都以css_set1->subsys[]的cgroup_subsys_state为keya加入到css_set_table链表。
+
+       继续，进程2改为绑定"memory/tasks"，执行到cgroup_attach_task->find_css_set->find_existing_css_set()函数，
+       for (i = 0; i < CGROUP_SUBSYS_COUNT; i++)中对template[i]赋值，赋值后是
+       template[12]={...,cgroup1的cgroup_subsys_state,...,cgroup2的cgroup_subsys_state,}，然后以key = css_set_hash(template)，
+       以template[12]的cgroup_subsys_state为key，在css_set_table链表找到css_set1。然后执行
+       compare_css_sets(css_set1, css_set2, cgroup2, template)函数，进行匹配校验。主要匹配两点，1循环从css_set_table上找到的css_set1
+       和进程2之前绑定的css_set2二者css_set的cg_links的链表上的取出cg_cgroup_link，再得到cg_cgroup_link对应的struct cgroup，比较两个
+       struct cgroup是否相等(实际是按照cgroup子系统的编号成对比较)，有一对不相等返回false。2如果从css_set1取出的struct cgroup与进程2
+       本次要绑定的"memory/tasks"的cgroup2属于同一个cgroup子系统，则要判断两个struct cgroup是否相等，不相等返回false。这些判断都通过，
+       说明从css_set_table上找到的css_set1，就是进程绑定"memory/tasks"cgroup目录要绑定的css_set，css_set匹配成功。然后回到
+       cgroup_attach_task函数，执行cgroup_task_migrate()把进程2的task_struct绑定到css_set1，完工。
+
+       如果进程2改为绑定"memory/test2/tasks"(cgroup目录是cgroup5)，执行到cgroup_attach_task->find_css_set->find_existing_css_set()函数，
+       for (i = 0; i < CGROUP_SUBSYS_COUNT; i++)中对template[i]赋值，赋值后是
+       template[i]={...,cgroup1的cgroup_subsys_state,...,cgroup5的cgroup_subsys_state,}，显然find_existing_css_set()中找不到匹配的
+       css_set则返回NULL。然后回到find_css_set()，分配新的css_set3，分配12个struct cg_cgroup_link，再取出进程2之前绑定的css_set2的成员
+       cg_links的链表上的cg_cgroup_link对应的struct cgroup(一共12个)，依次把这12个struct cgroup按照cgroup子系统编号先加入cg_cgroup_link
+       ，再把cg_cgroup_link加入到css_set3的cg_links链表。添加过程如果碰到struct cgroup与进程2要绑定"memory/test2/tasks"
+       (cgroup目录是cgroup5)一致，是要把cgroup5添加到cg_cgroup_link链表，再把cg_cgroup_link加入到css_set3的cg_links链表。这个过程在
+       find_css_set()函数的如下代码完成
+       list_for_each_entry(link, &oldcg->cg_links, cg_link_list)
+       {  
+           //如果遍历到的老的css_set的cgroup与本次进程要绑定的cgorup属于同一个cgorup子系统，要替换成本次进程要绑定cgroup，
+           //然后下边建立 本次进程要绑定cgroup5、css_set3的关系
+           if (c->root == cgrp->root)
+               c = cgrp;
+           //进程task_struct结构与css_set的关系
+           link_css_set(&tmp_cg_links, res, c);
+       }
+       最后回到cgroup_attach_task函数，执行cgroup_task_migrate()把进程2的task_struct绑定到css_set3，完工。
+*/
 static struct css_set *find_existing_css_set(
 	struct css_set *oldcg,
 	struct cgroup *cgrp,
-	struct cgroup_subsys_state *template[])
+	struct cgroup_subsys_state *template[])//template[]在这里
 {
 	int i;
 	struct cgroupfs_root *root = cgrp->root;
@@ -559,20 +728,29 @@ static struct css_set *find_existing_css_set(
 	 * new css_set. while subsystems can change globally, the entries here
 	 * won't change, so no need for locking.
 	 */
+	//for循环次数等于cgroup子系统个数。每次循环取出一个cgroup子系统的cgroup_subsys_state赋值于template[]。大部分都是从oldcg->subsys[i]
+	//取cgroup_subsys_state赋于template[i]。只有if (root->subsys_mask & (1UL << i))成立，说明本利循环遍历到了本次进程要绑定的
+	//struct cgroup *cgrp对应的cgroup子系统，则从cgrp->subsys[i]取出cgroup_subsys_state赋于template[i]
 	for (i = 0; i < CGROUP_SUBSYS_COUNT; i++) {
-		if (root->subsys_mask & (1UL << i)) {
+        
+		if (root->subsys_mask & (1UL << i)) {//这轮循环是本次进程要绑定的struct cgroup *cgrp对应的cgroup子系统
 			/* Subsystem is in this hierarchy. So we want
 			 * the subsystem state from the new
 			 * cgroup */
+			//从本次进程要绑定的cgroup获取对应的cgroup_subsys_state
 			template[i] = cgrp->subsys[i];
 		} else {
 			/* Subsystem is not in this hierarchy, so we
 			 * don't want to change the subsystem state */
+			 //从old cgroup获取对应的cgroup_subsys_state
 			template[i] = oldcg->subsys[i];
 		}
 	}
-
+    
+    //hash key是template[]里所有的cgroup_subsys_state。此时template[]里的cgroup_subsys_state结合了老的oldcg和新的cgrp这两个cgroup
+    //的struct cgroup->subsys[]里所有的cgroup_subsys_state
 	key = css_set_hash(template);
+    //遍历所有的css_set_table hash链表上的css_set，
 	hash_for_each_possible(css_set_table, cg, hlist, key) {
 		if (!compare_css_sets(cg, oldcg, cgrp, template))
 			continue;
@@ -624,7 +802,8 @@ static int allocate_cg_links(int count, struct list_head *tmp)
  * @cg: the css_set to be linked
  * @cgrp: the destination cgroup
  */
-//对struct cg_cgroup_link关键成员赋值，并添加到struct css_set 和 struct cgroup各自的链表，建立与二者的联系
+//对cg_cgroup_link关键成员赋值，cg_cgroup_link的cg指向struct css_set，cg_cgroup_link的cgrp指向struct cgroup，然后把cg_cgroup_link移动到
+//struct cgroup的css_sets链表，把cg_cgroup_link添加到struct css_set的cg_links链表。就建立了css_set、cgroup、cg_cgroup_link三者联系
 static void link_css_set(struct list_head *tmp_cg_links,
 			 struct css_set *cg, struct cgroup *cgrp)
 {
@@ -660,11 +839,11 @@ static void link_css_set(struct list_head *tmp_cg_links,
 //找到已经存在的struct css_set直接返回。否则，分配新的struct css_set *res和root_count个struct cg_cgroup_link
 //建立新分配的struct css_set *res、新分配的struct cg_cgroup_link、struct css_set *oldcg链表上原有的struct cgroup或者本次
 //建立绑定的struct cgroup *cgrp，三者相互的联系
-static struct css_set *find_css_set(
+static struct css_set *find_css_set(//find_css_set详细过程还是看find_existing_css_set()函数
 	struct css_set *oldcg, struct cgroup *cgrp)
 {
 	struct css_set *res;
-	struct cgroup_subsys_state *template[CGROUP_SUBSYS_COUNT];
+	struct cgroup_subsys_state *template[CGROUP_SUBSYS_COUNT];//template 
 
 	struct list_head tmp_cg_links;
 
@@ -675,8 +854,8 @@ static struct css_set *find_css_set(
 	 * the desired set */
 	read_lock(&css_set_lock);
     //如果找到已经存在的struct css_set，我觉得struct css_set *oldcg是存在的，
-    //这是试图找到与本次绑定的struct cgroup *cgrp的匹配的struct css_set，一般不会成立的吧????????????????????????????????
-	res = find_existing_css_set(oldcg, cgrp, template);
+    //这是试图找到与本次绑定的struct cgroup *cgrp的匹配的struct css_set，新创建的应该都不会成立吧
+	res = find_existing_css_set(oldcg, cgrp, template);//template是局部变量struct cgroup_subsys_state *template[CGROUP_SUBSYS_COUNT]
 	if (res)
 		get_css_set(res);
 	read_unlock(&css_set_lock);
@@ -690,7 +869,7 @@ static struct css_set *find_css_set(
 
 	/* Allocate all the cg_cgroup_link objects that we'll need */
     //分配root_count个struct cg_cgroup_link并添加到struct list_head tmp_cg_links链表
-	if (allocate_cg_links(root_count, &tmp_cg_links) < 0) {
+	if (allocate_cg_links(root_count, &tmp_cg_links) < 0) {////与cgroup子系统个数一致，12
 		kfree(res);
 		return NULL;
 	}
@@ -702,30 +881,37 @@ static struct css_set *find_css_set(
 
 	/* Copy the set of subsystem state objects generated in
 	 * find_existing_css_set() */
+	//把struct cgroup_subsys_state *template[CGROUP_SUBSYS_COUNT]里所有的cgroup_subsys_state指针都复制到res->subsys[]数组
 	memcpy(res->subsys, template, sizeof(res->subsys));
 
 	write_lock(&css_set_lock);
 	/* Add reference counts and links from the new css_set. */
-    //遍历struct css_set *oldcg的cg_links链表上的已经存在的struct cg_cgroup_link,通过它找到对应的struct cgroup c，然后
-    //把tmp_cg_links链表上的struct cg_cgroup_link移动到struct cgroup c的css_sets链表，
-    //并把tmp_cg_links链表上的struct cg_cgroup_link添加到struct css_set *res的cg_links链表
-    /*struct css_set *oldcg是该进程之前绑定的struct cgroup(即struct cgroup c)对应的struct css_set，tmp_cg_links链表上的
+
+    /*struct css_set *oldcg是该进程之前绑定的struct cgroup(即下边的struct cgroup c)对应的struct css_set，tmp_cg_links链表上的
      struct cg_cgroup_link和struct css_set *res是本次针对要绑定的进程新分配，下边的执行的link_css_set()是建立进程task_struct与
-     struct cgroup关键一步，令struct cg_cgroup_link指向struct css_set和struct cgroup，
-     并添加到struct css_set 和 struct cgroup各自的链表，建立三者的联系，struct cgroup代表cgroup系统，struct css_set包含在进程
-     task_struct结构中，struct cg_cgroup_link作为中间桥梁连接着struct cgroup和进程task_struct结构。当我要echo > shares设置进程的
-     权重时，先找到该控制文件share的父目录dentry，就找到了该目录的struct cgroup结构，通过struct cgroup结构的css_sets链表找到挂在
-     上边的struct cg_cgroup_link，struct cg_cgroup_link的struct css_set *cg成员就指向对应的struct css_set结构，有了struct css_set,
-     就可以找到进程task_struct结构。
+     struct cgroup关键一步:令struct cg_cgroup_link指向struct css_set和struct cgroup，并添加到struct css_set 和 struct cgroup各自
+     的链表，建立三者的联系。struct cgroup代表cgroup系统，struct css_set包含在进程task_struct结构中，
+     struct cg_cgroup_link作为中间桥梁连接着struct cgroup和进程task_struct结构。
+
+     当我要echo 1024 > shares设置进程的权重时，先找到该控制文件share的父目录dentry，就找到了该目录的struct cgroup结构，通过
+     struct cgroup结构的css_sets链表找到挂在上边的struct cg_cgroup_link，struct cg_cgroup_link的struct css_set *cg成员就指向对应
+     的struct css_set结构，有了struct css_set,就可以找到进程task_struct结构。
      */
+
+    //遍历struct css_set *oldcg的cg_links链表上的已经存在的struct cg_cgroup_link, 找到其指向的struct cgroup(即link->cgrp)，然后
+    //struct cgroup *c = link->cgrp，接着把tmp_cg_links链表上的struct cg_cgroup_link移动到struct cgroup c的css_sets链表和
+    //struct css_set res的cg_links链表，还令cg_cgroup_link的成员cg和cgrp分别指向struct css_set res和struct cgroup c。
 	list_for_each_entry(link, &oldcg->cg_links, cg_link_list) {
 		struct cgroup *c = link->cgrp;
-        //如果struct cg_cgroup_link *link指向的struct cgroup与本次要绑定的 struct cgroup *cgrp属于同一个cgroup系统，因为是同一个struct cgroupfs_root
+        
+        //如果遍历到的老的css_set的cgroup与本次进程要绑定的cgorup属于同一个cgorup子系统，要替换成本次进程要绑定cgroup，即c = cgrp。
+        //然后下边建立本次进程要绑定cgroup和css_set的关系
 		if (c->root == cgrp->root)
-			c = cgrp;//c指向的本次要绑定的struct cgroup
+			c = cgrp;
 
-        //对tmp_cg_links链表上新分配的struct cg_cgroup_link关键成员赋值，并添加到struct css_set 和 struct cgroup各自的链表，
-        //建立与二者的联系
+        //对tmp_cg_links上的cg_cgroup_link关键成员赋值，cg_cgroup_link的cg指向struct css_set res，cg_cgroup_link的cgrp指向
+        //struct cgroup c，后把cg_cgroup_link移动到struct cgroup的css_sets链表，把cg_cgroup_link添加到struct css_set res的cg_links链表。
+        //这样就建立了css_set、cgroup、cg_cgroup_link三者联系
 		link_css_set(&tmp_cg_links, res, c);
 	}
 
@@ -734,7 +920,10 @@ static struct css_set *find_css_set(
 	css_set_count++;
 
 	/* Add this cgroup group to the hash table */
+    //以struct css_set *res所有struct cgroup_subsys_state *css[]所有的cgroup子系统cgroup_subsys_state指针累加值作为hash key
 	key = css_set_hash(res->subsys);
+    //通过struct css_set *res的成员hlist把css_set添加到css_set_table这个hash树，key是css_set的struct cgroup_subsys_state *css[]
+    //所有cgroup_subsys_state指针累加值
 	hash_add(css_set_table, &res->hlist, key);
 
 	write_unlock(&css_set_lock);
@@ -2034,8 +2223,19 @@ static void cgroup_task_migrate(struct cgroup *oldcgrp,
  * Call holding cgroup_mutex and the group_rwsem of the leader. Will take
  * task_lock of @tsk or each thread in the threadgroup individually in turn.
  */
+/*
+  这个函数的处理未免太过啰嗦，核心点只有几个
+  1 分配骗人的struct task_and_cgroup *tc结构，执行下边的do...while_each_thread(leader, tsk)把进程及其线程的task_struct、
+    struct old css_set、struct old cgroup信息保存到struct task_and_cgroup。下边经常从struct task_and_cgroup取出这些信息。
+  2 循环执行find_css_set()，按照进程或者线程之前绑定的old css_set、本次要绑定的进程的struct cgroup *cgrp，是否有匹配的css_set，有的
+    话直接返回这个css_set。没有找到匹配的css_set，则分配新的css_set，分配12新的struct cg_cgroup_link，把old css_set上之前进程绑定的
+    cgroup目录struct cgroup和本次进程要绑定的cgroup目录struct cgroup *cgrp，按照cgorup子系统编号先添加到struct cg_cgroup_link，再
+    把struct cg_cgroup_link添加到新的css_set的cg_links链表。总之就建立了新的css_set和新的cgorup的关系。
+  3 循环执行执行cgroup_task_migrate(tc->cgrp, tc->task, tc->cg)，建立进程或者线程task_struct与css_set的关系
+*/
+//进程绑定到cgroup，一个进程可以绑定多个cgroup，比如cpu、memcory、blkio
 static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
-			      bool threadgroup)
+			      bool threadgroup)//cgroup_attach_task详细过程还是看find_existing_css_set()函数
 {
 	int retval, i, group_size;
 	struct cgroup_subsys *ss, *failed_ss = NULL;
@@ -2054,7 +2254,7 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	 * threads exit, this will just be an over-estimate.
 	 */
 	if (threadgroup)
-		group_size = get_nr_threads(tsk);
+		group_size = get_nr_threads(tsk);//进程的线程数??????
 	else
 		group_size = 1;
     //分配struct flex_array，顺带着分配内存，下边执行flex_array_put()往group指向的struct flex_array填充数据
@@ -2108,12 +2308,14 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 		if (!threadgroup)
 			break;
 	} while_each_thread(leader, tsk);
+    
 	rcu_read_unlock();
 	/* remember the number of threads in the array for later. */
 	group_size = i;
-    //tset.tc_array指向新分配的struct flex_array *group
+    //tset.tc_array指向新分配的struct flex_array *group，group指向struct flex_array，flex_array里保存了struct task_and_cgroup ent，
+    //ent包含了本次待绑定的进程task_struct和该进程之前绑定的struct cgroup
 	tset.tc_array = group;
-	tset.tc_array_len = group_size;
+	tset.tc_array_len = group_size;//group_size是本次要绑定进程的线程数
 
 	/* methods shouldn't be called if no task is actually migrating */
 	retval = 0;
@@ -2123,9 +2325,10 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	/*
 	 * step 1: check that we can legitimately attach to the cgroup.
 	 */
+	//调用cgroup子系统cgroup_subsys的can_attach()接口判断是否可以绑定
 	for_each_subsys(root, ss) {
 		if (ss->can_attach) {
-			retval = ss->can_attach(cgrp, &tset);
+			retval = ss->can_attach(cgrp, &tset);//cpu_cgroup_can_attach
 			if (retval) {
 				failed_ss = ss;
 				goto out_cancel_attach;
@@ -2137,14 +2340,14 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	 * step 2: make sure css_sets exist for all threads to be migrated.
 	 * we use find_css_set, which allocates a new one if necessary.
 	 */
+	//group_size是本次要绑定进程的线程数，这是对本次绑定进程的每个线程依次处理
 	for (i = 0; i < group_size; i++) {
-        //从group指向的struct flex_array，找到并返回前边保存的struct task_and_cgroup给tc，
-		//tc包含了本次待绑定的进程task_struct和该进程之前绑定的struct cgroup,
-		//tc->cgrp是该进程之前绑定的struct cgroup，tc->task是本次要绑定的进程task结构
+        //从group指向的struct flex_array，找到并返回前边保存的struct task_and_cgroup给tc。之后tc包含了本次待绑定的进程task_struct和
+        //该进程之前绑定的struct cgroup。说准确点，tc->cgrp是该进程之前绑定的struct cgroup，tc->task是本次要绑定的进程task结构
 		tc = flex_array_get(group, i);
-        //找到已经存在的struct css_set直接返回。否则，分配新的struct css_set *res和root_count个struct cg_cgroup_link,
-        //建立新分配的struct css_set *res、新分配的struct cg_cgroup_link、struct css_set *tc->task->cgroups链表上原有的struct cgroup
-        //或者本次建立绑定的struct cgroup *cgrp，三者相互的联系。struct css_set、struct cg_cgroup_link、struct cgroup的关系就是在这里完成的。
+        //找到已经存在的struct css_set直接返回。否则，分配新的struct css_set *res和struct cg_cgroup_link。然后建立新分配的
+        //struct css_set *res、新分配的struct cg_cgroup_link、tc->task->cgroups链表上原有的struct cgroup或者本次要建立绑定的
+        //struct cgroup *cgrp，三者相互的联系。就是struct css_set、struct cg_cgroup_link、struct cgroup三者关系的建立
 		tc->cg = find_css_set(tc->task->cgroups, cgrp);
 		if (!tc->cg) {
 			retval = -ENOMEM;
@@ -2158,7 +2361,7 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	 * failure cases after here, so this is the commit point.
 	 */
 	for (i = 0; i < group_size; i++) {
-        //从group指向的struct flex_array，找到并返回前边保存的struct task_and_cgroup给tc
+        //从group指向的struct flex_array，找到并返回前边保存的struct task_and_cgroup给tc。
         //tc->cgrp是该进程之前绑定的struct cgroup，tc->task是本次要绑定的进程task结构,tc->cg是本次为了绑定操作新分配的struct css_set
 		tc = flex_array_get(group, i);
         //前边建立了struct css_set、struct cg_cgroup_link、struct cgroup的关系，
@@ -2670,8 +2873,8 @@ static ssize_t cgroup_listxattr(struct dentry *dentry, char *buf, size_t size)
 		return -EOPNOTSUPP;
 	return simple_xattr_list(__d_xattrs(dentry), buf, size);
 }
-
-static const struct file_operations cgroup_file_operations = {
+//读写cgroup文件时执行
+static const struct file_operations cgroup_file_operations = {//cgroup_create_file()中赋值
 	.read = cgroup_file_read,
 	.write = cgroup_file_write,
 	.llseek = generic_file_llseek,
@@ -2679,16 +2882,16 @@ static const struct file_operations cgroup_file_operations = {
 	.release = cgroup_file_release,
 };
 
-static const struct inode_operations cgroup_file_inode_operations = {
+static const struct inode_operations cgroup_file_inode_operations = {//cgroup_create_file()中赋值
 	.setxattr = cgroup_setxattr,
 	.getxattr = cgroup_getxattr,
 	.listxattr = cgroup_listxattr,
 	.removexattr = cgroup_removexattr,
 };
-
-static const struct inode_operations cgroup_dir_inode_operations = {
+//mkdir 创建cgroup目录时执行
+static const struct inode_operations cgroup_dir_inode_operations = {//cgroup_create_file()中赋值
 	.lookup = cgroup_lookup,
-	.mkdir = cgroup_mkdir,//cgroup创建文件时执行
+	.mkdir = cgroup_mkdir,
 	.rmdir = cgroup_rmdir,
 	.rename = cgroup_rename,
 	.setxattr = cgroup_setxattr,
@@ -2714,7 +2917,7 @@ static inline struct cftype *__file_cft(struct file *file)
 		return ERR_PTR(-EINVAL);
 	return __d_cft(file->f_dentry);
 }
-//分配文件的inode，建立inode和dentry联系
+//分配文件的inode，建立inode和dentry联系，成功返回0
 static int cgroup_create_file(struct dentry *dentry, umode_t mode,
 				struct super_block *sb)
 {
@@ -2822,7 +3025,7 @@ static int cgroup_add_file(struct cgroup *cgrp, struct cgroup_subsys *subsys,
 	simple_xattrs_init(&cfe->xattrs);
 
 	mode = cgroup_file_mode(cft);
-    //分配文件的inode，建立inode和dentry联系
+    //分配文件的inode，建立inode和dentry联系，成功返回0
 	error = cgroup_create_file(dentry, mode | S_IFREG, cgrp->root->sb);
 	if (!error) {
 		list_add_tail(&cfe->node, &parent->files);
@@ -2938,16 +3141,20 @@ static void cgroup_cfts_commit(struct cgroup_subsys *ss,
  * function currently returns 0 as long as @cfts registration is successful
  * even if some file creation attempts on existing cgroups fail.
  */
+//把cgroup控制文件cftype数组添加到cgorup子系统cgroup_subsys的cftsets链表
 int cgroup_add_cftypes(struct cgroup_subsys *ss, struct cftype *cfts)
 {
 	struct cftype_set *set;
 
+    //分配cftype_set
 	set = kzalloc(sizeof(*set), GFP_KERNEL);
 	if (!set)
 		return -ENOMEM;
 
 	cgroup_cfts_prepare();
+    //cftype_set的cfts指向cftype数组
 	set->cfts = cfts;
+    //cftype_set靠其node成员添加到cgroup_subsys的cftsets链表
 	list_add_tail(&set->node, &ss->cftsets);
 	cgroup_cfts_commit(ss, cfts, true);
 
@@ -4137,8 +4344,8 @@ static int cgroup_populate_dir(struct cgroup *cgrp, bool base_files,
 {
 	int err;
 	struct cgroup_subsys *ss;
-    //从struct cftype files结构体获取基本的文件，比如"task"、"release_agent"等基本文件，
-    //然后在cpu group子系统的目录下下创建这些基本文件
+    //从struct cftype files结构体获取cgroup基本的文件cftype，比如"task"、"release_agent"等基本cgroup文件，
+    //然后在cgroup子系统的目录下下创建这些基本文件
 	if (base_files) {
 		err = cgroup_addrm_files(cgrp, NULL, files, true);
 		if (err < 0)
@@ -4146,14 +4353,19 @@ static int cgroup_populate_dir(struct cgroup *cgrp, bool base_files,
 	}
 
 	/* process cftsets of each subsystem */
+   //cgrp->root 指向根cgroupfs_root即rootnode，这是遍历rootnode的subsys_list链表上的cpu、memory、blkio等cgroup_subsys,通过cgroup_subsys
+   //的成员sibling container_of找到cftype_set，再找到cftype_set的cfts指向的cftype，这个cftype是每个cgroup_subsys特有的cftype。上边的是
+   //创建cgroup基本文件，这里的cftype是cpu、memory、blkio特有的cftype
 	for_each_subsys(cgrp->root, ss) {
 		struct cftype_set *set;
-        //是当前的cgroup子系统，我猜测因为有cpu、mem等cgroup系统，所以这是创建cpu cgroup的目录时，
-        //这里限定只允许创建cpu cgroup的目录吧???????
+        //是当前的cgroup子系统，我猜测因为有cpu、mem等cgroup系统，所以当创建cpu cgroup的目录时，
+        //这里限定cpu cgroup时只允许创建cpu cgroup的目录吧???????
 		if (!test_bit(ss->subsys_id, &subsys_mask))
 			continue;
-        //cgroup_addrm_files中创建各个控制文件,cgroup中，ss代表的是每个cgroup系统struct cgroup_subsys，
-        //struct cgroup_subsys包含了cgroup系统的操作函数、控制文件，下边看着像是取出其cftsets链表上的控制文件struct cftype_set
+        
+        //遍历cgroup_subsys的cftsets链表上的cftype_set，然后找到cftype_set的cfts指定的struct cftype[]，创建cftype指定cgroup文件
+        //这些每个cgroup_subsys子系统的struct cftype[]。如struct cftype cpu_files[]，struct cftype blkcg_files[]，
+        //struct cftype throtl_files[].更详细见struct cftype结构体描述。
 		list_for_each_entry(set, &ss->cftsets, node)
 			cgroup_addrm_files(cgrp, ss, set->cfts, true);
 	}
@@ -4244,8 +4456,9 @@ static void offline_css(struct cgroup_subsys *ss, struct cgroup *cgrp)
  *
  * Must be called with the mutex on the parent inode held
  */
-//这个函数是在创建cgroup目录时执行的，
-static long cgroup_create(struct cgroup *parent, struct dentry *dentry,
+//创建cgroup目录时执行，dentry是这个目录的dentry，在这个函数里还会创建该目录的inode，创建该cgroup目录下各个cgroup文件dentry和inode,
+//建立彼此的联系。还会执行每个cgroup子系统cgroup_subsys自己的css_alloc，分配struct cgroup_subsys_state并初始化
+static long cgroup_create(struct cgroup *parent, struct dentry *dentry,//dentry是新创建的目录的dentry
 			     umode_t mode)
 {
 	struct cgroup *cgrp;
@@ -4292,9 +4505,11 @@ static long cgroup_create(struct cgroup *parent, struct dentry *dentry,
 	init_cgroup_housekeeping(cgrp);
 
 	dentry->d_fsdata = cgrp;
+    //指向本cgroup对应目录的dentry
 	cgrp->dentry = dentry;
     //cgroup的parent
 	cgrp->parent = parent;
+    //指向根cgroupfs_root
 	cgrp->root = parent->root;
 
 	if (notify_on_release(parent))
@@ -4303,12 +4518,13 @@ static long cgroup_create(struct cgroup *parent, struct dentry *dentry,
 	if (test_bit(CGRP_CPUSET_CLONE_CHILDREN, &parent->flags))
 		set_bit(CGRP_CPUSET_CLONE_CHILDREN, &cgrp->flags);
 
+    //遍历cgroupfs_root->subsys_list链表，找到该链表上的cgroup_subsys，即cgroup子系统，然后执行该cgroup子系统的css_alloc()函数
 	for_each_subsys(root, ss) {
 		struct cgroup_subsys_state *css;
-    //创建各个subsys的结构，cpu的是task_group，返回task_group结构的第一个成员struct cgroup_subsys_state css
+    //分配每个cgroup子系统的控制结构(如cpu的是task_group)，返回task_group结构的第一个成员struct cgroup_subsys_state css
     //看着像是cpu cgroup下每创建一个目录，都会创建一个task_group呀，其他cgroup系统估计也是这样
-		css = ss->css_alloc(cgrp);//控制cpu是cpu_cgroup_css_alloc()
-		if (IS_ERR(css)) {
+		css = ss->css_alloc(cgrp);//控制cpu是cpu_cgroup_css_alloc()，这里分配struct task_group和cgroup_subsys_state
+		if (IS_ERR(css)) {//控制block的是blkcg_css_alloc(),这里分配struct blkcg和cgroup_subsys_state
 			err = PTR_ERR(css);
 			goto err_free_all;
 		}
@@ -4493,8 +4709,10 @@ static void __init_or_module cgroup_init_cftsets(struct cgroup_subsys *ss)
 	 * base_cftset is embedded in subsys itself, no need to worry about
 	 * deregistration.
 	 */
+	//初始化cpu、memcory、block 的cgroup file
 	if (ss->base_cftypes) {
-		ss->base_cftset.cfts = ss->base_cftypes;
+        //cgroup_subsys的cftype_set的cfts指向cgroup
+		ss->base_cftset.cfts = ss->base_cftypes;//每个cgroup_subsys
 		list_add_tail(&ss->base_cftset.node, &ss->cftsets);
 	}
 }
@@ -4508,21 +4726,22 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss)
 	mutex_lock(&cgroup_mutex);
 
 	/* init base cftset */
-	cgroup_init_cftsets(ss);
+	cgroup_init_cftsets(ss);//初始化cpu、memcory、block 的cgroup file
 
 	/* Create the top cgroup state for this subsystem */
-	list_add(&ss->sibling, &rootnode.subsys_list);
-	ss->root = &rootnode;
-	css = ss->css_alloc(dummytop);
+	list_add(&ss->sibling, &rootnode.subsys_list);//cgroup_subsys添加到subsys_list链表
+	ss->root = &rootnode;//cgroup_subsys->root 指向rootnode
+	
+	css = ss->css_alloc(dummytop);//分配顶层cgroup的struct cgroup_subsys_state
 	/* We don't handle early failures gracefully */
 	BUG_ON(IS_ERR(css));
-	init_cgroup_css(css, ss, dummytop);
+	init_cgroup_css(css, ss, dummytop);//初始化顶层cgorup的struct cgroup_subsys_state
 
 	/* Update the init_css_set to contain a subsys
 	 * pointer to this state - since the subsystem is
 	 * newly registered, all tasks and hence the
 	 * init_css_set is in the subsystem's top cgroup. */
-	init_css_set.subsys[ss->subsys_id] = css;
+	init_css_set.subsys[ss->subsys_id] = css;//顶层cgroup赋值struct cgroup_subsys_state????????
 
 	need_forkexit_callback |= ss->fork || ss->exit;
 
@@ -4779,13 +4998,14 @@ int __init cgroup_init(void)
 		return err;
 
 	for (i = 0; i < CGROUP_SUBSYS_COUNT; i++) {
+        //这里取出 cpuset_subsys 、 blkio_subsys 这些结构体，下边执行cgroup_init_subsys()赋值
 		struct cgroup_subsys *ss = subsys[i];
 
 		/* at bootup time, we don't worry about modular subsystems */
 		if (!ss || ss->module)
 			continue;
 		if (!ss->early_init)
-			cgroup_init_subsys(ss);
+			cgroup_init_subsys(ss);//cpu、mem、cgroup等cgroup_subsys结构初始化赋值
 		if (ss->use_id)
 			cgroup_init_idr(ss, init_css_set.subsys[ss->subsys_id]);
 	}

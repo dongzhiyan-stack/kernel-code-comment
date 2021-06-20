@@ -41,7 +41,8 @@ enum blkg_rwstat_type {
 
 struct blkcg_gq;
 
-struct blkcg {
+//block层的cgroup控制结构
+struct blkcg {//cgroup_create->blkcg_css_alloc 中分配
 	struct cgroup_subsys_state	css;
 	spinlock_t			lock;
 
@@ -120,12 +121,12 @@ typedef void (blkcg_pol_offline_pd_fn)(struct blkcg_gq *blkg);
 typedef void (blkcg_pol_exit_pd_fn)(struct blkcg_gq *blkg);
 typedef void (blkcg_pol_reset_pd_stats_fn)(struct blkcg_gq *blkg);
 
-struct blkcg_policy {
+struct blkcg_policy {//block层cgroup控制策略结构体
 	int				plid;
 	/* policy specific private data size */
 	size_t				pd_size;
 	/* cgroup files for the policy */
-	struct cftype			*cftypes;
+	struct cftype			*cftypes;//block 层cgroup 控制文件，流控是struct cftype throtl_files
 
 	/* operations */
 	blkcg_pol_init_pd_fn		*pd_init_fn;

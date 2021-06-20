@@ -95,7 +95,7 @@ struct throtl_grp {
 	struct list_head stats_alloc_node;
 };
 
-struct throtl_data
+struct throtl_data//blk_throtl_init中分配
 {
 	/* service tree for active throtl groups */
 	struct throtl_rb_root tg_service_tree;
@@ -1238,7 +1238,7 @@ int blk_throtl_init(struct request_queue *q)
 {
 	struct throtl_data *td;
 	int ret;
-
+    //分配throtl_data
 	td = kzalloc_node(sizeof(*td), GFP_KERNEL, q->node);
 	if (!td)
 		return -ENOMEM;
@@ -1267,10 +1267,12 @@ void blk_throtl_exit(struct request_queue *q)
 
 static int __init throtl_init(void)
 {
+    //创建block层流控workqueue内核线程
 	kthrotld_workqueue = alloc_workqueue("kthrotld", WQ_MEM_RECLAIM, 0);
 	if (!kthrotld_workqueue)
 		panic("Failed to create kthrotld\n");
 
+    //注册流控控制策略结构体blkcg_policy_throtl以及cgroup block层流控的struct cftype throtl_files数组
 	return blkcg_policy_register(&blkcg_policy_throtl);
 }
 

@@ -29,7 +29,7 @@ static DEFINE_MUTEX(blkcg_pol_mutex);
 struct blkcg blkcg_root = { .cfq_weight = 2 * CFQ_WEIGHT_DEFAULT,
 			    .cfq_leaf_weight = 2 * CFQ_WEIGHT_DEFAULT, };
 EXPORT_SYMBOL_GPL(blkcg_root);
-
+//这个数组是block层的两种控制策略
 static struct blkcg_policy *blkcg_policy[BLKCG_MAX_POLS];
 
 static struct blkcg_gq *__blkg_lookup(struct blkcg *blkcg,
@@ -944,6 +944,7 @@ struct cgroup_subsys blkio_subsys = {
 	.css_free = blkcg_css_free,
 	.can_attach = blkcg_can_attach,
 	.subsys_id = blkio_subsys_id,
+	//throtl_init->blkcg_policy_register中把block层流控的cftype数组throtl_files添加到block cgorup子系统blkio_subsys的cftsets链表
 	.base_cftypes = blkcg_files,
 	.module = THIS_MODULE,
 
@@ -1146,7 +1147,8 @@ int blkcg_policy_register(struct blkcg_policy *pol)
 	blkcg_policy[i] = pol;
 
 	/* everything is in place, add intf files for the new policy */
-	if (pol->cftypes)
+    //这个pol->cftypes就是block层流控cftype数组throtl_files
+	if (pol->cftypes)//把block层流控的cftype数组throtl_files添加到block cgorup子系统blkio_subsys的cftsets链表
 		WARN_ON(cgroup_add_cftypes(&blkio_subsys, pol->cftypes));
 	ret = 0;
 out_unlock:

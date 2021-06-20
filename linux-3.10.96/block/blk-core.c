@@ -2192,7 +2192,7 @@ static inline struct request *blk_pm_peek_request(struct request_queue *q,
  */
 
 /*
- 1 循环执行__elv_next_request()，从q->queue_head队列取出待进行IO数据传输的req
+ 1 从q->queue_head队列头取出待进行IO数据传输的req.如果q->queue_head没有req，则执行deadline_dispatch_requests从fifo队列选择派发的req
  2 分配一个struct scsi_cmnd *cmd，使用req对cmd进行部分初始化cmd->request=req，req->special = cmd，还有cmd->transfersize传输字节数
      、cmd->sc_data_direction DMA传输方向
  3 先遍历req上的每一个bio，再得到每个bio的bio_vec，把bio对应的文件数据在内存中的首地址bvec->bv_pag+bvec->bv_offset写入scatterlist
@@ -2203,6 +2203,7 @@ struct request *blk_peek_request(struct request_queue *q)
 	struct request *rq;
 	int ret;
     //循环执行__elv_next_request()，从q->queue_head队列取出待进行IO数据传输的req。
+    //如果q->queue_head没有req，则执行deadline_dispatch_requests从fifo队列选择派发的req
 	while ((rq = __elv_next_request(q)) != NULL) {
 
 		rq = blk_pm_peek_request(q, rq);

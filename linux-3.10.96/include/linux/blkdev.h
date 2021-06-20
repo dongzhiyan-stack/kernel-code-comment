@@ -46,7 +46,7 @@ struct blk_stat_callback;
  * Maximum number of blkcg policies allowed to be registered concurrently.
  * Defined here to simplify include dependency.
  */
-#define BLKCG_MAX_POLS		2
+#define BLKCG_MAX_POLS		2//这应该是block层两种控制策略
 
 struct request;
 typedef void (rq_end_io_fn)(struct request *, int);
@@ -120,7 +120,7 @@ struct request {
 		//RH_KABI_REPLACE(struct work_struct mq_flush_work,
 		//	        unsigned long fifo_time)
 		struct work_struct mq_flush_work;
-        //设置req超时时间 dd_insert_request
+        //req超时时间，设置见dd_insert_request。req按照fifo_time在fifo队列排队，越靠左越小(最小是jiffies)，也最先被选中而派发
         unsigned long fifo_time;
 	};
 
@@ -129,6 +129,7 @@ struct request {
     struct blk_mq_hw_ctx *mq_hctx;//rq的硬件队列
         
 	u64 cmd_flags;//__blk_mq_alloc_request和blk_mq_get_driver_tag 中置REQ_MQ_INFLIGHT
+	
 	enum rq_cmd_type_bits cmd_type;
     //0，req传输完成   1:req开始传输状态
 	unsigned long atomic_flags;
@@ -573,7 +574,7 @@ struct request_queue {
 #endif
 #ifdef CONFIG_BLK_DEV_THROTTLING
 	/* Throttle data */
-	struct throtl_data *td;
+	struct throtl_data *td;//blk_throtl_init中分配
 #endif
 	struct rcu_head		rcu_head;
 	wait_queue_head_t	mq_freeze_wq;

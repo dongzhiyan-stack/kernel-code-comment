@@ -58,9 +58,10 @@ enum cgroup_subsys_id {
 	__CGROUP_SUBSYS_TEMP_PLACEHOLDER = CGROUP_BUILTIN_SUBSYS_COUNT - 1,
 
 #define IS_SUBSYS_ENABLED(option) IS_MODULE(option)
+//这个头文件就是包含SUBSYS(cpu_cgroup)、SUBSYS(mem_cgroup)这些限制结构体，SUBSYS(block)
 #include <linux/cgroup_subsys.h>
 #undef IS_SUBSYS_ENABLED
-	CGROUP_SUBSYS_COUNT,//应该是cgroup子系统总的个数吧???就是限制cpu、mem、io的系统。每个系统占一个编号,cpu是2
+	CGROUP_SUBSYS_COUNT,//应该是cgroup子系统总的个数吧???就是限制cpu、mem、io的系统。每个系统占一个编号,cpu是2,block是8
 };
 #undef SUBSYS
 
@@ -70,7 +71,11 @@ enum cgroup_subsys_id {
 //通过struct cgroup的struct cgroup_subsys_state *subsys[cpu_cgroup_subsys_id]成员，得到cpu cgroup对应的
 //struct cgroup_subsys_state结构，再由struct cgroup_subsys_state的container_of操作，得到struct task_group
 //struct cgroup_subsys_state真的是连接struct cgroup、struct task_group的桥梁呀
-struct cgroup_subsys_state {//struct cgroup_subsys_state结构包含在task_group结构体中
+/*每个cpu、blkio等cgroup控制结构都有独立的 cgroup_subsys_state结构，每次mkdir 创建cgroup目录都会创建。见cgroup_create
+并不是 cgroup_subsys_state个数与cgroup子系统个数相等*/
+struct cgroup_subsys_state {
+//cgroup目录下mkdir 创建cgroup目录时执行cgroup_create(),分配struct cgroup,顺带还分配cgroup_subsys_state
+//struct cgroup和cgroup_subsys_state一一对应
 	/*
 	 * The cgroup that this subsystem is attached to. Useful
 	 * for subsystems that want to know about the cgroup
@@ -172,8 +177,8 @@ struct cgroup_name {
 	struct rcu_head rcu_head;
 	char name[];
 };
-//以cpu cgroup为例，顶层的控制目录cpu，就对应一个struct cgroup吧?????????然后在这个目录mkdir test目录，应该又会创建一个struct cgroup
-//最顶层的cgroup结构包含在struct cgroupfs_root里，一个目录一个struct cgroup，记住很关键
+//cgroup_create()分配并初始化。以cpu cgroup为例，顶层的控制目录cpu，就对应一个struct cgroup吧?????????然后在这个目录mkdir test目录，
+//应该又会创建一个struct cgroup。最顶层的cgroup结构包含在struct cgroupfs_root里，一个目录一个struct cgroup，记住很关键
 struct cgroup {
 	unsigned long flags;		/* "unsigned long" so bitops work */
 
@@ -194,7 +199,7 @@ struct cgroup {
 	struct list_head files;		/* my files */
     //父struct cgroup结构，一个目录对应一个struct cgroup结构，父子目录的struct cgroup结构彼此构成联系
 	struct cgroup *parent;		/* my parent */
-    //每一层cgroup目录的dentry，如果是顶层的cgroup，那就是cpu cgroup子系统根目录的dentry
+    //每一层cgroup目录的dentry，如果是顶层的cgroup，那就是cpu cgroup子系统根目录的dentry。cgroup_create()中赋值
 	struct dentry *dentry;		/* cgroup fs entry, RCU protected */
 
 	/*
@@ -213,19 +218,20 @@ struct cgroup {
 	/* Private pointers for each registered subsystem */
   //创建cgroup目录时执行cgroup_create->init_cgroup_css()中赋值,只赋值该cgroup系统的，比如当前是cpu cgroup，
   //则只会subsys[2]= struct cgroup_subsys_state *css，其他struct cgroup_subsys_state *subsys[]估计都是NULL，浪费了
-  //通过struct cgroup_subsys_state *subsys[x]找到实际的控制实体，比如限制CPU的struct task_group结构体
-  //比如这个cgroup代表cpu cgroup，假设cpu cgroup在该数组的下标是2，则subsys[2]这个struct cgroup_subsys_state就代表cpu的
-  //通过container_of(cgroup_subsys_state)，就找到了cpu的struct task_group结构体
-	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
+  //通过struct cgroup_subsys_state *subsys[x]找到实际的控制实体，比如限制CPU的struct task_group结构体。
+  //比如这个cgroup代表cpu cgroup，假设cpu cgroup在该数组的下标是2，则先得到到subsys[2]指向的struct cgroup_subsys_state指针，
+  //再通过container_of(cgroup_subsys_state)，就找到了cpu的struct task_group结构体
+	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];//cgroup_create()->init_cgroup_css()中赋值
 
-	struct cgroupfs_root *root;//每个cgroup系统一个struct cgroupfs_root，就像根目录dentry一样
+    //每个cgroup系统一个struct cgroupfs_root，就像根目录dentry一样。cgroup_init_subsys()中指向rootnode
+	struct cgroupfs_root *root;
 
 	/*
 	 * List of cg_cgroup_links pointing at css_sets with
 	 * tasks in this cgroup. Protected by css_set_lock
 	 */
 	//struct cg_cgroup_link靠其成员struct list_head cgrp_link_list添加到struct cgroup的css_sets链表，
-    //这样struct cg_cgroup_link与struct cgroup建立的联系。find_css_set()函数详细讲解他们的关系。
+    //这样struct cg_cgroup_link与struct cgroup建立了联系。find_css_set()函数详细讲解他们的关系。
     //进程task_struct结构、struct css_set、struct cg_cgroup_link、进程绑定的struct cgroup一一对应
     //然后每个struct cgroup又与task_cgroup或者mem_cgroup控制单元一一对应，这样通过每个进程的task_struct
     //结构就能找到这个进程绑定的task_cgroup或者mem_cgroup控制单元
@@ -307,23 +313,25 @@ enum {
  * associated with a superblock to form an active hierarchy.  This is
  * internal to cgroup core.  Don't access directly from controllers.
  */
-struct cgroupfs_root {
+struct cgroupfs_root {//每个cgroup子系统有自己唯一的cgroupfs_root
 	struct super_block *sb;
 
 	/*
 	 * The bitmask of subsystems intended to be attached to this
 	 * hierarchy
 	 */
+	//cpu、memory、blkio的依次是0x6 0x8 0x80,为什么cpu的是0x6,两个bit位是1呢?应该是因为cpu的实际包含"cpu"和"cpuacct"两个cgroup子系统吧
 	unsigned long subsys_mask;
 
 	/* Unique id for this hierarchy. */
-	int hierarchy_id;
+	int hierarchy_id;//cpu、blkio、memory的依次是3、4、9
 
 	/* The bitmask of subsystems currently attached to this hierarchy */
 	unsigned long actual_subsys_mask;
 
 	/* A list running through the attached subsystems */
-	struct list_head subsys_list;
+    //cgroup_init_subsys()中把cgroup_subsys的成员sibling添加到struct cgroupfs_root的subsys_list链表
+	struct list_head subsys_list;//cgroup_init_subsys中把从cpu、mem、block等cgroup_subsys添加到subsys_list链表
 
 	/* The root cgroup for this hierarchy */
 	struct cgroup top_cgroup;//顶层的cgroup
@@ -368,7 +376,7 @@ struct css_set {
 	 * List running through all cgroup groups in the same hash
 	 * slot. Protected by css_set_lock
 	 */
-	struct hlist_node hlist;
+	struct hlist_node hlist;//find_css_set()中通过css_set的hlist成员把css_set添加到css_set_table
 
 	/*
 	 * List running through all tasks using this cgroup
@@ -389,8 +397,8 @@ struct css_set {
 // find_css_set()函数详细讲解他们的关系
  //然后每个struct cgroup又与task_cgroup或者mem_cgroup控制单元一一对应，这样通过每个进程的task_struct
  //结构就能找到这个进程绑定的task_cgroup或者mem_cgroup控制单元
-
-   struct list_head cg_links;
+ 
+   struct list_head cg_links;//struct cg_cgroup_link靠其成员struct list_head cg_link_list添加到到struct css_set的cg_links
 
 	/*
 	 * Set of subsystem states, one for each subsystem. This array
@@ -400,6 +408,8 @@ struct css_set {
 	 */
 	//进程绑定的cpu、mem等cgroup的struct cgroup_subsys_state，通过subsys[cgroup subsys id]二者，可以找到对应的
 	//cgroup子系统的struct cgroup_subsys_state，再container_of(cgroup_subsys_state)就能找到对应的task_group或者mem_cgroup结构
+
+    //来自进程绑定的cgroup目录的struct cgroup的struct cgroup_subsys_state
 	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
 
 	/* For RCU-protected deletion */
@@ -430,12 +440,23 @@ struct cgroup_map_cb {
 #define CFTYPE_INSANE		(1U << 2)	/* don't create if sane_behavior */
 
 #define MAX_CFTYPE_NAME		64
+
+/*
+struct cftype主要有3类
+1  cgroup基本的struct cftype数组，如"tasks"、"release_agent"等cgroup文件，这些cgroup文件创建在cgroup_create->
+     cgroup_populate_dir->cgroup_addrm_files(cgrp, NULL, files, true)
+2  cgroup子系统cgroup_subsys结构体默认指定的struct cftype数组，如struct cgroup_subsys cpu_cgroup_subsys[]的struct cftype cpu_files[]，
+     这些cgroup文件的创建在:cgroup_create->cgroup_populate_dir->cgroup_addrm_files(cgrp, ss, set->cfts, true)
+3  cgroup子系统cgroup_subsys专门添加的struct cftype数组，赋值见blkcg_policy_register->cgroup_add_cftypes()对block层流控的
+   struct cftype throtl_files[]数组，这些cgroup文件的创建在cgroup_create->cgroup_populate_dir
+     ->cgroup_addrm_files(cgrp, ss, set->cfts, true).
+*/
 //代表cgroup下的一个文件，比如cpu cgroup每个目录的基本文件"tasks"，控制进程运行时间的cfs_quota_us和cpu_cfs_period文件
 //struct cftype包含了该文件的读写控制函数，如echo设置进程运行时间要调用的write函数
 //cpu cgroup特有的控制文件包含在struct cftype cpu_files[]，内存的是struct cftype mem_cgroup_files[]
 //每个cgroup子系统base控制文件是struct cftype files[]。上层读写cgroup文件，先调用vfs层的cgroup_file_write/cgroup_file_read
 //然后再调用struct cftype注册具体每个cgroup文件的读写函数，
-struct cftype {
+struct cftype {//
 	/*
 	 * By convention, the name should begin with the name of the
 	 * subsystem, followed by a period.  Zero length string indicates
@@ -544,8 +565,24 @@ struct cftype {
  * cgroup_subsys->cftsets.  Each cftset points to an array of cftypes
  * terminated by zero length name.
  */
+ 
+/*
+每个cgroup子系统cgroup_subsys都有一个基础cftype_set，在cgroup_subsys结构体里。在cgroup_add_cftypes()还会再分配新的cftype_set。
+每个cftype_set都靠其成员node添加到cgroup_subsys的cftsets链表，cftype_set的成员cfts指向对应的struct cftype数组，
+
+start_kernel->cgroup_init_early->cgroup_init_subsys->cgroup_init_cftsets 操作cgroup子系统cgroup_subsys的基本cftype_set和cftype，如cpu
+的struct cftype cpu_files[]
+
+throtl_init->blkcg_policy_register->cgroup_add_cftypes  操作每个cgroup子系统cgroup_subsys特有的cftype_set和cftype，如block层流控的
+cftype数组struct cftype throtl_files[]
+*/
 struct cftype_set {
+    //cgroup_init_cftsets()中将cftype_set的node添加到cgroup_subsys的cftsets链表，将来可以通过cgroup_subsys的cftsets链表上的node
+    //contained_of找到cftype_set，cftype_set的成员cfts指向cftype文件
+    //cgroup_add_cftypes()中把block层流控的cftype数组throtl_files添加到block cgorup子系统blkio_subsys的cftsets链表
 	struct list_head		node;	/* chained at subsys->cftsets */
+    //cgroup_init_cftsets()中令cftype_set的cfts指向base_cftypes指向的cftype文件
+    //cgroup_add_cftypes()中也会令cftype_set的cfts指向新添加的cftype数组，比如block cgroup流控的struct cftype throtl_files数组
 	struct cftype			*cfts;
 };
 
@@ -613,7 +650,7 @@ int cgroup_taskset_size(struct cgroup_taskset *tset);
 //该结构与cgroup建立联系是在mount过程的rebind_subsystems()
 //cpu cgroup的是struct cgroup_subsys cpu_cgroup_subsys，这个结构包含了该子系统的基本操作函数、ID、控制文件信息
 //mem cgroup的是struct cgroup_subsys mem_cgroup_subsys
-struct cgroup_subsys {
+struct cgroup_subsys {//cgroup_init_subsys()中初始化cpu、mem、block的cgroup_subsys
     //cgroup_create()中创建cgroup目录分配，调用cpu cgroup的struct cgroup_subsys结构的cpu_cgroup_css_alloc()函数
     //分配cpu cgroup控制结构task_group,看着像是cpu cgroup下每创建一个目录，都会创建一个task_group呀
 	struct cgroup_subsys_state *(*css_alloc)(struct cgroup *cgrp);
@@ -660,18 +697,22 @@ struct cgroup_subsys {
 	 * Link to parent, and list entry in parent's children.
 	 * Protected by cgroup_lock()
 	 */
-	struct cgroupfs_root *root;
-	struct list_head sibling;
+	struct cgroupfs_root *root;//cgroup_init_subsys()中赋值，指向rootnode
+	struct list_head sibling;//cgroup_init_subsys()中把cgroup_subsys的成员sibling添加到struct cgroupfs_root的subsys_list链表
 	/* used when use_id == true */
 	struct idr idr;
 	spinlock_t id_lock;
 
 	/* list of cftype_sets */
-	struct list_head cftsets;// cftype结构体链表
+    //cgroup_init_cftsets()中将cftype_set的node添加到cgroup_subsys的cftsets链表，将来可以通过cgroup_subsys的cftsets链表上的node
+    //contained_of找到cftype_set，cftype_set的成员cfts指向cftype文件
+	struct list_head cftsets;
 	
 	/* base cftypes, automatically [de]registered with subsys itself */
-	struct cftype *base_cftypes;//代表cgroup系统目录下的基本文件吧???
-	struct cftype_set base_cftset;//这个也代表cgroup系统目录下的基本文件吧
+    //代表cgroup系统目录下的基本文件，就是cpuset_subsys或者blkio_subsys结构的base_cftypes成员指向的cftype文件
+	struct cftype *base_cftypes;
+    //cgroup_init_cftsets()中令base_cftset的cftype指向base_cftypes指向的cftype文件
+	struct cftype_set base_cftset;
 
 	/* should be defined only by modular subsystems */
 	struct module *module;

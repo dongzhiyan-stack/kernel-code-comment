@@ -139,7 +139,7 @@ cgroup_create()中创建cgroup目录分配，调用cpu cgroup的struct cgroup_subsys结构的c
 对应的还是调度组，那这也对应一个struct task_group，然后再从这个struct task_group向下，它的孩子调度实体se，
 有的代表实际的进程，有的代表调度组，又是一个struct task_group
 */
-struct task_group {
+struct task_group {//cgroup_create->cpu_cgroup_css_alloc()中分配
     //task_group就是靠css与cgroup联系的，通过container_of(cgroup_subsys_state)，就找到了cpu的struct task_group结构体
 	struct cgroup_subsys_state css;
 
