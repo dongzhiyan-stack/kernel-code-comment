@@ -330,8 +330,10 @@ struct cgroupfs_root {//每个cgroup子系统有自己唯一的cgroupfs_root
 	unsigned long actual_subsys_mask;
 
 	/* A list running through the attached subsystems */
-    //cgroup_init_subsys()中把cgroup_subsys的成员sibling添加到struct cgroupfs_root的subsys_list链表
-	struct list_head subsys_list;//cgroup_init_subsys中把从cpu、mem、block等cgroup_subsys添加到subsys_list链表
+    //cgroup_init_subsys()和rebind_subsystems()中把cgroup_subsys靠其成员sibling添加到struct cgroupfs_root的subsys_list链表。
+    //cgroup_init_subsys中把从cpu、mem、block等cgroup_subsys添加到rootnode的subsys_list链表，rebind_subsystems()中才是把cpu、mem、
+    //block等cgroup_subsys添加每个cgroup子系统对应的cgroupfs_root的subsys_list链表
+	struct list_head subsys_list;
 
 	/* The root cgroup for this hierarchy */
 	struct cgroup top_cgroup;//顶层的cgroup

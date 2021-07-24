@@ -90,7 +90,7 @@
  * Both make kfree a no-op.
  */
 #define ZERO_SIZE_PTR ((void *)16)
-
+//x小于16则成立
 #define ZERO_OR_NULL_PTR(x) ((unsigned long)(x) <= \
 				(unsigned long)ZERO_SIZE_PTR)
 

@@ -481,7 +481,7 @@ static int attempt_merge(struct request_queue *q, struct request *req,
     //req吞并了next的磁盘空间范围
 	req->__data_len += blk_rq_bytes(next);
     
-    //调用IO调度算法的elevator_merge_req_fn回调函数
+    //调用IO调度算法的elevator_merge_req_fn回调函数,
     //在这里，next已经合并到了rq,在fifo队列里，把req移动到next节点的位置，更新req的超时时间。从fifo队列和红黑树剔除next,
     //还更新dd->next_rq[]赋值next的下一个req。因为rq合并了next，扇区结束地址变大了，则rq从hash队列中删除掉再重新再hash中排序
 	elv_merge_requests(q, req, next);
@@ -508,7 +508,7 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 //req2:11~16，新的待合并的bio的磁盘空间是6~10,则先执行bio_attempt_back_merge()把bio后项合并到req1,此时req1:0~10，显然此时req1和req2可以
 //进行二次合并，attempt_back_merge()函数就是这个作用吧，该函数的struct request *next就像举例的req2。合并成功返回1，否则0
 
-//之前req发生了后项合并,req的磁盘空间向后增大,从算法队列(比如deadline的红黑树队列)取出req的下一个req即next,再次尝试把next合并到req后边
+//之前req发生了后项合并,req的磁盘空间向后增大,从算法队列(deadline的红黑树队列)取出req的下一个req即next,再次尝试把next合并到req后边
 int attempt_back_merge(struct request_queue *q, struct request *rq)
 {
     //只是从IO调度算法队列里取出rq的下一个rq给next，调用的函数elv_rb_latter_request(deadline算法)或noop_latter_request(noop算法)
@@ -522,7 +522,7 @@ int attempt_back_merge(struct request_queue *q, struct request *rq)
     //如果req没有next req，只能返回0
 	return 0;
 }
-//之前req发生了前项合并,req的磁盘空间向前增大,从算法队列(比如deadline的红黑树队列)取出req的上一个req即prev,再次尝试把req合并到prev后边
+//之前req发生了前项合并,req的磁盘空间向前增大,从算法队列(deadline的红黑树队列)取出req的上一个req即prev,再次尝试把req合并到prev后边
 int attempt_front_merge(struct request_queue *q, struct request *rq)
 {
     //红黑树中取出req原来的前一个req,即prev

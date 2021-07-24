@@ -91,7 +91,7 @@ struct blkg_policy_data {
 };
 
 /* association between a blk cgroup and a request queue */
-struct blkcg_gq {
+struct blkcg_gq {//struct blkcg	 *blkcg
 	/* Pointer to the associated request_queue */
 	struct request_queue		*q;
 	struct list_head		q_node;

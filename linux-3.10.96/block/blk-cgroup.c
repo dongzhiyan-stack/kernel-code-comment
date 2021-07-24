@@ -715,7 +715,8 @@ int blkg_conf_prep(struct blkcg *blkcg, const struct blkcg_policy *pol,
 	unsigned int major, minor;
 	unsigned long long v;
 	int part, ret;
-
+    
+    //把要设置的值按照"主设备号:次设备号 设置的值"分离出来，v保存要设置值
 	if (sscanf(input, "%u:%u %llu", &major, &minor, &v) != 3)
 		return -EINVAL;
 
@@ -731,7 +732,7 @@ int blkg_conf_prep(struct blkcg *blkcg, const struct blkcg_policy *pol,
 	spin_lock_irq(disk->queue->queue_lock);
 
 	if (blkcg_policy_enabled(disk->queue, pol))
-		blkg = blkg_lookup_create(blkcg, disk->queue);
+		blkg = blkg_lookup_create(blkcg, disk->queue);//由blkcg得到blkcg_gq
 	else
 		blkg = ERR_PTR(-EINVAL);
 
@@ -755,6 +756,7 @@ int blkg_conf_prep(struct blkcg *blkcg, const struct blkcg_policy *pol,
 
 	ctx->disk = disk;
 	ctx->blkg = blkg;
+    //ctx->v保存要设置的值
 	ctx->v = v;
 	return 0;
 }
@@ -1148,7 +1150,7 @@ int blkcg_policy_register(struct blkcg_policy *pol)
 
 	/* everything is in place, add intf files for the new policy */
     //这个pol->cftypes就是block层流控cftype数组throtl_files
-	if (pol->cftypes)//把block层流控的cftype数组throtl_files添加到block cgorup子系统blkio_subsys的cftsets链表
+	if (pol->cftypes)//把block层流控的cftype数组struct cftype throtl_files[]添加到blkio cgorup子系统struct blkio_subsys的cftsets链表
 		WARN_ON(cgroup_add_cftypes(&blkio_subsys, pol->cftypes));
 	ret = 0;
 out_unlock:

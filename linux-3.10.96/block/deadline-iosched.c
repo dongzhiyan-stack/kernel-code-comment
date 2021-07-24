@@ -112,7 +112,7 @@ static void
 deadline_add_rq_rb(struct deadline_data *dd, struct request *rq)
 {
 	struct rb_root *root = deadline_rb_root(dd, rq);
-    //把rq添加到树里，就是按照每个req的起始扇区排序的
+    //把rq添加到红黑树里，就是按照每个req的起始扇区排序的
 	elv_rb_add(root, rq);
 }
 //如果req原本是dd->next_rq[]保存req，则要找到req在红黑树的下一个req赋值给dd->next_rq[]，然后把req从红黑树中剔除
@@ -138,7 +138,7 @@ deadline_add_request(struct request_queue *q, struct request *rq)
 {
 	struct deadline_data *dd = q->elevator->elevator_data;
 	const int data_dir = rq_data_dir(rq);
-    //rq添加到红黑树队列里
+    //req添加到红黑树队列里
 	deadline_add_rq_rb(dd, rq);
 
 	/*
@@ -146,7 +146,7 @@ deadline_add_request(struct request_queue *q, struct request *rq)
 	 */
 	//设置req调度超时时间，超时时间到，则会把fifo队列头的req派发给驱动
 	rq_set_fifo_time(rq, jiffies + dd->fifo_expire[data_dir]);
-    //req插入到fifo队列尾部，入队从队列尾部入队
+    //req插入到fifo队列尾部
 	list_add_tail(&rq->queuelist, &dd->fifo_list[data_dir]);
 }
 
@@ -236,6 +236,11 @@ deadline_merged_requests(struct request_queue *q, struct request *req,
 	/*
 	 * kill knowledge of next, this one is a goner
 	 */
+	 
+    /*这里我有个很大的疑问，blk_flush_plug_list->__elv_add_request->elv_attempt_insert_merge->blk_attempt_req_merge->
+     attempt_merge->elv_merge_requests->deadline_merged_requests ，这个流程是在elv_attempt_insert_merge()从hash队列遍历到一个req1，然后
+     把plut->list链表上的req(即next)后项合并到req1。这里是把next从红黑树队列和fifo队列剔除，谁能确保next之前已经添加到
+     deadline算法红黑树队列和fifo队列剔除呢?next是plug->list链表上的req，谁能确保它已经添加到了deadline算法红黑树队列和fifo队列呢?*/
 	//deadline算法从fifo队列和红黑树剔除next。剔除前如果next原本是dd->next_rq[]保存req，还要找到next在红黑树的下一个req赋值给dd->next_rq[]
 	deadline_remove_request(q, next);
 }
@@ -257,7 +262,7 @@ deadline_move_to_dispatch(struct deadline_data *dd, struct request *rq)
 /*
  * move an entry to dispatch queue
  */
-//把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，将来磁盘驱动程序就是从queue_head链表取出req传输的
+//把req添加到rq->queue_head链表，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，将来磁盘驱动程序就是从rq->queue_head链表取出req传输的
 static void
 deadline_move_request(struct deadline_data *dd, struct request *rq)
 {
@@ -293,7 +298,7 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
 	/*
 	 * rq is expired!
 	 */
-	//req超时时间到了
+	//jiffies > rq_fifo_time(rq) ，则req超时时间到了
 	if (time_after_eq(jiffies, rq_fifo_time(rq)))
 		return 1;
 
@@ -304,9 +309,10 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
  * deadline_dispatch_requests selects the best request according to
  * read/write expire, fifo_batch, etc
  */
-//选择合适待派发给驱动传输的req,然后把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
-//将来磁盘驱动程序就是从queue_head链表取出req传输的这个合适的req，
-//req来源有:上次派发设置的next_rq;read req派发过多而选择的write req;fifo 队列上超时要传输的req，统筹兼顾，有固定策略
+ 
+/*选择合适待派发给驱动传输的req,然后把req添加到q->queue_head链表，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
+将来磁盘驱动程序就是从queue_head链表取出这个req而派发。req来源有:上次派发设置的next_rq;read req派发过多
+而选择的write req;fifo 队列上超时要传输的req，统筹兼顾，有固定策略。*/
 static int deadline_dispatch_requests(struct request_queue *q, int force)
 {
 	struct deadline_data *dd = q->elevator->elevator_data;
@@ -336,8 +342,7 @@ static int deadline_dispatch_requests(struct request_queue *q, int force)
 	 * at this point we are not running a batch. select the appropriate
 	 * data direction (read / write)
 	 */
-    //这应该是选择read或write req，因为一直选择read req给驱动传输，那write req就starve饿死了
-    //fifo队列有read req，fifo队列有write req要传送给驱动，错了，fifo和红黑树是一体的，只是用处不一样
+    //选择read或write req，因为一直选择read req给驱动传输，那write req就饿死了
 	if (reads) {
 		BUG_ON(RB_EMPTY_ROOT(&dd->sort_list[READ]));
         //有write req要传送给驱动，并且write req被饥饿次数达到上限，就强制选择跳转选择write req
@@ -400,7 +405,7 @@ dispatch_request://调到这里，req直接来自next_rq或者fifo队列，这个req就要被发给驱
 	//batching加1
 	dd->batching++;
     
-    //把req添加到rq的queue_head队列，设置新的next_rq，并把req从fifo队列和红黑树队列剔除，
+    //把req添加到req->queue_head链表，设置req在红黑树队列的下一个req为新的next_rq，最后把req从fifo队列和红黑树队列剔除
     //将来磁盘驱动程序就是从queue_head链表取出req传输的
 	deadline_move_request(dd, rq);
 

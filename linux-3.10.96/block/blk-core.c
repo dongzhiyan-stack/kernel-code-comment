@@ -1134,7 +1134,7 @@ retry:
 	spin_lock_irq(q->queue_lock);
 	finish_wait(&rl->wait[is_sync], &wait);
 
-	goto retry;
+	goto retry;//不是在这里就return了，而是再跳到上方
 }
 
 struct request *blk_get_request(struct request_queue *q, int rw, gfp_t gfp_mask)
@@ -1382,6 +1382,8 @@ void blk_add_request_payload(struct request *rq, struct page *page,
 	rq->buffer = bio_data(bio);
 }
 EXPORT_SYMBOL_GPL(blk_add_request_payload);
+/*bio合并到req必然要调用bio_attempt_back_merge/bio_attempt_front_merge函数，不管是bio合并到plug链表的req，还是
+bio合并到IO算法队列的req*/
 //req和bio二者磁盘范围挨着，req向后合并本次的bio，合并成功返回真
 static bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
 				   struct bio *bio)
@@ -1551,11 +1553,11 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
     //在elv调度器里查找是否有可以合并的req，这是合并bio的req,是调用具体的IO调度算法函数寻找可以合并的req。
     //这些req所在的IO调度算法队列是多进程共享的，就像上边所述，进程访问这些队列要加锁，其他进程要等待。
     //函数返回值 ELEVATOR_BACK_MERGE(前项合并的req)、ELEVATOR_FRONT_MERGE(前项合并)、ELEVATOR_NO_MERGE(没有找到可以合并的req)
-	el_ret = elv_merge(q, &req, bio);/*req保存bio可以合并的req指针*/
+	el_ret = elv_merge(q, &req, bio);/*req变量 保存bio可以合并的req指针*/
 	if (el_ret == ELEVATOR_BACK_MERGE) {
 	    //后项合并，bio合并到req对应的磁盘空间范围后边
 		if (bio_attempt_back_merge(q, req, bio)) {
-            //调用IO调度算法的elevator_bio_merged_fn函数，即cfq_bio_merged，貌似只有增加一部分统计数据
+            //调用IO调度算法的elevator_bio_merged_fn函数，貌似只有增加一部分统计数据
 			elv_bio_merged(q, req, bio);
             
           //之前req发生了后项合并,req的磁盘空间向后增大,从算法队列(比如deadline的红黑树队列)取出req的下一个req即next,再次尝试把next合并到req后边
@@ -1594,7 +1596,7 @@ get_rq:
 	 * Returns with the queue unlocked.
 	 */
 	//得到一个新的rq，里边有可能休眠,这里设置req->start_time为jiffies
-	req = get_request(q, rw_flags, bio, GFP_NOIO);
+	req = get_request(q, rw_flags, bio, GFP_NOIO);//从get_request返回还是上着q->queue_lock锁
 	if (unlikely(!req)) {
 		bio_endio(bio, -ENODEV);	/* @q is dead */
 		goto out_unlock;
@@ -1828,7 +1830,7 @@ generic_make_request_checks(struct bio *bio)
 	 */
 	create_io_context(GFP_ATOMIC, q->node);
 
-	if (blk_throtl_bio(q, bio))
+	if (blk_throtl_bio(q, bio))//限流检查
 		return false;	/* throttled, will be resubmitted later */
 
 	trace_block_bio_queue(q, bio);
@@ -1877,7 +1879,7 @@ void generic_make_request(struct bio *bio)
 {
 	struct bio_list bio_list_on_stack;
 
-	if (!generic_make_request_checks(bio))
+	if (!generic_make_request_checks(bio))//blkio限流检查
 		return;
 
 	/*
@@ -2203,7 +2205,7 @@ struct request *blk_peek_request(struct request_queue *q)
 	struct request *rq;
 	int ret;
     //循环执行__elv_next_request()，从q->queue_head队列取出待进行IO数据传输的req。
-    //如果q->queue_head没有req，则执行deadline_dispatch_requests从fifo队列选择派发的req
+    //如果q->queue_head没有req，则执行deadline_dispatch_requests从fifo队列选择派发的req到q->queue_head链表
 	while ((rq = __elv_next_request(q)) != NULL) {
 
 		rq = blk_pm_peek_request(q, rq);
@@ -3035,7 +3037,7 @@ static int plug_rq_cmp(void *priv, struct list_head *a, struct list_head *b)
  * additional stack usage in driver dispatch, in places where the originally
  * plugger did not intend it.
  */
-//唤醒emmc或者磁盘读写操作内核线程，开始执行底层驱动函数，启动emmc或者磁盘数据传输
+//里边执行__blk_run_queue派发req给磁盘驱动
 static void queue_unplugged(struct request_queue *q, unsigned int depth,
 			    bool from_schedule)
 	__releases(q->queue_lock)
@@ -3173,7 +3175,7 @@ mq-deadline算法的还要插入红黑树。如果没有IO调度算法，在硬件队列空闲时，尝试把plu
 	/*
 	 * This drops the queue lock
 	 */
-	if (q)//唤醒emmc或者磁盘读写操作内核线程，开始执行底层驱动函数，启动emmc或者磁盘数据传输
+	if (q)//里边执行__blk_run_queue派发req给磁盘驱动
 		queue_unplugged(q, depth, from_schedule);
 
 	local_irq_restore(flags);

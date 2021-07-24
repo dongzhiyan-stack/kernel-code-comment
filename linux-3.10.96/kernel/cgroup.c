@@ -592,7 +592,7 @@ static bool compare_css_sets(struct css_set *cg,
    ÕÒµ½Ôò·µ»Øcss_set£¬·ñÔò·µ»ØNULL¡£²éÕÒ¹æÔòÊÇÊ²Ã´ÄØ?
    
    1 ÔÚfor (i = 0; i < CGROUP_SUBSYS_COUNT; i++)Ñ­»·ÄÇÀïÊ¹ÓÃcgrp->subsys[i]ºÍoldcg->subsys[i]µÄcgroup_subsys_stateÌî³ä
-     template[CGROUP_SUBSYS_COUNT]Êı×é¡£³ıÁËforÑ­»·±éÀúµ½ÁË±¾´Î½ø³ÌÒª°ó¶¨µÄstruct cgroup *cgrp¶ÔÓ¦µÄcgroup×ÓÏµÍ³£¬ÊÇ´Ó
+     template[CGROUP_SUBSYS_COUNT]Êı×é¡£³ıÁËforÑ­»·±éÀúµ½ÁË±¾´Î½ø³ÌÒª°ó¶¨µÄstruct cgroup *cgrp¶ÔÓ¦µÄcgroup×ÓÏµÍ³£¬ÊÇ
      ´Ócgrp->subsys[i]È¡³öcgroup_subsys_state¸³ÓÚtemplate[i]£¬¼´template[i] = cgrp->subsys[i]¡£ÆäËû¶¼ÊÇtemplate[i] = oldcg->subsys[i]
 
    2 Ö®ºótemplate[i]µÄcgroup_subsys_state¾Í½áºÏÁËÀÏcss_setºÍ±¾´ÎÒª°ó¶¨½ø³ÌµÄcgroupµÄcgroup_subsys_state£¬ÒÔtemplate[i]ÎªkeyÔÚ
@@ -622,9 +622,10 @@ static bool compare_css_sets(struct css_set *cg,
 
        ºó±ßÔÚfind_css_set()Àï»á°Ñtemplate[i]µÄËùÓĞcgroup_subsys_state¸´ÖÆµ½css_setµÄsubsys[i]Êı×é,ÏÂ±ßÓĞ½²¡£
  
-      !!!ËùÒÔcss_set->subsys[]ÀïµÄcgroup_subsys_stateÀ´×Ô½ø³ÌÒª°ó¶¨µÄcgroupÄ¿Â¼½á¹¹struct cgroupµÄcgroup_subsys_state³ÉÔ±¡£Èç¹ûÒ»¸ö½ø³Ì
-      Ã»ÓĞ°ó¶¨cgroupÄ¿Â¼£¬ÄÇ¶ÔÓ¦css_set->subsys[i]ÀïµÄcgroup_subsys_state¶¼ÊÇ´Ó¸¸½ø³Ì¼Ì³ĞµÄÄ¬ÈÏµÄcgroup_subsys_state¡£Ö®ºó½ø³ÌÃ¿°ó¶¨Ò»¸ö
-      cgroupÄ¿Â¼£¬¾ÍÒª°ÑÕâ¸öcgroupÄ¿Â¼½á¹¹µÄ³ÉÔ±cgroup_subsys_state°´ÕÕ¸Ãcgroup×ÓÏµÍ³±àºÅ±£´æµ½css_set->subsys[i]£¬iÊÇcgroup×ÓÏµÍ³±àºÅ¡£
+      !!!ËùÒÔcss_set->subsys[]ÀïµÄcgroup_subsys_stateÀ´×Ô½ø³ÌÒª°ó¶¨µÄcgroup¿ØÖÆ½á¹¹(±ÈÈçcpu cgroup×ÓÏµÍ³µÄstruct task_group)µÄ
+      cgroup_subsys_state³ÉÔ±¡£Èç¹ûÒ»¸ö½ø³ÌÃ»ÓĞ°ó¶¨cgroupÄ¿Â¼£¬ÄÇ¶ÔÓ¦css_set->subsys[i]ÀïµÄcgroup_subsys_state¶¼ÊÇ´Ó¸¸½ø³Ì¼Ì³Ğ
+      µÄÄ¬ÈÏµÄcgroup_subsys_state¡£Ö®ºó½ø³ÌÃ¿°ó¶¨Ò»¸öcgroupÄ¿Â¼£¬¾ÍÒª°ÑÕâ¸öcgroupÄ¿Â¼¶ÔÓ¦µÄcgroup¿ØÖÆ½á¹¹(±ÈÈçcpu cgroup×ÓÏµÍ³
+      µÄstruct task_group)µÄ³ÉÔ±cgroup_subsys_state°´ÕÕ¸Ãcgroup×ÓÏµÍ³±àºÅ±£´æµ½css_set->subsys[i]£¬iÊÇcgroup×ÓÏµÍ³±àºÅ¡£
        
        2 Èç¹ûÔÚfind_css_set->find_existing_css_set()ÖĞÕÒµ½ÁË½ø³ÌÒª°ó¶¨css_setÔòÖ±½Ó·µ»Ø¸Ãcss_set,È»ºóÔÚcgroup_attach_task()½«½ø³ÌµÄ
        task_struct½á¹¹°ó¶¨µ½·µ»ØµÄcss_set¼´¿É(¼û2.6)¡£Èç¹ûÃ»ÓĞÕÒµ½Òª°ó¶¨µÄcss_set£¬Ôòfind_css_set->find_existing_css_set()·µ»ØNULL£¬Õâ
@@ -672,30 +673,33 @@ static bool compare_css_sets(struct css_set *cg,
         °ó¶¨memory/tasks,¶şÕß°ó¶¨µÄcss_set²»ÏàÍ¬¡£½ø³Ì1°ó¶¨cpu/tasksºÍmemory/tasks£¬½ø³Ì2°ó¶¨cpu/tasksºÍmemory/test/tasks£¬¶şÕß
         °ó¶¨µÄcss_setÒ²²»ÏàÍ¬¡£
       3 Ò»¸ö½ø³ÌÖ»»á°ó¶¨Ò»¸ösee_set£¬²»¹Ü°ó¶¨¶àÉÙ¸öcgroup×ÓÏµÍ³¡¢°ó¶¨µ½ÄÄ¸öcgroupÄ¿Â¼£¬ÎŞ·Ç°ó¶¨µÄcss_set±äÀ´±äÈ¥¡£²¢ÇÒ½ø³Ì°ó¶¨Ò»¸ö
-         cgroupÄ¿Â¼ºó£¬Ëü°ó¶¨µÄcss_setµÄsubsys[]Êı×éÒª±£´æ¸ÃcgroupÄ¿Â¼µÄcgroup_subsys_state£¬±£´æÔÚÊı×éÊ²Ã´Î»ÖÃÄØ?ÓÉ¸ÃcgroupÄ¿Â¼¶ÔÓ¦µÄ
-         cgroup×ÓÏµÍ³±àºÅ¾ö¶¨¡£
+         cgroupÄ¿Â¼ºó£¬Ëü°ó¶¨µÄcss_setµÄsubsys[]Êı×éÒª±£´æ¸ÃcgroupÄ¿Â¼¶ÔÓ¦µÄcgroup¿ØÖÆ½á¹¹(±ÈÈçcpu cgroup×ÓÏµÍ³µÄstruct task_group)
+         µÄ³ÉÔ±cgroup_subsys_stateµØÖ·£¬±£´æÔÚsubsys[]Êı×éÊ²Ã´Î»ÖÃÄØ?ÓÉ¸ÃcgroupÄ¿Â¼¶ÔÓ¦µÄcgroup×ÓÏµÍ³±àºÅ¾ö¶¨¡£
          
       ¾ÙÀı£¬ÖØµãÀ´ÁË¡£½ø³Ì1°ó¶¨"cpu/tasks"(cgroupÄ¿Â¼ÊÇcgroup1)ºÍ"memory/tasks"(cgroupÄ¿Â¼ÊÇcgroup2)£¬°ó¶¨css_set1¡£
        ½ø³Ì2°ó¶¨"cpu/tasks"(cgroupÄ¿Â¼ÊÇcgroup1)ºÍ"memory/test/tasks"(cgroupÄ¿Â¼ÊÇcgroup3)£¬°ó¶¨css_set2¡£
        
-       css_set1->subsys[12]={...,cgroup1µÄcgroup_subsys_state,...,cgroup2µÄcgroup_subsys_state,}  
-       css_set2->subsys[12]={...,cgroup1µÄcgroup_subsys_state,...,cgroup3µÄcgroup_subsys_state,}
+       css_set1->subsys[12]={...,cgroup1¶ÔÓ¦µÄcgroup_subsys_state,...,cgroup2¶ÔÓ¦µÄcgroup_subsys_state,}  
+       css_set2->subsys[12]={...,cgroup1¶ÔÓ¦µÄcgroup_subsys_state,...,cgroup3¶ÔÓ¦µÄcgroup_subsys_state,}
 
-       ÕâÁ½¸öcss_set¶¼ÒÔcss_set1->subsys[]µÄcgroup_subsys_stateÎªkeya¼ÓÈëµ½css_set_tableÁ´±í¡£
+       ÕâÁ½¸öcss_set¶¼ÒÔcss_set->subsys[]µÄcgroup_subsys_stateÖ¸ÕëÎªkeya¼ÓÈëµ½css_set_tableÁ´±í¡£
 
        ¼ÌĞø£¬½ø³Ì2¸ÄÎª°ó¶¨"memory/tasks"£¬Ö´ĞĞµ½cgroup_attach_task->find_css_set->find_existing_css_set()º¯Êı£¬
        for (i = 0; i < CGROUP_SUBSYS_COUNT; i++)ÖĞ¶Ôtemplate[i]¸³Öµ£¬¸³ÖµºóÊÇ
-       template[12]={...,cgroup1µÄcgroup_subsys_state,...,cgroup2µÄcgroup_subsys_state,}£¬È»ºóÒÔkey = css_set_hash(template)£¬
-       ÒÔtemplate[12]µÄcgroup_subsys_stateÎªkey£¬ÔÚcss_set_tableÁ´±íÕÒµ½css_set1¡£È»ºóÖ´ĞĞ
-       compare_css_sets(css_set1, css_set2, cgroup2, template)º¯Êı£¬½øĞĞÆ¥ÅäĞ£Ñé¡£Ö÷ÒªÆ¥ÅäÁ½µã£¬1Ñ­»·´Ócss_set_tableÉÏÕÒµ½µÄcss_set1
-       ºÍ½ø³Ì2Ö®Ç°°ó¶¨µÄcss_set2¶şÕßcss_setµÄcg_linksµÄÁ´±íÉÏµÄÈ¡³öcg_cgroup_link£¬ÔÙµÃµ½cg_cgroup_link¶ÔÓ¦µÄstruct cgroup£¬±È½ÏÁ½¸ö
-       struct cgroupÊÇ·ñÏàµÈ(Êµ¼ÊÊÇ°´ÕÕcgroup×ÓÏµÍ³µÄ±àºÅ³É¶Ô±È½Ï)£¬ÓĞÒ»¶Ô²»ÏàµÈ·µ»Øfalse¡£2Èç¹û´Ócss_set1È¡³öµÄstruct cgroupÓë½ø³Ì2
-       ±¾´ÎÒª°ó¶¨µÄ"memory/tasks"µÄcgroup2ÊôÓÚÍ¬Ò»¸öcgroup×ÓÏµÍ³£¬ÔòÒªÅĞ¶ÏÁ½¸östruct cgroupÊÇ·ñÏàµÈ£¬²»ÏàµÈ·µ»Øfalse¡£ÕâĞ©ÅĞ¶Ï¶¼Í¨¹ı£¬
-       ËµÃ÷´Ócss_set_tableÉÏÕÒµ½µÄcss_set1£¬¾ÍÊÇ½ø³Ì°ó¶¨"memory/tasks"cgroupÄ¿Â¼Òª°ó¶¨µÄcss_set£¬css_setÆ¥Åä³É¹¦¡£È»ºó»Øµ½
-       cgroup_attach_taskº¯Êı£¬Ö´ĞĞcgroup_task_migrate()°Ñ½ø³Ì2µÄtask_struct°ó¶¨µ½css_set1£¬Íê¹¤¡£
+       template[12]={...,cgroup1¶ÔÓ¦µÄcgroup_subsys_state,...,cgroup2¶ÔÓ¦µÄcgroup_subsys_state,}£¬È»ºóÖ´ĞĞkey = css_set_hash(template)£¬
+       ÒÔtemplate[12]Àï±ß12¸öcgroup×ÓÏµÍ³µÄcgroup_subsys_stateÖ¸ÕëÎªkey£¬ÔÚcss_set_tableÁ´±íÕÒµ½css_set1¡£È»ºóÖ´ĞĞ
+       compare_css_sets(css_set1, css_set2, cgroup2, template)º¯Êı£¬½øĞĞÆ¥ÅäĞ£Ñé¡£Ö÷ÒªÆ¥ÅäÁ½µã£¬
+
+      1Ñ­»·´Ócss_set_tableÉÏÕÒµ½css_set£¬ÕÒµ½css_set1Ê±£¬´Ócss_set1ºÍ½ø³Ì2Ö®Ç°°ó¶¨µÄcss_set2µÄcg_linksµÄÁ´±íÉÏµÄÈ¡³ö
+       cg_cgroup_link£¬ÔÙµÃµ½cg_cgroup_link¶ÔÓ¦µÄstruct cgroup£¬±È½ÏÁ½¸östruct cgroupÊÇ·ñÏàµÈ(Êµ¼ÊÊÇ°´ÕÕcgroup×ÓÏµÍ³µÄ±àºÅ³É¶Ô±È½Ï)£¬
+       ±È½Ï11´Î(Ò»¹²12 cgroup×ÓÏµÍ³)£¬ÓĞÒ»¶Ô²»ÏàµÈ·µ»Øfalse¡£
+      2 ÔÚµÚÒ»²½µÄ»ù´¡ÉÏ£¬»¹ÓĞ1´Î¾ÍÊÇ´Ócss_set1È¡³öµÄstruct cgroupÓë½ø³Ì2±¾´ÎÒª°ó¶¨µÄ"memory/tasks"µÄcgroup2ÊôÓÚÍ¬Ò»¸öcgroup×ÓÏµÍ³£¬
+        ÔòÒªÅĞ¶ÏÁ½¸östruct cgroupÊÇ·ñÏàµÈ£¬²»ÏàµÈ·µ»Øfalse¡£ÕâĞ©ÅĞ¶Ï¶¼Í¨¹ı£¬ËµÃ÷´Ócss_set_tableÉÏÕÒµ½µÄcss_set1£¬¾ÍÊÇ½ø³Ì°ó¶¨
+        "memory/tasks"cgroupÄ¿Â¼Òª°ó¶¨µÄcss_set£¬css_setÆ¥Åä³É¹¦¡£È»ºó»Øµ½cgroup_attach_taskº¯Êı£¬Ö´ĞĞcgroup_task_migrate()
+        °Ñ½ø³Ì2µÄtask_struct°ó¶¨µ½css_set1£¬ÔİÊ±Íê¹¤
 
        Èç¹û½ø³Ì2¸ÄÎª°ó¶¨"memory/test2/tasks"(cgroupÄ¿Â¼ÊÇcgroup5)£¬Ö´ĞĞµ½cgroup_attach_task->find_css_set->find_existing_css_set()º¯Êı£¬
-       for (i = 0; i < CGROUP_SUBSYS_COUNT; i++)ÖĞ¶Ôtemplate[i]¸³Öµ£¬¸³ÖµºóÊÇ
+       Í¬ÑùÖ´ĞĞµ½for (i = 0; i < CGROUP_SUBSYS_COUNT; i++)ÖĞ¶Ôtemplate[i]¸³Öµ£¬¸³ÖµºóÊÇ
        template[i]={...,cgroup1µÄcgroup_subsys_state,...,cgroup5µÄcgroup_subsys_state,}£¬ÏÔÈ»find_existing_css_set()ÖĞÕÒ²»µ½Æ¥ÅäµÄ
        css_setÔò·µ»ØNULL¡£È»ºó»Øµ½find_css_set()£¬·ÖÅäĞÂµÄcss_set3£¬·ÖÅä12¸östruct cg_cgroup_link£¬ÔÙÈ¡³ö½ø³Ì2Ö®Ç°°ó¶¨µÄcss_set2µÄ³ÉÔ±
        cg_linksµÄÁ´±íÉÏµÄcg_cgroup_link¶ÔÓ¦µÄstruct cgroup(Ò»¹²12¸ö)£¬ÒÀ´Î°ÑÕâ12¸östruct cgroup°´ÕÕcgroup×ÓÏµÍ³±àºÅÏÈ¼ÓÈëcg_cgroup_link
@@ -708,7 +712,7 @@ static bool compare_css_sets(struct css_set *cg,
            //È»ºóÏÂ±ß½¨Á¢ ±¾´Î½ø³ÌÒª°ó¶¨cgroup5¡¢css_set3µÄ¹ØÏµ
            if (c->root == cgrp->root)
                c = cgrp;
-           //½ø³Ìtask_struct½á¹¹Óëcss_setµÄ¹ØÏµ
+           //ÉèÖÃ½ø³Ìtask_struct½á¹¹Óëcss_setµÄ¹ØÏµ
            link_css_set(&tmp_cg_links, res, c);
        }
        ×îºó»Øµ½cgroup_attach_taskº¯Êı£¬Ö´ĞĞcgroup_task_migrate()°Ñ½ø³Ì2µÄtask_struct°ó¶¨µ½css_set3£¬Íê¹¤¡£
@@ -860,7 +864,7 @@ static struct css_set *find_css_set(//find_css_setÏêÏ¸¹ı³Ì»¹ÊÇ¿´find_existing_cs
 		get_css_set(res);
 	read_unlock(&css_set_lock);
 
-	if (res)
+	if (res)//ÕÒµ½Æ¥ÅäµÄcss_setÖ±½Ó·µ»Ø
 		return res;
     //·ÖÅästruct css_set
 	res = kmalloc(sizeof(*res), GFP_KERNEL);
@@ -1278,7 +1282,7 @@ static int rebind_subsystems(struct cgroupfs_root *root,
         //ssÀ´×ÔÏµÍ³×ÜµÄsubsys[i]½á¹¹
 		struct cgroup_subsys *ss = subsys[i];
 		unsigned long bit = 1UL << i;
-        //¸Ãcgroup×ÓÏµÍ³Ìí¼Óµ½ÏµÍ³?????
+        //¸Ãcgroup×ÓÏµÍ³Ìí¼Óµ½ÏµÍ³?????¶ÔµÄ£¬±¾´Îmount¹ÒÔØµÄÄÇ¸öcgroup×ÓÏµÍ³µÄ
 		if (bit & added_mask) {
 			/* We're binding this subsystem to this hierarchy */
 			BUG_ON(ss == NULL);
@@ -1288,6 +1292,7 @@ static int rebind_subsystems(struct cgroupfs_root *root,
             //cgroup¾ÍÊÇ±¾´ÎµÄcgroup×ÓÏµÍ³£¬±ÈÈçcpu cgroup£¬´ËÊ±cgrp->subsys[i]ºÍdummytop->subsys[i]´ú±ícpuµÄÄÇ¸öcgroupµÄ°É??????
 			cgrp->subsys[i] = dummytop->subsys[i];
 			cgrp->subsys[i]->cgroup = cgrp;
+            //°Ñcgroup_subsys½á¹¹ÒÆ¶¯µ½cgroupfs_rootµÄsubsys_listÁ´±í
 			list_move(&ss->sibling, &root->subsys_list);
             //ss´ËÊ±Ó¦¸ÃÒ²Ö¸Ïò´ú±ícpuµÄÄÇ¸öcgroup
 			ss->root = root;
@@ -1878,7 +1883,7 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		struct css_set *cg;
 
 		BUG_ON(sb->s_root != NULL);
-        //·ÖÅäcpu cgroupÎÄ¼şÏµÍ³µÄÄ¿Â¼dentryºÍinode
+        //·ÖÅäcpu cgroupÎÄ¼şÏµÍ³µÄ¸ùÄ¿Â¼dentryºÍinode
 		ret = cgroup_get_rootdir(sb);
 		if (ret)
 			goto drop_new_super;
@@ -1908,7 +1913,7 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		if (ret)
 			goto unlock_drop;
         //½¨Á¢±¾´ÎµÄcgroup¡¢cgroupfs_rootÓëstruct cgroup_subsys subsys[i]ºÍdummytop->subsys[i]µÄÁªÏµ£¬
-        //Ïàµ±ÓÚÌí¼Ó±¾´ÎµÄcpu cgroupÏµÍ³µ½ÏµÍ³?????
+        //Ïàµ±ÓÚÌí¼Ó±¾´ÎµÄcpu cgroupÏµÍ³µ½ÏµÍ³?????£¬ÕâÀï´¦Àícgroup×ÓÏµÍ³cgroup_subsys
 		ret = rebind_subsystems(root, root->subsys_mask);
 		if (ret == -EBUSY) {
 			free_cg_links(&tmp_cg_links);
@@ -2226,7 +2231,7 @@ static void cgroup_task_migrate(struct cgroup *oldcgrp,
 /*
   Õâ¸öº¯ÊıµÄ´¦ÀíÎ´ÃâÌ«¹ı†ªàÂ£¬ºËĞÄµãÖ»ÓĞ¼¸¸ö
   1 ·ÖÅäÆ­ÈËµÄstruct task_and_cgroup *tc½á¹¹£¬Ö´ĞĞÏÂ±ßµÄdo...while_each_thread(leader, tsk)°Ñ½ø³Ì¼°ÆäÏß³ÌµÄtask_struct¡¢
-    struct old css_set¡¢struct old cgroupĞÅÏ¢±£´æµ½struct task_and_cgroup¡£ÏÂ±ß¾­³£´Óstruct task_and_cgroupÈ¡³öÕâĞ©ĞÅÏ¢¡£
+    struct old css_set¡¢struct old cgroupĞÅÏ¢±£´æµ½struct task_and_cgroup¡£¸Ãº¯Êı¾­³£´Óstruct task_and_cgroupÈ¡³öÕâĞ©ĞÅÏ¢¡£
   2 Ñ­»·Ö´ĞĞfind_css_set()£¬°´ÕÕ½ø³Ì»òÕßÏß³ÌÖ®Ç°°ó¶¨µÄold css_set¡¢±¾´ÎÒª°ó¶¨µÄ½ø³ÌµÄstruct cgroup *cgrp£¬ÊÇ·ñÓĞÆ¥ÅäµÄcss_set£¬ÓĞµÄ
     »°Ö±½Ó·µ»ØÕâ¸öcss_set¡£Ã»ÓĞÕÒµ½Æ¥ÅäµÄcss_set£¬Ôò·ÖÅäĞÂµÄcss_set£¬·ÖÅä12ĞÂµÄstruct cg_cgroup_link£¬°Ñold css_setÉÏÖ®Ç°½ø³Ì°ó¶¨µÄ
     cgroupÄ¿Â¼struct cgroupºÍ±¾´Î½ø³ÌÒª°ó¶¨µÄcgroupÄ¿Â¼struct cgroup *cgrp£¬°´ÕÕcgorup×ÓÏµÍ³±àºÅÏÈÌí¼Óµ½struct cg_cgroup_link£¬ÔÙ
@@ -2257,7 +2262,7 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 		group_size = get_nr_threads(tsk);//½ø³ÌµÄÏß³ÌÊı??????
 	else
 		group_size = 1;
-    //·ÖÅästruct flex_array£¬Ë³´ø×Å·ÖÅäÄÚ´æ£¬ÏÂ±ßÖ´ĞĞflex_array_put()ÍùgroupÖ¸ÏòµÄstruct flex_arrayÌî³äÊı¾İ
+    //·ÖÅästruct flex_array£¬Ë³´ø×Å·ÖÅäÄÚ´æ£¬ÏÂ±ßÖ´ĞĞflex_array_put()ÏògroupÖ¸ÏòµÄstruct flex_arrayÌî³äÊı¾İ
     //È»ºóÔÙÏÂ±ßÍ¨¹ıflex_array_get()´ÓgroupÖ¸ÏòµÄstruct flex_arrayÈ¡³öÊı¾İ
 	/* flex_array supports very large thread-groups better than kmalloc. */
 	group = flex_array_alloc(sizeof(*tc), group_size, GFP_KERNEL);
@@ -2362,7 +2367,7 @@ static int cgroup_attach_task(struct cgroup *cgrp, struct task_struct *tsk,
 	 */
 	for (i = 0; i < group_size; i++) {
         //´ÓgroupÖ¸ÏòµÄstruct flex_array£¬ÕÒµ½²¢·µ»ØÇ°±ß±£´æµÄstruct task_and_cgroup¸øtc¡£
-        //tc->cgrpÊÇ¸Ã½ø³ÌÖ®Ç°°ó¶¨µÄstruct cgroup£¬tc->taskÊÇ±¾´ÎÒª°ó¶¨µÄ½ø³Ìtask½á¹¹,tc->cgÊÇ±¾´ÎÎªÁË°ó¶¨²Ù×÷ĞÂ·ÖÅäµÄstruct css_set
+        //tc->cgrpÊÇ¸Ã½ø³ÌÖ®Ç°°ó¶¨µÄstruct cgroup£¬tc->taskÊÇ±¾´ÎÒª°ó¶¨µÄ½ø³Ìtask½á¹¹,tc->cgÊÇ±¾´Î°ó¶¨²Ù×÷ĞÂ·ÖÅäµÄstruct css_set
 		tc = flex_array_get(group, i);
         //Ç°±ß½¨Á¢ÁËstruct css_set¡¢struct cg_cgroup_link¡¢struct cgroupµÄ¹ØÏµ£¬
         //ÕâÊÇ½¨Á¢´ı°ó¶¨½ø³ÌµÄstruct task_struct½á¹¹Óë°ó¶¨µÄstruct css_setµÄÏà»¥ÁªÏµ
@@ -2631,12 +2636,12 @@ static ssize_t cgroup_file_write(struct file *file, const char __user *buf,
     //Í¨¹ıÎÄ¼şdentryµÃµ½struct cfent£¬ÔÙÓÉstruct cfentµÄtypeµÃµ½ÎÄ¼şµÄstruct cftype
     //struct cftype°üº¬ÁË¸ÃÎÄ¼şµÄ¶ÁĞ´¿ØÖÆº¯Êı£¬ÈçechoÉèÖÃ½ø³ÌÔËĞĞÊ±¼äÒªµ÷ÓÃµÄwriteº¯Êı
 	struct cftype *cft = __d_cft(file->f_dentry);
-    //Í¨¹ı¸¸Ä¿Â¼µÄdentry»ñÈ¡¸¸Ä¿Â¼¶ÔÓ¦µÄstruct cgroup½á¹¹Ìå£¬Õâ¸östruct cgroup¾Í´ú±íÁËÕâ¸öÄ¿Â¼£¬ÕâÒ»²ãµÄ¿ØÖÆ
+    //Í¨¹ı¸¸Ä¿Â¼µÄdentry»ñÈ¡¸¸Ä¿Â¼¶ÔÓ¦µÄstruct cgroup½á¹¹Ìå£¬Õâ¸östruct cgroup¾Í´ú±íÁËÕâ¸öÄ¿Â¼
 	struct cgroup *cgrp = __d_cgrp(file->f_dentry->d_parent);
     //¸ÃcgroupÄ¿Â¼²»´æÔÚ
 	if (cgroup_is_removed(cgrp))
 		return -ENODEV;
-    //Ô­À´µ÷ÓÃµÄÊÇstruct cftype *cftµÄµÄĞ´º¯Êı,echoÉèÖÃ½ø³ÌÔËĞĞÊ±¼äÒªµ÷ÓÃµÄwriteº¯ÊıÊÇcpu_cfs_quota_write_s64()
+    //¸ù¾İÇé¿öµ÷ÓÃstruct cftype *cftµÄµÄĞ´º¯Êı.echoÉèÖÃ½ø³ÌÔËĞĞÊ±¼äÒªµ÷ÓÃµÄwriteº¯ÊıÊÇ cpu_cfs_quota_write_s64()
     //echo 123 > tasksĞ´ÎÄ¼ş»òÕßecho 123 >> task×·¼ÓÎÄ¼ş£¬°ó¶¨½ø³Ìµ½cgroupÏµÍ³£¬µ÷ÓÃµÄĞ´º¯ÊıÊÇcgroup_tasks_write()
 	if (cft->write)
 		return cft->write(cgrp, cft, file, buf, nbytes, ppos);
@@ -2991,7 +2996,7 @@ static umode_t cgroup_file_mode(const struct cftype *cft)
 static int cgroup_add_file(struct cgroup *cgrp, struct cgroup_subsys *subsys,
 			   struct cftype *cft)//´´½¨cgroup»ù±¾ÎÄ¼şÊ±£¬cftÖ¸Ïòstruct cftype files[]¶¨ÒåµÄÃ¿¸ö»ù±¾ÎÄ¼ş½á¹¹
 {
-    //ÕâÓ¦¸ÃÊÇcpu cgroup×ÓÏµÍ³¸¸Ä¿Â¼µÄdentry°É£¬ÏÂ±ß¾ÍÊÇÔÚÕâ¸ödentryÏÂ´´½¨×ÓÎÄ¼ş"tasks"µÈµÈ
+    //cgroup×ÓÏµÍ³¸¸Ä¿Â¼µÄdentry£¬ÏÂ±ß¾ÍÊÇÔÚÕâ¸ödentryÏÂ´´½¨cgroup×ÓÎÄ¼ş"tasks"µÈµÈ
 	struct dentry *dir = cgrp->dentry;
 	struct cgroup *parent = __d_cgrp(dir);
 	struct dentry *dentry;
@@ -3000,6 +3005,7 @@ static int cgroup_add_file(struct cgroup *cgrp, struct cgroup_subsys *subsys,
 	umode_t mode;
 	char name[MAX_CGROUP_TYPE_NAMELEN + MAX_CFTYPE_NAME + 2] = { 0 };
 
+    //ÕâÀï¸ù¾İcgroup×ÓÏµÍ³£¬Æ´½ÓËüµÄcgroupÎÄ¼şµÄÃû×Ö£¬±ÈÈç"cpu.cfs_quota_us"
 	if (subsys && !(cgrp->root->flags & CGRP_ROOT_NOPREFIX)) {
 		strcpy(name, subsys->name);
 		strcat(name, ".");
@@ -3012,13 +3018,13 @@ static int cgroup_add_file(struct cgroup *cgrp, struct cgroup_subsys *subsys,
 	cfe = kzalloc(sizeof(*cfe), GFP_KERNEL);
 	if (!cfe)
 		return -ENOMEM;
-    //ÔÚ¸¸Ä¿Â¼baseÏÂ£¬²éÕÒ»òÕßÒ²´´½¨nameÖ¸¶¨µÄÎÄ¼şdentry
+    //ÔÚ¸¸Ä¿Â¼baseÏÂ£¬²éÕÒ»òÕß´´½¨nameÖ¸¶¨µÄÎÄ¼şdentry
 	dentry = lookup_one_len(name, dir, strlen(name));
 	if (IS_ERR(dentry)) {
 		error = PTR_ERR(dentry);
 		goto out;
 	}
-    //¿´À´cfe±£´æÁËÒ»¸öcgroupÎÄ¼şµÄ»ù±¾ĞÅÏ¢
+    //cfe±£´æÕâ¸öcgroupÎÄ¼şµÄ»ù±¾ĞÅÏ¢
 	cfe->type = (void *)cft;
 	cfe->dentry = dentry;
 	dentry->d_fsdata = cfe;
@@ -3028,6 +3034,7 @@ static int cgroup_add_file(struct cgroup *cgrp, struct cgroup_subsys *subsys,
     //·ÖÅäÎÄ¼şµÄinode£¬½¨Á¢inodeºÍdentryÁªÏµ£¬³É¹¦·µ»Ø0
 	error = cgroup_create_file(dentry, mode | S_IFREG, cgrp->root->sb);
 	if (!error) {
+        //°ÑĞÂ·ÖÅäµÄcfeÌí¼Óµ½cgroup¸¸Ä¿Â¼µÄstruct cgroupµÄfilesÁ´±í
 		list_add_tail(&cfe->node, &parent->files);
 		cfe = NULL;
 	}
@@ -3141,7 +3148,7 @@ static void cgroup_cfts_commit(struct cgroup_subsys *ss,
  * function currently returns 0 as long as @cfts registration is successful
  * even if some file creation attempts on existing cgroups fail.
  */
-//°Ñcgroup¿ØÖÆÎÄ¼şcftypeÊı×éÌí¼Óµ½cgorup×ÓÏµÍ³cgroup_subsysµÄcftsetsÁ´±í
+//°Ñcgroup×ÓÏµÍ³ÌØÓĞµÄcgroup¿ØÖÆÎÄ¼şcftypeÊı×éÌí¼Óµ½cgorup×ÓÏµÍ³struct cgroup_subsysµÄcftsetsÁ´±í.blkcg_policy_register->cgroup_add_cftypes
 int cgroup_add_cftypes(struct cgroup_subsys *ss, struct cftype *cfts)
 {
 	struct cftype_set *set;
@@ -4290,7 +4297,7 @@ static struct cftype files[] = {
 	{
 		.name = "tasks",
 		.open = cgroup_tasks_open,
-		.write_u64 = cgroup_tasks_write,//°ó¶¨Ã¿¸ö½ø³Ìµ½¿ØÖÆÏµÍ³
+		.write_u64 = cgroup_tasks_write,//°ó¶¨Ã¿¸ö½ø³Ìµ½cgroup×ÓÏµÍ³
 		.release = cgroup_pidlist_release,
 		.mode = S_IRUGO | S_IWUSR,
 	},
@@ -4344,7 +4351,7 @@ static int cgroup_populate_dir(struct cgroup *cgrp, bool base_files,
 {
 	int err;
 	struct cgroup_subsys *ss;
-    //´Óstruct cftype files½á¹¹Ìå»ñÈ¡cgroup»ù±¾µÄÎÄ¼şcftype£¬±ÈÈç"task"¡¢"release_agent"µÈ»ù±¾cgroupÎÄ¼ş£¬
+    //´Óstruct cftype files[]½á¹¹Ìå»ñÈ¡cgroup»ù±¾µÄÎÄ¼şcftype£¬±ÈÈç"task"¡¢"release_agent"µÈ»ù±¾cgroupÎÄ¼ş£¬
     //È»ºóÔÚcgroup×ÓÏµÍ³µÄÄ¿Â¼ÏÂÏÂ´´½¨ÕâĞ©»ù±¾ÎÄ¼ş
 	if (base_files) {
 		err = cgroup_addrm_files(cgrp, NULL, files, true);
@@ -4353,19 +4360,19 @@ static int cgroup_populate_dir(struct cgroup *cgrp, bool base_files,
 	}
 
 	/* process cftsets of each subsystem */
-   //cgrp->root Ö¸Ïò¸ùcgroupfs_root¼´rootnode£¬ÕâÊÇ±éÀúrootnodeµÄsubsys_listÁ´±íÉÏµÄcpu¡¢memory¡¢blkioµÈcgroup_subsys,Í¨¹ıcgroup_subsys
+   //cgrp->rootÖ¸Ïò¸ùcgroupfs_root£¬ÕâÊÇ±éÀú¸ùcgroupfs_rootµÄsubsys_listÁ´±íÉÏµÄcpu¡¢memory¡¢blkioµÈcgroup_subsys,ÔÙÍ¨¹ıcgroup_subsys
    //µÄ³ÉÔ±sibling container_ofÕÒµ½cftype_set£¬ÔÙÕÒµ½cftype_setµÄcftsÖ¸ÏòµÄcftype£¬Õâ¸öcftypeÊÇÃ¿¸öcgroup_subsysÌØÓĞµÄcftype¡£ÉÏ±ßµÄÊÇ
-   //´´½¨cgroup»ù±¾ÎÄ¼ş£¬ÕâÀïµÄcftypeÊÇcpu¡¢memory¡¢blkioÌØÓĞµÄcftype
+   //´´½¨cgroup»ù±¾ÎÄ¼ş£¬ÕâÀïµÄcftypeÊÇcpu¡¢memory¡¢blkioÌØÓĞµÄcgroupÎÄ¼ş¡£
 	for_each_subsys(cgrp->root, ss) {
 		struct cftype_set *set;
-        //ÊÇµ±Ç°µÄcgroup×ÓÏµÍ³£¬ÎÒ²Â²âÒòÎªÓĞcpu¡¢memµÈcgroupÏµÍ³£¬ËùÒÔµ±´´½¨cpu cgroupµÄÄ¿Â¼Ê±£¬
-        //ÕâÀïÏŞ¶¨cpu cgroupÊ±Ö»ÔÊĞí´´½¨cpu cgroupµÄÄ¿Â¼°É???????
+        //ÕâÊÇÏŞ¶¨Ö»ÓĞÓësubsys_maskÖ¸¶¨µÄcgroup×ÓÏµÍ³Æ¥Åä²ÅÄÜÖ´ĞĞÏÂ±ßµÄcgroup_addrm_files()´´½¨ÌØ¶¨cgroup×ÓÏµÍ³µÄcgroupÎÄ¼ş¡£
+        //±ÈÈçÔÚcpu cgroupÄ¿Â¼ÏÂ´´½¨cgroupÎÄ¼ş£¬¸ÃifÖ»ÓĞÊÇssÊÇcpuµÄcgroup_subsys²Å²»³ÉÁ¢
 		if (!test_bit(ss->subsys_id, &subsys_mask))
 			continue;
         
-        //±éÀúcgroup_subsysµÄcftsetsÁ´±íÉÏµÄcftype_set£¬È»ºóÕÒµ½cftype_setµÄcftsÖ¸¶¨µÄstruct cftype[]£¬´´½¨cftypeÖ¸¶¨cgroupÎÄ¼ş
-        //ÕâĞ©Ã¿¸öcgroup_subsys×ÓÏµÍ³µÄstruct cftype[]¡£Èçstruct cftype cpu_files[]£¬struct cftype blkcg_files[]£¬
-        //struct cftype throtl_files[].¸üÏêÏ¸¼ûstruct cftype½á¹¹ÌåÃèÊö¡£
+        //±éÀúcgroup_subsys¸Ãcgroup×ÓÏµÍ³cftsetsÁ´±íÉÏµÄcftype_set£¬ÔÙÍ¨¹ıcftype_setµÄcftsÕÒµ½cgroup×ÓÏµÍ³ÌØÓĞµÄstruct cftype[]£¬´´½¨
+        //cftypeÖ¸¶¨µÄ¸Ãcgroup×ÓÏµÍ³ÌØÓĞµÄcgroupÎÄ¼ş¡£cgroup_subsys×ÓÏµÍ³ÌØÓĞµÄstruct cftype[]ÓĞÄÄĞ©ÄØ?Èçstruct cftype cpu_files[]£¬
+        //struct cftype blkcg_files[]£¬struct cftype throtl_files[].¸üÏêÏ¸¼ûstruct cftype½á¹¹ÌåÃèÊö¡£
 		list_for_each_entry(set, &ss->cftsets, node)
 			cgroup_addrm_files(cgrp, ss, set->cfts, true);
 	}
@@ -4528,7 +4535,7 @@ static long cgroup_create(struct cgroup *parent, struct dentry *dentry,//dentryÊ
 			err = PTR_ERR(css);
 			goto err_free_all;
 		}
-        //³õÊ¼»¯struct cgroup_subsys_state css
+        //³õÊ¼»¯struct cgroup_subsys_state css£¬¸³Öµcgrp->subsys[ss->subsys_id]=css
 		init_cgroup_css(css, ss, cgrp);
 		if (ss->use_id) {
 			err = alloc_css_id(ss, parent, cgrp);
@@ -4542,7 +4549,7 @@ static long cgroup_create(struct cgroup *parent, struct dentry *dentry,//dentryÊ
 	 * directory locked on success so that it can be populated without
 	 * dropping cgroup_mutex.
 	 */
-	//´´½¨¸ÃÄ¿Â¼µÄinode
+	//´´½¨¸ÃÄ¿Â¼µÄinode£¬½¨Á¢dentryºÍinodeµÄ¹ØÏµ
 	err = cgroup_create_file(dentry, S_IFDIR | mode, sb);
 	if (err < 0)
 		goto err_free_all;
@@ -4709,10 +4716,10 @@ static void __init_or_module cgroup_init_cftsets(struct cgroup_subsys *ss)
 	 * base_cftset is embedded in subsys itself, no need to worry about
 	 * deregistration.
 	 */
-	//³õÊ¼»¯cpu¡¢memcory¡¢block µÄcgroup file
 	if (ss->base_cftypes) {
-        //cgroup_subsysµÄcftype_setµÄcftsÖ¸Ïòcgroup
-		ss->base_cftset.cfts = ss->base_cftypes;//Ã¿¸öcgroup_subsys
+        //cgroup_subsysµÄcftype_setµÄcftsÖ¸Ïòcgroup×ÓÏµÍ³cgroup_subsysµÄ³ÉÔ±base_cftypesÖ¸ÏòµÄstruct cftypeÊı×é
+		ss->base_cftset.cfts = ss->base_cftypes;
+        //°Ñcgroup×ÓÏµÍ³struct cgroup_subsysµÄ³ÉÔ±base_cftypesÖ¸ÏòµÄstruct cftypeÊı×éÌí¼Óµ½cgroup_subsysµÄcftsetsÁ´±í
 		list_add_tail(&ss->base_cftset.node, &ss->cftsets);
 	}
 }

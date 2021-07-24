@@ -47,7 +47,7 @@ struct tg_stats_cpu {
 	/* total IOs serviced, post merge */
 	struct blkg_rwstat		serviced;
 };
-
+//blkio 限流iops、流量控制结构体
 struct throtl_grp {
 	/* must be the first member */
 	struct blkg_policy_data pd;
@@ -71,10 +71,10 @@ struct throtl_grp {
 	unsigned int nr_queued[2];
 
 	/* bytes per second rate limits */
-	uint64_t bps[2];
+	uint64_t bps[2];//每秒传输字节数限制数据
 
 	/* IOPS limits */
-	unsigned int iops[2];
+	unsigned int iops[2];//iops限制数据
 
 	/* Number of bytes disptached in current slice */
 	uint64_t bytes_disp[2];
@@ -655,12 +655,12 @@ static bool tg_may_dispatch(struct throtl_data *td, struct throtl_grp *tg,
 		if (time_before(tg->slice_end[rw], jiffies + throtl_slice))
 			throtl_extend_slice(td, tg, rw, jiffies + throtl_slice);
 	}
-
-	if (tg_with_in_bps_limit(td, tg, bio, &bps_wait)
-	    && tg_with_in_iops_limit(td, tg, bio, &iops_wait)) {
+    
+	if (tg_with_in_bps_limit(td, tg, bio, &bps_wait)//检查IO流量是否超标
+	    && tg_with_in_iops_limit(td, tg, bio, &iops_wait)) {//检查iops是否超标
 		if (wait)
 			*wait = 0;
-		return 1;
+		return 1;//如果iops和IO流量都没超标返回1
 	}
 
 	max_wait = max(bps_wait, iops_wait);
@@ -671,7 +671,7 @@ static bool tg_may_dispatch(struct throtl_data *td, struct throtl_grp *tg,
 	if (time_before(tg->slice_end[rw], jiffies + max_wait))
 		throtl_extend_slice(td, tg, rw, jiffies + max_wait);
 
-	return 0;
+	return 0;//到这里说明iops和IO流量至少有一个超标了，该限流了
 }
 
 static void throtl_update_dispatch_stats(struct blkcg_gq *blkg, u64 bytes,
@@ -1007,6 +1007,7 @@ static int tg_print_conf_uint(struct cgroup *cgrp, struct cftype *cft,
 static int tg_set_conf(struct cgroup *cgrp, struct cftype *cft, const char *buf,
 		       bool is_u64)
 {
+    //由cgroup得到blkio的控制结构blkcg
 	struct blkcg *blkcg = cgroup_to_blkcg(cgrp);
 	struct blkg_conf_ctx ctx;
 	struct throtl_grp *tg;
@@ -1016,15 +1017,18 @@ static int tg_set_conf(struct cgroup *cgrp, struct cftype *cft, const char *buf,
 	ret = blkg_conf_prep(blkcg, &blkcg_policy_throtl, buf, &ctx);
 	if (ret)
 		return ret;
-
+    
+    //由blkcg_gq得到throtl_grp，throtl_grp保存blkio的限流参数
 	tg = blkg_to_tg(ctx.blkg);
 	td = ctx.blkg->q->td;
 
 	if (!ctx.v)
 		ctx.v = -1;
 
+    //ctx->v保存要设置的值，即echo "233:1 10240" > blkio.throttle.write_bps_device 里的10240
+    //cft->private是blkio每个cgroup文件在throtl_grp结构的偏移，详见struct cftype throtl_files[]
 	if (is_u64)
-		*(u64 *)((void *)tg + cft->private) = ctx.v;
+		*(u64 *)((void *)tg + cft->private) = ctx.v;//把新设置的值设置到throtl_grp的bps[1]成员里
 	else
 		*(unsigned int *)((void *)tg + cft->private) = ctx.v;
 
@@ -1109,11 +1113,12 @@ static struct blkcg_policy blkcg_policy_throtl = {
 
 bool blk_throtl_bio(struct request_queue *q, struct bio *bio)
 {
+    //blkio控制数据结构
 	struct throtl_data *td = q->td;
 	struct throtl_grp *tg;
 	bool rw = bio_data_dir(bio), update_disptime = true;
 	struct blkcg *blkcg;
-	bool throttled = false;
+	bool throttled = false;//默认没达到限流标准
 
 	if (bio->bi_rw & REQ_THROTTLED) {
 		bio->bi_rw &= ~REQ_THROTTLED;
@@ -1126,9 +1131,11 @@ bool blk_throtl_bio(struct request_queue *q, struct bio *bio)
 	 * just update the dispatch stats in lockless manner and return.
 	 */
 	rcu_read_lock();
+    //得到blkio cgroup子系统控制结构blkcg，具体是由当前进程task_struct结构得到blkcg
 	blkcg = bio_blkcg(bio);
-	tg = throtl_lookup_tg(td, blkcg);
+	tg = throtl_lookup_tg(td, blkcg);//找到throtl_grp结构,保存blkio 限流iops、流量控制数据
 	if (tg) {
+        //看有没有配置blkio限流规则，就是是否配置了"iops限制"、"IO流量限制"属性，很重要
 		if (tg_no_rule_group(tg, rw)) {
 			throtl_update_dispatch_stats(tg_to_blkg(tg),
 						     bio->bi_size, bio->bi_rw);
@@ -1141,7 +1148,7 @@ bool blk_throtl_bio(struct request_queue *q, struct bio *bio)
 	 * IO group
 	 */
 	spin_lock_irq(q->queue_lock);
-	tg = throtl_lookup_create_tg(td, blkcg);
+	tg = throtl_lookup_create_tg(td, blkcg);//找到throtl_grp，结构保存blkio 限流iops、流量控制数据
 	if (unlikely(!tg))
 		goto out_unlock;
 
@@ -1156,8 +1163,9 @@ bool blk_throtl_bio(struct request_queue *q, struct bio *bio)
 	}
 
 	/* Bio is with-in rate limit of group */
-	if (tg_may_dispatch(td, tg, bio, NULL)) {
-		throtl_charge_bio(tg, bio);
+	if (tg_may_dispatch(td, tg, bio, NULL)) {//检查是否超出限流标准，超出则返回false，要被限流了
+        //没有超标则iops加1，IO流量加上本次传输的
+        throtl_charge_bio(tg, bio);
 
 		/*
 		 * We need to trim slice even when bios are not being queued
@@ -1184,6 +1192,7 @@ queue_bio:
 
 	bio_associate_current(bio);
 	throtl_add_bio_tg(q->td, tg, bio);
+    //走到这里，说明当前进程派发IO太多超出限流标准，该休眠了，于是throttled = true
 	throttled = true;
 
 	if (update_disptime) {

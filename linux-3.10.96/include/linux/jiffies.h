@@ -107,6 +107,7 @@ static inline u64 get_jiffies_64(void)
 //前>后返回true
 #define time_before(a,b)	time_after(b,a)//b>a返回true
 
+//a>=b返回true
 #define time_after_eq(a,b)	\
 	(typecheck(unsigned long, a) && \
 	 typecheck(unsigned long, b) && \

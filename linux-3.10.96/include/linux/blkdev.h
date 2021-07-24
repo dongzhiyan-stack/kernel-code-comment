@@ -171,6 +171,7 @@ struct request {
 	 * completion_data share space with the rb_node.
 	 */
 	union {
+	    //__elv_add_request->deadline_add_request->deadline_add_rq_rb->elv_rb_add 将req添加到红黑树队列，对req->rb_node赋值
 		struct rb_node rb_node;	/* sort/lookup */
 		void *completion_data;
 	};
@@ -384,7 +385,7 @@ struct request_queue {
 	//大爷的，queue_head就是存放待发送给驱动传输的req的，见__elv_add_request->elv_drain_elevator->deadline_dispatch_requests->
 	//->deadline_move_request->deadline_move_to_dispatch->elv_dispatch_add_tail.
 	//触发驱动程序取出queue_head上待传输的req的函数路径是
-	//__blk_run_queue->__blk_run_queue_uncond->mmc_request_fn->blk_fetch_request->blk_peek_request->__elv_next_request
+	//__blk_run_queue->__blk_run_queue_uncond->scsi_request_fn->blk_fetch_request->blk_peek_request->__elv_next_request->deadline_dispatch_requests
 	struct list_head	queue_head;
     
     //attempt_merge->elv_merge_requests函数中，把next这个rq合并到新产生的req，然后赋值last_merge=req

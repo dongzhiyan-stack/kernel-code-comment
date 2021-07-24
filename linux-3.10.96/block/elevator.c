@@ -322,7 +322,7 @@ void elv_rb_add(struct rb_root *root, struct request *rq)
 		else if (blk_rq_pos(rq) >= blk_rq_pos(__rq))
 			p = &(*p)->rb_right;
 	}
-    //rq链接到红黑树
+    //rq链接到红黑树，对rq->rb_node赋值
 	rb_link_node(&rq->rb_node, parent, p);
 	rb_insert_color(&rq->rb_node, root);
 }
@@ -472,7 +472,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	 */
 	 //新加入IO调度队列的req会做hash索引，这应该是是根据bio的扇区起始地址在hash表找匹配的req吧，
 	 
-	 //遍历hash队列req，如果该req的扇区结束地址等于bio的扇区起始地址，bio可以后项合并到req
+	 //这是遍历hash队列req，如果该req的扇区结束地址等于bio的扇区起始地址，bio可以后项合并到req
 	__rq = elv_rqhash_find(q, bio->bi_sector);
 	if (__rq && elv_rq_merge_ok(__rq, bio)) {
 		*req = __rq;
@@ -481,7 +481,7 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 
     //具体IO调度算法函数cfq_merge或者deadline_merge，找到可以合并的bio的req，这里是把bio前项合并到req
 	if (e->type->ops.elevator_merge_fn)
-        //deadline是在红黑树队列里遍历req,如果该req起始扇区地址等于bio的扇区结束地址，返回前项合并(bio合并到req的前边)
+        //deadline是在红黑树队列里遍历req,如果该req起始扇区地址等于bio的扇区结束地址，返回前项合并(bio合并到req的前边)。
         //req是个双重指针，保存这个红黑树队列里匹配到的req
 		return e->type->ops.elevator_merge_fn(q, req, bio);//deadline_merge，这里返回ELEVATOR_FRONT_MERGE，前项合并
 /*
@@ -710,7 +710,7 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 
 	case ELEVATOR_INSERT_BACK://后向合并
 		rq->cmd_flags |= REQ_SOFTBARRIER;
-        //循环调用deadline算法的elevator_dispatch_fn接口一直选择派发的req直到队列
+        //循环调用deadline算法的elevator_dispatch_fn接口一直选择派发的req到q->queue_head链表
 		elv_drain_elevator(q);
 		list_add_tail(&rq->queuelist, &q->queue_head);
 		/*
@@ -723,7 +723,7 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 		 *   with anything.  There's no point in delaying queue
 		 *   processing.
 		 */
-		//这里调用底层驱动数据传输函数，就会从rq的queue_head队列取出req发送给磁盘驱动去传输
+		//这里调用底层驱动数据传输函数，就会从rq->queue_head链表取出req发送给磁盘驱动去传输
 		__blk_run_queue(q);
 		break;
 
@@ -737,6 +737,7 @@ void __elv_add_request(struct request_queue *q, struct request *rq, int where)
 			break;
 	case ELEVATOR_INSERT_SORT://新分配的req插入的IO调度算法队列走这里
 		BUG_ON(rq->cmd_type != REQ_TYPE_FS);
+        //这里设置REQ_SORTED属性
 		rq->cmd_flags |= REQ_SORTED;
         //队列插入新的一个req
 		q->nr_sorted++;
@@ -782,7 +783,7 @@ EXPORT_SYMBOL(elv_add_request);
 struct request *elv_latter_request(struct request_queue *q, struct request *rq)
 {
 	struct elevator_queue *e = q->elevator;
-
+    //deadline的是elv_rb_latter_request函数
 	if (e->type->ops.elevator_latter_req_fn)//elv_rb_latter_request和noop_latter_request
 		return e->type->ops.elevator_latter_req_fn(q, rq);
 	return NULL;
@@ -1155,7 +1156,7 @@ EXPORT_SYMBOL(elv_rb_former_request);
 struct request *elv_rb_latter_request(struct request_queue *q,
 				      struct request *rq)
 {
-	struct rb_node *rbnext = rb_next(&rq->rb_node);
+	struct rb_node *rbnext = rb_next(&rq->rb_node);//从deadline红黑树取出下一个req
 
 	if (rbnext)
 		return rb_entry_rq(rbnext);
