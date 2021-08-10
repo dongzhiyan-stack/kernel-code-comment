@@ -635,6 +635,7 @@ long wait_iff_congested(struct zone *zone, int sync, long timeout)
 	 * encountered in the current zone, yield if necessary instead
 	 * of sleeping on the congestion queue
 	 */
+	//nr_bdi_congested[sync]不为0表示bdi拥堵，zone_is_reclaim_congested(zone)不为0表示zone拥堵
 	if (atomic_read(&nr_bdi_congested[sync]) == 0 ||
 			!zone_is_reclaim_congested(zone)) {
 		cond_resched();

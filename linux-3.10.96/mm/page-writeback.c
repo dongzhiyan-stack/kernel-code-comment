@@ -1519,6 +1519,7 @@ void throttle_vm_writeout(gfp_t gfp_mask)
 	unsigned long dirty_thresh;
 
         for ( ; ; ) {
+        //获取脏页限制
 		global_dirty_limits(&background_thresh, &dirty_thresh);
 		dirty_thresh = hard_dirty_limit(dirty_thresh);
 
@@ -1531,6 +1532,7 @@ void throttle_vm_writeout(gfp_t gfp_mask)
                 if (global_page_state(NR_UNSTABLE_NFS) +
 			global_page_state(NR_WRITEBACK) <= dirty_thresh)
                         	break;
+                //如果脏页总数大于限制，休眠100ms
                 congestion_wait(BLK_RW_ASYNC, HZ/10);
 
 		/*
@@ -2234,6 +2236,7 @@ int test_clear_page_writeback(struct page *page)
 		unsigned long flags;
 
 		spin_lock_irqsave(&mapping->tree_lock, flags);
+        //清除page writeback标记
 		ret = TestClearPageWriteback(page);
 		if (ret) {
 			radix_tree_tag_clear(&mapping->page_tree,
@@ -2265,6 +2268,7 @@ int test_set_page_writeback(struct page *page)
 		unsigned long flags;
 
 		spin_lock_irqsave(&mapping->tree_lock, flags);
+         //设置page标记"Writeback"
 		ret = TestSetPageWriteback(page);
 		if (!ret) {
 			radix_tree_tag_set(&mapping->page_tree,
@@ -2282,6 +2286,7 @@ int test_set_page_writeback(struct page *page)
 				     PAGECACHE_TAG_TOWRITE);
 		spin_unlock_irqrestore(&mapping->tree_lock, flags);
 	} else {
+	    //设置page标记"Writeback"
 		ret = TestSetPageWriteback(page);
 	}
 	if (!ret)

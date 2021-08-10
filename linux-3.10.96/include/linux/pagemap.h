@@ -96,8 +96,9 @@ static inline void mapping_set_gfp_mask(struct address_space *m, gfp_t mask)
 #define PAGE_CACHE_SIZE		PAGE_SIZE
 #define PAGE_CACHE_MASK		PAGE_MASK
 #define PAGE_CACHE_ALIGN(addr)	(((addr)+PAGE_CACHE_SIZE-1)&PAGE_CACHE_MASK)
-
+//page->_count加1
 #define page_cache_get(page)		get_page(page)
+//page->_count减1
 #define page_cache_release(page)	put_page(page)
 void release_pages(struct page **pages, int nr, int cold);
 
@@ -202,7 +203,7 @@ static inline int page_cache_add_speculative(struct page *page, int count)
 
 	return 1;
 }
-
+//对page->_count清0，并返回page->_count老的值，如果老的值等于count则返回1
 static inline int page_freeze_refs(struct page *page, int count)
 {
 	return likely(atomic_cmpxchg(&page->_count, count, 0) == count);
@@ -336,7 +337,7 @@ static inline void __clear_page_locked(struct page *page)
 {
 	__clear_bit(PG_locked, &page->flags);
 }
-
+//尝试对page加锁，如果page之前已经其他进程被加锁则加锁失败返回0，否则当前进程对page加锁成功并返回1
 static inline int trylock_page(struct page *page)
 {
 	return (likely(!test_and_set_bit_lock(PG_locked, &page->flags)));
@@ -407,6 +408,7 @@ static inline void wait_on_page_locked(struct page *page)
 /* 
  * Wait for a page to complete writeback
  */
+//在page PG_writeback等待队列上休眠，等待该page脏页回写完成，脏页回写完成执行end_page_writeback()函数唤醒休眠的进程
 static inline void wait_on_page_writeback(struct page *page)
 {
 	if (PageWriteback(page))

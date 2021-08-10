@@ -127,11 +127,13 @@ void __delete_from_page_cache(struct page *page)
 	else
 		cleancache_invalidate_page(mapping, page);
 
+    //从radix tree剔除page
 	radix_tree_delete(&mapping->page_tree, page->index);
 	page->mapping = NULL;
 	/* Leave page->index set: truncation lookup relies upon it */
 	mapping->nrpages--;
-	__dec_zone_page_state(page, NR_FILE_PAGES);
+    
+	__dec_zone_page_state(page, NR_FILE_PAGES);//NR_FILE_PAGES
 	if (PageSwapBacked(page))
 		__dec_zone_page_state(page, NR_SHMEM);//与swap有关
 	BUG_ON(page_mapped(page));
@@ -504,10 +506,10 @@ int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 				pgoff_t offset, gfp_t gfp_mask)
 {
 	int ret;
-
+    //page按照索引index添加到radix tree
 	ret = add_to_page_cache(page, mapping, offset, gfp_mask);
 	if (ret == 0)
-		lru_cache_add_file(page);
+		lru_cache_add_file(page);//page添加到LRU_INACTIVE_FILE链表
 	return ret;
 }
 EXPORT_SYMBOL_GPL(add_to_page_cache_lru);
@@ -609,9 +611,9 @@ EXPORT_SYMBOL_GPL(add_page_wait_queue);
 void unlock_page(struct page *page)
 {
 	VM_BUG_ON(!PageLocked(page));
-	clear_bit_unlock(PG_locked, &page->flags);
+	clear_bit_unlock(PG_locked, &page->flags);//清除page PG_locked标记
 	smp_mb__after_clear_bit();
-	wake_up_page(page, PG_locked);
+	wake_up_page(page, PG_locked);//唤醒在page PG_locked等待队列的休眠的进程
 }
 EXPORT_SYMBOL(unlock_page);
 
@@ -621,13 +623,16 @@ EXPORT_SYMBOL(unlock_page);
  */
 void end_page_writeback(struct page *page)
 {
+    //如果该page被设置了"Reclaim"标记位，
 	if (TestClearPageReclaim(page))
 		rotate_reclaimable_page(page);
-
+    
+    //清除掉page writeback标记
 	if (!test_clear_page_writeback(page))
 		BUG();
 
 	smp_mb__after_clear_bit();
+    //唤醒在该page的PG_writeback等待队列休眠的进程
 	wake_up_page(page, PG_writeback);
 }
 EXPORT_SYMBOL(end_page_writeback);
@@ -694,6 +699,7 @@ int __lock_page_or_retry(struct page *page, struct mm_struct *mm,
  * Is there a pagecache struct page at the given (mapping, offset) tuple?
  * If yes, increment its refcount and return it; if no, return NULL.
  */
+//根据文件页索引在radix tree中查找是否存在该缓存页page，找到则返回
 struct page *find_get_page(struct address_space *mapping, pgoff_t offset)
 {
 	void **pagep;
@@ -1100,23 +1106,27 @@ static void shrink_readahead_size_eio(struct file *filp,
  * This is really ugly. But the goto's actually try to clarify some
  * of the logic when it comes to error handling etc.
  */
-static void do_generic_file_read(struct file *filp, loff_t *ppos,
+static void do_generic_file_read(struct file *filp, loff_t *ppos,//文件指针偏移
 		read_descriptor_t *desc, read_actor_t actor)
 {
+    //文件页高速缓存核心结构
 	struct address_space *mapping = filp->f_mapping;
 	struct inode *inode = mapping->host;
-	struct file_ra_state *ra = &filp->f_ra;
+	struct file_ra_state *ra = &filp->f_ra;//预读窗口
 	pgoff_t index;
 	pgoff_t last_index;
 	pgoff_t prev_index;
 	unsigned long offset;      /* offset into pagecache page */
 	unsigned int prev_offset;
 	int error;
-
+    /*文件指针ppos指向保存文件数据的buf(用户空间的buf)，以4K,4K大小与文件页page构成文件映射*/
+    //以文件指针为本次读取的起始地址，计算出要读取的文件页page的索引index
 	index = *ppos >> PAGE_CACHE_SHIFT;
 	prev_index = ra->prev_pos >> PAGE_CACHE_SHIFT;
 	prev_offset = ra->prev_pos & (PAGE_CACHE_SIZE-1);
+    //计算出本次要读取的文件结束地址文件页page索引，desc->count是本次读取的文件字节数
 	last_index = (*ppos + desc->count + PAGE_CACHE_SIZE-1) >> PAGE_CACHE_SHIFT;
+    //文件指针ppos不足4K的余数，就是4K保存文件数据buf里的偏移,也就是在映射的page里的偏移
 	offset = *ppos & ~PAGE_CACHE_MASK;
 
 	for (;;) {
@@ -1127,25 +1137,33 @@ static void do_generic_file_read(struct file *filp, loff_t *ppos,
 
 		cond_resched();
 find_page:
+        //本轮要读取index索引的文件页是否有文件缓存页page，准确说这个文件页对应的文件数据已经读取到了这个文件页page对应的内存，不太准确
+        /*注意，有文件缓存页page，并不代表page内存已经有了对应文件的实际数据*/
 		page = find_get_page(mapping, index);
 		if (!page) {
+            //index对应的文件页没有缓存page，开始同步预读
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
+            //再次查找index索引的文件页是否有文件缓存page
 			page = find_get_page(mapping, index);
 			if (unlikely(page == NULL))
 				goto no_cached_page;
 		}
+        //如果当前page设置"PG_Readahead"预读标记位，说明当前预读窗口正好命中本次读取的文件数据
 		if (PageReadahead(page)) {
+            //这里再次发起异步文件预读
 			page_cache_async_readahead(mapping,
 					ra, filp, page,
 					index, last_index - index);
 		}
+        //判断page缓存页内存是否是最新文件数据，因为文件可能会被其他进程写入新的数据
 		if (!PageUptodate(page)) {
 			if (inode->i_blkbits == PAGE_CACHE_SHIFT ||
 					!mapping->a_ops->is_partially_uptodate)
 				goto page_not_up_to_date;
-			if (!trylock_page(page))
+            
+			if (!trylock_page(page))//尝试lock page，对page上PG_locked标记
 				goto page_not_up_to_date;
 			/* Did it get truncated before we got the lock? */
 			if (!page->mapping)
@@ -1155,7 +1173,8 @@ find_page:
 				goto page_not_up_to_date_locked;
 			unlock_page(page);
 		}
-page_ok:
+        
+page_ok://page对应的文件数据已经读取到了page指向的内存
 		/*
 		 * i_size must be checked after we know the page is Uptodate.
 		 *
@@ -1181,6 +1200,7 @@ page_ok:
 				goto out;
 			}
 		}
+        //nr是本次循环读取到的文件字节数，等于4K减去在本次缓存页page的偏移
 		nr = nr - offset;
 
 		/* If users can be writing to this page using arbitrary
@@ -1208,20 +1228,28 @@ page_ok:
 		 * "pos" here (the actor routine has to update the user buffer
 		 * pointers and the remaining count).
 		 */
-		ret = actor(desc, page, offset, nr);
+		//把本次读取到size大小的文件数据复制到read系统调用传入的用户空间buf，desc->count减去读取的字节数size
+		ret = actor(desc, page, offset, nr);//file_read_actor，返回值就是读取字节数.
+        //offset原本是在index对应文件页page的偏移，加上本次循环实际读取字节数
 		offset += ret;
+        //offset超过一个page大小，令index为当前缓存页page的一个page索引，下轮读取这个新的page对应的文件数据
 		index += offset >> PAGE_CACHE_SHIFT;
+        //offset被赋值为在新的内存页page里的偏移
 		offset &= ~PAGE_CACHE_MASK;
+        //prev_offset保存offset
 		prev_offset = offset;
 
 		page_cache_release(page);
+        //本轮需读取文件数据还没读完，继续循环
 		if (ret == nr && desc->count)
 			continue;
+
+        //到这里应该是文件数据读取完了,结束本次文件读取
 		goto out;
 
 page_not_up_to_date:
 		/* Get exclusive access to the page ... */
-		error = lock_page_killable(page);
+		error = lock_page_killable(page);//等待page缓存页对应的文件页数据读取到page指向内存
 		if (unlikely(error))
 			goto readpage_error;
 
@@ -1234,12 +1262,12 @@ page_not_up_to_date_locked:
 		}
 
 		/* Did somebody else fill it already? */
-		if (PageUptodate(page)) {
-			unlock_page(page);
-			goto page_ok;
+		if (PageUptodate(page)) {//page缓存页对应的文件页数据已经读取到page指向内存
+			unlock_page(page);//解锁PG_locked
+			goto page_ok;//page缓存页数据读取ok了，跳到page_ok
 		}
 
-readpage:
+readpage://这个标签是从磁盘文件读取index索引文件页数据到新分配的page对应的内存
 		/*
 		 * A previous I/O error may have been due to temporary
 		 * failures, eg. multipath errors.
@@ -1247,7 +1275,7 @@ readpage:
 		 */
 		ClearPageError(page);
 		/* Start the actual read. The read will unlock the page. */
-		error = mapping->a_ops->readpage(filp, page);
+		error = mapping->a_ops->readpage(filp, page);//调用文件系统具体读取文件数据接口，如ext4_readpage()
 
 		if (unlikely(error)) {
 			if (error == AOP_TRUNCATED_PAGE) {
@@ -1256,11 +1284,12 @@ readpage:
 			}
 			goto readpage_error;
 		}
-
+        //对应文件页数据还没读取到page页对应内存
 		if (!PageUptodate(page)) {
-			error = lock_page_killable(page);
+			error = lock_page_killable(page);//休眠等待文件页数据读取到page对应内存
 			if (unlikely(error))
 				goto readpage_error;
+            //唤醒后依然文件页数据没有读取到page对应内存，说明应该发生IO错误
 			if (!PageUptodate(page)) {
 				if (page->mapping == NULL) {
 					/*
@@ -1273,12 +1302,12 @@ readpage:
 				unlock_page(page);
 				shrink_readahead_size_eio(filp, ra);
 				error = -EIO;
-				goto readpage_error;
+				goto readpage_error;//IO错误
 			}
 			unlock_page(page);
 		}
 
-		goto page_ok;
+		goto page_ok;//page缓存页数据读取ok了，跳到page_ok
 
 readpage_error:
 		/* UHHUH! A synchronous read error occurred. Report it */
@@ -1291,11 +1320,12 @@ no_cached_page:
 		 * Ok, it wasn't cached, so we need to create a new
 		 * page..
 		 */
-		page = page_cache_alloc_cold(mapping);
+		page = page_cache_alloc_cold(mapping);//分配一个文件页
 		if (!page) {
 			desc->error = -ENOMEM;
 			goto out;
 		}
+        //把新分配的page按照索引index添加到radix tree
 		error = add_to_page_cache_lru(page, mapping,
 						index, GFP_KERNEL);
 		if (error) {
@@ -1305,6 +1335,7 @@ no_cached_page:
 			desc->error = error;
 			goto out;
 		}
+        //再次尝试从磁盘文件读取文件页数据到新分配的page对应的内存
 		goto readpage;
 	}
 
@@ -1316,7 +1347,7 @@ out:
 	*ppos = ((loff_t)index << PAGE_CACHE_SHIFT) + offset;
 	file_accessed(filp);
 }
-
+//把本次读取到size大小的文件数据复制到read系统调用传入的用户空间buf，desc->count减去读取的字节数size
 int file_read_actor(read_descriptor_t *desc, struct page *page,
 			unsigned long offset, unsigned long size)
 {
@@ -1340,7 +1371,9 @@ int file_read_actor(read_descriptor_t *desc, struct page *page,
 	}
 
 	/* Do it the slow way */
+    //page指向的内存
 	kaddr = kmap(page);
+    //把缓存页page里的文件数据赋值到read系统调用传入的用户空间buf
 	left = __copy_to_user(desc->arg.buf, kaddr + offset, size);
 	kunmap(page);
 
@@ -1349,9 +1382,10 @@ int file_read_actor(read_descriptor_t *desc, struct page *page,
 		desc->error = -EFAULT;
 	}
 success:
+    //desc->count减去本轮读取的文件字节数
 	desc->count = count - size;
 	desc->written += size;
-	desc->arg.buf += size;
+	desc->arg.buf += size;//desc->arg.buf向后偏移size
 	return size;
 }
 
@@ -1406,7 +1440,7 @@ EXPORT_SYMBOL(generic_segment_checks);
  */
 ssize_t
 generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
-		unsigned long nr_segs, loff_t pos)
+		unsigned long nr_segs, loff_t pos)//nr_segs:1
 {
 	struct file *filp = iocb->ki_filp;
 	ssize_t retval;
@@ -1420,7 +1454,7 @@ generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 		return retval;
 
 	/* coalesce the iovecs and go direct-to-BIO for O_DIRECT */
-	if (filp->f_flags & O_DIRECT) {
+	if (filp->f_flags & O_DIRECT) {//direct IO模式
 		loff_t size;
 		struct address_space *mapping;
 		struct inode *inode;
@@ -1477,7 +1511,7 @@ generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 
 		desc.written = 0;
 		desc.arg.buf = iov[seg].iov_base + offset;
-		desc.count = iov[seg].iov_len - offset;
+		desc.count = iov[seg].iov_len - offset;//剩余需要读取字节数
 		if (desc.count == 0)
 			continue;
 		desc.error = 0;
@@ -2588,7 +2622,7 @@ int try_to_release_page(struct page *page, gfp_t gfp_mask)
 	struct address_space * const mapping = page->mapping;
 
 	BUG_ON(!PageLocked(page));
-	if (PageWriteback(page))
+	if (PageWriteback(page))//如果page在脏页回写返回0
 		return 0;
 
 	if (mapping && mapping->a_ops->releasepage)

@@ -159,23 +159,25 @@ enum zone_stat_item {
 #define LRU_FILE 2
 
 enum lru_list {
-	LRU_INACTIVE_ANON = LRU_BASE,
-	LRU_ACTIVE_ANON = LRU_BASE + LRU_ACTIVE,
-	LRU_INACTIVE_FILE = LRU_BASE + LRU_FILE,
-	LRU_ACTIVE_FILE = LRU_BASE + LRU_FILE + LRU_ACTIVE,
-	LRU_UNEVICTABLE,//page_add_new_anon_rmap->add_page_to_unevictable_list
-	NR_LRU_LISTS
+	LRU_INACTIVE_ANON = LRU_BASE,//0
+	LRU_ACTIVE_ANON = LRU_BASE + LRU_ACTIVE,// 1
+	LRU_INACTIVE_FILE = LRU_BASE + LRU_FILE,// 2
+	LRU_ACTIVE_FILE = LRU_BASE + LRU_FILE + LRU_ACTIVE,// 3
+	LRU_UNEVICTABLE,// 4 page_add_new_anon_rmap->add_page_to_unevictable_list
+	NR_LRU_LISTS// 5
 };
 
 #define for_each_lru(lru) for (lru = 0; lru < NR_LRU_LISTS; lru++)
 
 #define for_each_evictable_lru(lru) for (lru = 0; lru <= LRU_ACTIVE_FILE; lru++)
 
+//代表文件页返回1，代表匿名页page返回0
+//根据lru的编号判断是否代表文件lru链表，包含inacive和active lru链表
 static inline int is_file_lru(enum lru_list lru)
 {
 	return (lru == LRU_INACTIVE_FILE || lru == LRU_ACTIVE_FILE);
 }
-
+//根据lru的编号判断是否代表active lru链表，包含文件页和匿名页lru链表
 static inline int is_active_lru(enum lru_list lru)
 {
 	return (lru == LRU_ACTIVE_ANON || lru == LRU_ACTIVE_FILE);
@@ -195,13 +197,17 @@ struct zone_reclaim_stat {
 	 *
 	 * The anon LRU stats live in [0], file LRU stats in [1]
 	 */
-	unsigned long		recent_rotated[2];
-	unsigned long		recent_scanned[2];
+	//recent_rotated[0]表示anon page，recent_rotated[1]表示file page，recent_scanned同理
+	unsigned long		recent_rotated[2];//隔离出来的page，被访问过，shrink_active_list,shrink_inactive_list,putback_inactive_pages
+	unsigned long		recent_scanned[2];//隔离的page数，见shrink_active_list,shrink_inactive_list,putback_inactive_pages
 };
-
+//active/inactive file/anon属性lru链表总代表。是stuct zone的成员。每次内存回收都是取出zone的lruvec，这个lruvec
+//包含了该zone的所有active、inactive和file、anon page，这些page分布在lruvec的成员struct list_head lists[NR_LRU_LISTS]链表。
+//获取时取出memory cgroup的lruvec，此时的lruvec只是包含了该memory cgroup的active、inactive和file、anon page。
 struct lruvec {
+    //5类lru链表:LRU_INACTIVE_ANON、LRU_ACTIVE_ANON、LRU_INACTIVE_FILE、LRU_ACTIVE_FILE、LRU_UNEVICTABLE
 	struct list_head lists[NR_LRU_LISTS];
-	struct zone_reclaim_stat reclaim_stat;
+	struct zone_reclaim_stat reclaim_stat;//update_page_reclaim_stat()中增加
 #ifdef CONFIG_MEMCG
 	struct zone *zone;
 #endif
@@ -213,11 +219,11 @@ struct lruvec {
 #define LRU_ALL	     ((1 << NR_LRU_LISTS) - 1)
 
 /* Isolate clean file */
-#define ISOLATE_CLEAN		((__force isolate_mode_t)0x1)
+#define ISOLATE_CLEAN		((__force isolate_mode_t)0x1)//只隔离干净页
 /* Isolate unmapped file */
-#define ISOLATE_UNMAPPED	((__force isolate_mode_t)0x2)
+#define ISOLATE_UNMAPPED	((__force isolate_mode_t)0x2)//只隔离没有映射过的page
 /* Isolate for asynchronous migration */
-#define ISOLATE_ASYNC_MIGRATE	((__force isolate_mode_t)0x4)
+#define ISOLATE_ASYNC_MIGRATE	((__force isolate_mode_t)0x4)//异步迁移的page
 /* Isolate unevictable pages */
 #define ISOLATE_UNEVICTABLE	((__force isolate_mode_t)0x8)
 
@@ -387,12 +393,12 @@ struct zone {
 	int			compact_order_failed;
 #endif
 
-	ZONE_PADDING(_pad1_)
+	ZONE_PADDING(_pad1_)////struct lruvec
 
 	/* Fields commonly accessed by the page reclaim scanner */
 	spinlock_t		lru_lock;
-	struct lruvec		lruvec;
-
+	struct lruvec		lruvec;//各个属性的lru链表
+    //扫描的page数，shrink_active_list()
 	unsigned long		pages_scanned;	   /* since last reclaim */
 	unsigned long		flags;		   /* zone flags, see below */
 

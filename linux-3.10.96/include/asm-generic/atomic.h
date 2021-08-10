@@ -125,23 +125,28 @@ static inline void atomic_dec(atomic_t *v)
 {
 	atomic_sub_return(1, v);
 }
-
+//v减1并返回减1后的值
 #define atomic_dec_return(v)		atomic_sub_return(1, (v))
 #define atomic_inc_return(v)		atomic_add_return(1, (v))
 
 #define atomic_sub_and_test(i, v)	(atomic_sub_return((i), (v)) == 0)
+//v减1后如果等于0返回true
 #define atomic_dec_and_test(v)		(atomic_dec_return(v) == 0)
 #define atomic_inc_and_test(v)		(atomic_inc_return(v) == 0)
 
 #define atomic_xchg(ptr, v)		(xchg(&(ptr)->counter, (v)))
+//将new赋值于(v)->counter，并返回老的(v)->counter值
 #define atomic_cmpxchg(v, old, new)	(cmpxchg(&((v)->counter), (old), (new)))
-
-static inline int __atomic_add_unless(atomic_t *v, int a, int u)
+//将新的值u保存到v，并返回v的最后一次累加a前的老值。如果v的老值是0则直接返回0，while不成立
+static inline int __atomic_add_unless(atomic_t *v, int a, int u)//a:1  u:0
 {
   int c, old;
   c = atomic_read(v);
+  //atomic_cmpxchg()将c+a保存到v，并返回v的老值，直到v的值与u相等退出while
   while (c != u && (old = atomic_cmpxchg(v, c, c + a)) != c)
     c = old;
+
+  //返回值是v执行atomic_cmpxchg()累加前老的值
   return c;
 }
 

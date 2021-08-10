@@ -111,7 +111,7 @@ int read_cache_pages(struct address_space *mapping, struct list_head *pages,
 EXPORT_SYMBOL(read_cache_pages);
 
 static int read_pages(struct address_space *mapping, struct file *filp,
-		struct list_head *pages, unsigned nr_pages)
+		struct list_head *pages, unsigned nr_pages)//遇到的page在struct list_head *pages这个链表，nr_pages是预读page数
 {
 	struct blk_plug plug;
 	unsigned page_idx;
@@ -120,24 +120,27 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 	blk_start_plug(&plug);
 
 	if (mapping->a_ops->readpages) {
-		ret = mapping->a_ops->readpages(filp, mapping, pages, nr_pages);
+		ret = mapping->a_ops->readpages(filp, mapping, pages, nr_pages);//具体文件系统read函数如 ext4_readpages
 		/* Clean up the remaining pages */
 		put_pages_list(pages);
 		goto out;
 	}
 
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
+        //每次都从struct list_head *pages链表头取出page，依次取完这个链表上的所有page
 		struct page *page = list_to_page(pages);
-		list_del(&page->lru);//从page的lru链表剔除
+		list_del(&page->lru);//把page从struct list_head *pages这个临时链表剔除
+		//再把page添加到文件页高速缓存mapping的radix tree和lru链表
 		if (!add_to_page_cache_lru(page, mapping,
 					page->index, GFP_KERNEL)) {
-			mapping->a_ops->readpage(filp, page);//blkdev_readpage
+			mapping->a_ops->readpage(filp, page);//具体文件系统read函数如 ext4_readpage
 		}
 		page_cache_release(page);
 	}
 	ret = 0;
 
 out:
+    //真正启动文件系统block层磁盘数据传输
 	blk_finish_plug(&plug);
 
 	return ret;
@@ -172,25 +175,30 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	/*
 	 * Preallocate as many pages as we will need.
 	 */
+	//nr_to_read是上层传入的预读的总文件页数,offset是预读的起始文件页
 	for (page_idx = 0; page_idx < nr_to_read; page_idx++) {
+        //page_offset预读的文件页索引
 		pgoff_t page_offset = offset + page_idx;
 
 		if (page_offset > end_index)
 			break;
 
 		rcu_read_lock();
+        //按照page_offset这个page索引，在文件页高速缓存radix tree中查找是否是否已经有了该page
 		page = radix_tree_lookup(&mapping->page_tree, page_offset);
 		rcu_read_unlock();
 		if (page)
 			continue;
-
+        //radix tree找不到页索引是page_offset的page，则分配一个新的page
 		page = page_cache_alloc_readahead(mapping);
 		if (!page)
 			break;
-		page->index = page_offset;
-		list_add(&page->lru, &page_pool);
+		page->index = page_offset;//新分配的page的页索引
+		list_add(&page->lru, &page_pool);//把预读的page添加到page_pool链表
+		
+        //
 		if (page_idx == nr_to_read - lookahead_size)
-			SetPageReadahead(page);
+			SetPageReadahead(page);//设置page的"PageReadahead"标记
 		ret++;
 	}
 
@@ -199,6 +207,7 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	 * uptodate then the caller will launch readpage again, and
 	 * will then handle the error.
 	 */
+	//ret表示预读的page数
 	if (ret)
 		read_pages(mapping, filp, &page_pool, ret);
 	BUG_ON(!list_empty(&page_pool));
@@ -269,7 +278,8 @@ unsigned long ra_submit(struct file_ra_state *ra,
  * for 128k (32 page) max ra
  * 1-8 page = 32k initial, > 8 page = 128k initial
  */
-static unsigned long get_init_ra_size(unsigned long size, unsigned long max)
+//其实就是根据最大预读page数max调整预读page数newsize
+static unsigned long get_init_ra_size(unsigned long size, unsigned long max)//size:16  newsize:64
 {
 	unsigned long newsize = roundup_pow_of_two(size);
 
@@ -294,7 +304,7 @@ static unsigned long get_next_ra_size(struct file_ra_state *ra,
 	unsigned long newsize;
 
 	if (cur < max / 16)
-		newsize = 4 * cur;
+		newsize = 4 * cur;//ra->size的4倍
 	else
 		newsize = 2 * cur;
 
@@ -396,10 +406,16 @@ static int try_context_readahead(struct address_space *mapping,
 /*
  * A minimal readahead algorithm for trivial sequential/random reads.
  */
+
+/*
+hit_readahead_marker:同步false,异步true
+offset:do_generic_file_read函数传入的本次要读取的文件页缓存page索引
+req_size:do_generic_file_read函数传入的last_index - index，就是还剩余多少个文件页缓存还没读取
+*/
 static unsigned long
 ondemand_readahead(struct address_space *mapping,
 		   struct file_ra_state *ra, struct file *filp,
-		   bool hit_readahead_marker, pgoff_t offset,
+		   bool hit_readahead_marker, pgoff_t offset,//
 		   unsigned long req_size)
 {
 	unsigned long max = max_sane_readahead(ra->ra_pages);
@@ -407,7 +423,7 @@ ondemand_readahead(struct address_space *mapping,
 	/*
 	 * start of file
 	 */
-	if (!offset)
+	if (!offset)//第一次读文件，从文件头开始预读
 		goto initial_readahead;
 
 	/*
@@ -441,7 +457,7 @@ ondemand_readahead(struct address_space *mapping,
 		ra->start = start;
 		ra->size = start - offset;	/* old async_size */
 		ra->size += req_size;
-		ra->size = get_next_ra_size(ra, max);
+		ra->size = get_next_ra_size(ra, max);//ra->size的4倍
 		ra->async_size = ra->size;
 		goto readit;
 	}
@@ -449,6 +465,7 @@ ondemand_readahead(struct address_space *mapping,
 	/*
 	 * oversize read
 	 */
+	//如果还没读取文件页个数大于单次最大预读page数
 	if (req_size > max)
 		goto initial_readahead;
 
@@ -471,9 +488,12 @@ ondemand_readahead(struct address_space *mapping,
 	 */
 	return __do_page_cache_readahead(mapping, filp, offset, req_size, 0);
 
-initial_readahead:
+initial_readahead://第一次读写文件在这里
+    //开始遇到页面索引
 	ra->start = offset;
-	ra->size = get_init_ra_size(req_size, max);
+    //根据最大预读page数max调整预读总page数赋于ra->size
+	ra->size = get_init_ra_size(req_size, max);//req_size的4倍
+    //如果预读总page数大于本次预读数则ra->async_size被赋值二者差值，否则被赋值ra->size
 	ra->async_size = ra->size > req_size ? ra->size - req_size : ra->size;
 
 readit:

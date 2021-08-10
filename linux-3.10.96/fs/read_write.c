@@ -332,6 +332,7 @@ int rw_verify_area(int read_write, struct file *file, loff_t *ppos, size_t count
 
 ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
+    //对iov赋值用户空间buf和读取字节数
 	struct iovec iov = { .iov_base = buf, .iov_len = len };
 	struct kiocb kiocb;
 	ssize_t ret;
@@ -340,7 +341,7 @@ ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
 	kiocb.ki_pos = *ppos;
 	kiocb.ki_left = len;
 	kiocb.ki_nbytes = len;
-
+    //具体文件系统的read函数,ext4文件系统的是generic_file_aio_read，xfs的是xfs_file_aio_read->generic_file_aio_read
 	ret = filp->f_op->aio_read(&kiocb, &iov, 1, kiocb.ki_pos);
 	if (-EIOCBQUEUED == ret)
 		ret = wait_on_sync_kiocb(&kiocb);
@@ -365,7 +366,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (ret >= 0) {
 		count = ret;
 		if (file->f_op->read)
-			ret = file->f_op->read(file, buf, count, pos);
+			ret = file->f_op->read(file, buf, count, pos);//经常也是do_sync_read
 		else
 			ret = do_sync_read(file, buf, count, pos);
 		if (ret > 0) {

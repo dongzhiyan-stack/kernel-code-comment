@@ -279,6 +279,7 @@ static inline int get_freepage_migratetype(struct page *page)
 /*
  * Drop a ref, return true if the refcount fell to zero (the page has no users)
  */
+//page引用计数减1，如果page引用计数减1后是0返回1
 static inline int put_page_testzero(struct page *page)
 {
 	VM_BUG_ON(atomic_read(&page->_count) == 0);
@@ -289,6 +290,7 @@ static inline int put_page_testzero(struct page *page)
  * Try to grab a ref unless the page has a refcount of zero, return false if
  * that is the case.
  */
+//如果page引用计数非0直接返回true，if成立。否则，page引用计数一直加1直到为0，返回false
 static inline int get_page_unless_zero(struct page *page)
 {
 	return atomic_inc_not_zero(&page->_count);
@@ -721,7 +723,7 @@ static inline void page_nid_reset_last(struct page *page)
 {
 }
 #endif
-
+//返回page所在zone
 static inline struct zone *page_zone(const struct page *page)
 {
     //NODE_DATA(page_to_nid(page))是获取contig_page_data[]，就是第几个node

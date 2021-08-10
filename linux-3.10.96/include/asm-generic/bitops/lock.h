@@ -9,6 +9,7 @@
  * This operation is atomic and provides acquire barrier semantics.
  * It can be used to implement bit locks.
  */
+//addr的nr这个bit位置1，并返回老的值
 #define test_and_set_bit_lock(nr, addr)	test_and_set_bit(nr, addr)
 
 /**

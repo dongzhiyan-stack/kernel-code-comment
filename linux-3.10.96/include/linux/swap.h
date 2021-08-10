@@ -252,11 +252,12 @@ extern void add_page_to_unevictable_list(struct page *page);
  * lru_cache_add: add a page to the page lists
  * @page: the page to add
  */
+//把page添加到当前cpu的lru缓存page链表，LRU_INACTIVE_ANON属性的
 static inline void lru_cache_add_anon(struct page *page)
 {
 	__lru_cache_add(page, LRU_INACTIVE_ANON);
 }
-
+//把page添加到当前cpu的lru缓存page链表，LRU_INACTIVE_FILE属性的
 static inline void lru_cache_add_file(struct page *page)
 {
 	__lru_cache_add(page, LRU_INACTIVE_FILE);

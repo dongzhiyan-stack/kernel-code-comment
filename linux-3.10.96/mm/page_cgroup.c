@@ -13,7 +13,7 @@
 
 static unsigned long total_usage;
 
-#if !defined(CONFIG_SPARSEMEM)
+#if !defined(CONFIG_SPARSEMEM)//no
 
 
 void __meminit pgdat_page_cgroup_init(struct pglist_data *pgdat)
@@ -87,8 +87,8 @@ fail:
 }
 
 #else /* CONFIG_FLAT_NODE_MEM_MAP */
-
-struct page_cgroup *lookup_page_cgroup(struct page *page)
+//根据page页帧找到page_cgroup，page_cgroup的成员mem_cgroup就是page所属mem cgroup
+struct page_cgroup *lookup_page_cgroup(struct page *page)//yes
 {
 	unsigned long pfn = page_to_pfn(page);
 	struct mem_section *section = __pfn_to_section(pfn);

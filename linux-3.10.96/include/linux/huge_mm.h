@@ -153,6 +153,7 @@ static inline void vma_adjust_trans_huge(struct vm_area_struct *vma,
 		return;
 	__vma_adjust_trans_huge(vma, start, end, adjust_next);
 }
+//如果不是huge page直接返回1
 static inline int hpage_nr_pages(struct page *page)
 {
 	if (unlikely(PageTransHuge(page)))

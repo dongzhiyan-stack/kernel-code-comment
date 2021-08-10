@@ -851,6 +851,7 @@ static int page_referenced_file(struct page *page,
  * Quick test_and_clear_referenced for all mappings to a page,
  * returns the number of ptes which referenced the page.
  */
+//检查page是否被访问过，被访问过则映射了此内存page的进程的页表项pte有Accessed标记，返回值是pte有Accessed标记的pte个数
 int page_referenced(struct page *page,
 		    int is_locked,
 		    struct mem_cgroup *memcg,

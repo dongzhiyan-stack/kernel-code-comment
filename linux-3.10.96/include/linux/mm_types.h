@@ -38,6 +38,23 @@ struct address_space;
  * allows the use of atomic double word operations on the flags/mapping
  * and lru list pointers also.
  */
+
+/*
+1 __pagevec_lru_add_fn() 设置page LRU和ACTIVE标记
+1 end_page_writeback()->rotate_reclaimable_page() 清除page回收状态并把page添加到inactive链表尾
+2 deactivate_page()->lru_deactivate_fn() 清除Active和Referenced标记，把page添加到lru缓存或者lru inactive 链表
+2 activate_page->__activate_page() 给page添加active，把page添加到lru缓存或者lru active 链表、
+3 lru_cache_add_lru() page添加到lru缓存或者链表，设置page 状态
+3 add_page_to_unevictable_list() 把page添加到 unevictable lru list
+
+
+1 move_active_pages_to_lru 增加lru链表page数
+2 搜索__mod_zone_page_state关键字，就知道active/inactive file/anon page数的增加与减少
+
+1 ext4_writepage->ext4_bio_write_page->set_page_writeback->test_set_page_writeback() 设置page"writeback"标记
+3 putback_inactive_pages 设置与清除page标记 SetPageLRU(page) __ClearPageLRU(page)  __ClearPageActive(page)
+
+*/
 struct page {
 	/* First double word block */
 	unsigned long flags;		/* Atomic flags, some possibly
@@ -134,6 +151,11 @@ struct page {
 					};
 					int units;	/* SLOB */
 				};
+                /*page引用计数
+                  1get_page()加1，put_page()减1;
+                  2__isolate_lru_page->get_page_unless_zero()成功隔离page则加1
+                  3 move_active_pages_to_lru page引用计数减1
+                 */
 				atomic_t _count;		/* Usage count, see below. */
 			};
 		};
@@ -141,6 +163,7 @@ struct page {
 
 	/* Third double word block */
 	union {
+	    //page添加到各种链表都是靠这个lru成员
 		struct list_head lru;	/* Pageout list, eg. active_list
 					 * protected by zone->lru_lock !
 					 */

@@ -38,9 +38,9 @@
 /* How many pages do we try to swap or page in/out together? */
 int page_cluster;
 
-static DEFINE_PER_CPU(struct pagevec[NR_LRU_LISTS], lru_add_pvecs);
-static DEFINE_PER_CPU(struct pagevec, lru_rotate_pvecs);
-static DEFINE_PER_CPU(struct pagevec, lru_deactivate_pvecs);
+static DEFINE_PER_CPU(struct pagevec[NR_LRU_LISTS], lru_add_pvecs);//新的page先添加到lru_add_pvecs，见__lru_cache_add()
+static DEFINE_PER_CPU(struct pagevec, lru_rotate_pvecs);//该链表page添加到inactive lru链表尾，见rotate_reclaimable_page()
+static DEFINE_PER_CPU(struct pagevec, lru_deactivate_pvecs);//见deactivate_page(),该链表page添加到inactive lru链表头
 
 /*
  * This path almost never happens for VM activity - pages are normally
@@ -347,34 +347,37 @@ static void pagevec_lru_move_fn(struct pagevec *pvec,
 	struct zone *zone = NULL;
 	struct lruvec *lruvec;
 	unsigned long flags = 0;
-
+    //遍历lru缓存上的PAGEVEC_SIZE个page
 	for (i = 0; i < pagevec_count(pvec); i++) {
+        //依次取出lru缓存保存的page
 		struct page *page = pvec->pages[i];
 		struct zone *pagezone = page_zone(page);
 
+        //上一个page和这个page不属于同一个zone，则要把上个zone的lock锁解除再把当前page所在zone加锁
 		if (pagezone != zone) {
 			if (zone)
 				spin_unlock_irqrestore(&zone->lru_lock, flags);
 			zone = pagezone;
 			spin_lock_irqsave(&zone->lru_lock, flags);
 		}
-
+        //根据page返回lruvec
 		lruvec = mem_cgroup_page_lruvec(page, zone);
-		(*move_fn)(page, lruvec, arg);
+        //设置page属性，把page添加到对应属性的lru链表(active/inactive file/anon)，mem cgroup中增加page个数统计，增加lru链表中page计数
+		(*move_fn)(page, lruvec, arg);//__pagevec_lru_add_fn/__activate_page/pagevec_move_tail_fn
 	}
 	if (zone)
 		spin_unlock_irqrestore(&zone->lru_lock, flags);
 	release_pages(pvec->pages, pvec->nr, pvec->cold);
 	pagevec_reinit(pvec);
 }
-
+//把page添加到file/anon inactive lru链表尾部，此时page对应的数据已经刷回磁盘，把page放到inactive lru链表尾部，下次内存回收局释放掉该page
 static void pagevec_move_tail_fn(struct page *page, struct lruvec *lruvec,
 				 void *arg)
 {
 	int *pgmoved = arg;
-
+    //page有lru属性，page没有active属性，page没有不可回收属性
 	if (PageLRU(page) && !PageActive(page) && !PageUnevictable(page)) {
-		enum lru_list lru = page_lru_base_type(page);
+		enum lru_list lru = page_lru_base_type(page);//返回LRU_INACTIVE_ANON或LRU_INACTIVE_FILE，都是inactive 
 		list_move_tail(&page->lru, &lruvec->lists[lru]);
 		(*pgmoved)++;
 	}
@@ -387,7 +390,7 @@ static void pagevec_move_tail_fn(struct page *page, struct lruvec *lruvec,
 static void pagevec_move_tail(struct pagevec *pvec)
 {
 	int pgmoved = 0;
-
+    //把page添加到file/anon inactive lru链表尾部.page对应的数据已经刷回磁盘，把page放到inactive lru链表尾部，下次内存回收局释放掉该page
 	pagevec_lru_move_fn(pvec, pagevec_move_tail_fn, &pgmoved);
 	__count_vm_events(PGROTATED, pgmoved);
 }
@@ -397,16 +400,22 @@ static void pagevec_move_tail(struct pagevec *pvec)
  * reclaim.  If it still appears to be reclaimable, move it to the tail of the
  * inactive list.
  */
+//内存回收完成后，被标记"reclaimable"的page的数据刷入了磁盘，执行rotate_reclaimable_page->end_page_writeback把该page移动到
+//inactive lru链表链表，下轮内存回收就会释放该page到伙伴系统
 void rotate_reclaimable_page(struct page *page)
 {
+    //page没有上PG_locked，page不是脏页，page被标记acive标记，page没有设置不可回收标记，page在lru链表
 	if (!PageLocked(page) && !PageDirty(page) && !PageActive(page) &&
 	    !PageUnevictable(page) && PageLRU(page)) {
 		struct pagevec *pvec;
 		unsigned long flags;
-
+        //page->count ++
 		page_cache_get(page);
 		local_irq_save(flags);
+        //取出本地cpu lru缓存pagevec
 		pvec = &__get_cpu_var(lru_rotate_pvecs);
+        
+        //先尝试把page添加到本地cpu lru缓存pagevec，如果添加后lru缓存pagevec满了，则把lru缓存pagevec中的所有page移动到inactive lru链表
 		if (!pagevec_add(pvec, page))
 			pagevec_move_tail(pvec);
 		local_irq_restore(flags);
@@ -422,17 +431,24 @@ static void update_page_reclaim_stat(struct lruvec *lruvec,
 	if (rotated)
 		reclaim_stat->recent_rotated[file]++;
 }
-
+//把page从inactive lru链表剔除，添加到active lru链表
 static void __activate_page(struct page *page, struct lruvec *lruvec,
 			    void *arg)
 {
+    //if成立条件:page在lru链表，page没有Active属性，page可回收
 	if (PageLRU(page) && !PageActive(page) && !PageUnevictable(page)) {
+        //page是文件缓存才返回1
 		int file = page_is_file_cache(page);
+        //返回base lru:文件缓存返回LRU_INACTIVE_FILE ，否则LRU_INACTIVE_ANON
 		int lru = page_lru_base_type(page);
-
+        //page从原inactive lru链表剔除，page肯定在inactive lru链表，因为page此时没有Active属性
 		del_page_from_lru_list(page, lruvec, lru);
+
+        //设置page的Active属性
 		SetPageActive(page);
+        //lru += LRU_ACTIVE后，lru指向active lru链表
 		lru += LRU_ACTIVE;
+        //page添加到active lru链表
 		add_page_to_lru_list(page, lruvec, lru);
 
 		__count_vm_event(PGACTIVATE);
@@ -440,7 +456,7 @@ static void __activate_page(struct page *page, struct lruvec *lruvec,
 	}
 }
 
-#ifdef CONFIG_SMP
+#ifdef CONFIG_SMP//yes
 static DEFINE_PER_CPU(struct pagevec, activate_page_pvecs);
 
 static void activate_page_drain(int cpu)
@@ -453,12 +469,16 @@ static void activate_page_drain(int cpu)
 
 void activate_page(struct page *page)
 {
+    //if成立条件:page在链入链表，page没有Active标记,page可回收
 	if (PageLRU(page) && !PageActive(page) && !PageUnevictable(page)) {
+        //取出activate_page_pvecs 本次cpu lru缓存pagevec
 		struct pagevec *pvec = &get_cpu_var(activate_page_pvecs);
-
+        //page->count加1
 		page_cache_get(page);
+        //先尝试把page添加到本地cpu lru缓存pagevec，如果添加后lru缓存pagevec满了，则把lru缓存中的所有page移动到active lru链表
 		if (!pagevec_add(pvec, page))
-			pagevec_lru_move_fn(pvec, __activate_page, NULL);
+			pagevec_lru_move_fn(pvec, __activate_page, NULL);//把lru缓存中的所有page移动到active lru链表
+        
 		put_cpu_var(activate_page_pvecs);
 	}
 }
@@ -505,13 +525,18 @@ EXPORT_SYMBOL(mark_page_accessed);
  * pages that are on the LRU, linear writes in subpage chunks would see
  * every PAGEVEC_SIZE page activated, which is unexpected.
  */
+//尝试把page添加到lru_add_pvecs这个lru缓存，lru缓存满了则把lru缓存的所有page添加到lru链表
 void __lru_cache_add(struct page *page, enum lru_list lru)
 {
+    //得到当前cpu的lru_add_pvecs链表上lru编号指定属性的lru缓存pagevec
 	struct pagevec *pvec = &get_cpu_var(lru_add_pvecs)[lru];
 
 	page_cache_get(page);
+    //如果当前cpu lru缓存已经存放了14个page，满了，先把这14个page移动到lru链表，清空，下边再把新的page添加到lru缓存
 	if (!pagevec_space(pvec))
 		__pagevec_lru_add(pvec, lru);
+    
+    //把page添加到lru缓存链表，其实只是把page指针保存到pvec->pages[]数组而已，pvec->pages[pvec->nr++] = page
 	pagevec_add(pvec, page);
 	put_cpu_var(lru_add_pvecs);
 }
@@ -533,6 +558,7 @@ void lru_cache_add_lru(struct page *page, enum lru_list lru)
 	}
 
 	VM_BUG_ON(PageLRU(page) || PageActive(page) || PageUnevictable(page));
+    //尝试把page添加到lru缓存，lru缓存满了则把lru缓存的所有page添加到lru链表
 	__lru_cache_add(page, lru);
 }
 
@@ -552,6 +578,7 @@ void add_page_to_unevictable_list(struct page *page)
 	struct lruvec *lruvec;
 
 	spin_lock_irq(&zone->lru_lock);
+    //取出lruvec
 	lruvec = mem_cgroup_page_lruvec(page, zone);
 	SetPageUnevictable(page);
 	SetPageLRU(page);
@@ -580,43 +607,50 @@ void add_page_to_unevictable_list(struct page *page)
  * be write it out by flusher threads as this is much more effective
  * than the single-page writeout from reclaim.
  */
+//把page从active lru链表剔除，添加到inactive lru链表头部
 static void lru_deactivate_fn(struct page *page, struct lruvec *lruvec,
 			      void *arg)
 {
 	int lru, file;
 	bool active;
 
-	if (!PageLRU(page))
+	if (!PageLRU(page))//page不在lru链表
 		return;
 
-	if (PageUnevictable(page))
+	if (PageUnevictable(page))//page不可回收
 		return;
 
 	/* Some processes are using the page */
-	if (page_mapped(page))
+	if (page_mapped(page))//page没有文件映射
 		return;
-
+    //page是否active，应该是active
 	active = PageActive(page);
+    //如果page是文件缓存返回1
 	file = page_is_file_cache(page);
+    //如果page是文件缓存返回LRU_INACTIVE_FILE，否则返回LRU_INACTIVE_ANON
 	lru = page_lru_base_type(page);
 
+    //把page从active链表剔除，lru代表inactive链表，lru + active代表active lru链表
 	del_page_from_lru_list(page, lruvec, lru + active);
 	ClearPageActive(page);
 	ClearPageReferenced(page);
+    //把page添加到inactive lru链表，应该是链表头部，不是链表尾部
 	add_page_to_lru_list(page, lruvec, lru);
-
+    //如果page是正在回写或者脏页状态
 	if (PageWriteback(page) || PageDirty(page)) {
 		/*
 		 * PG_reclaim could be raced with end_page_writeback
 		 * It can make readahead confusing.  But race window
 		 * is _really_ small and  it's non-critical problem.
 		 */
+		//设置page Reclaim状态
 		SetPageReclaim(page);
 	} else {
 		/*
 		 * The page's writeback ends up during pagevec
 		 * We moves tha page into tail of inactive.
 		 */
+		//把page添加到inactive lru链表尾部，这个page是干净的，下次内存回收就释放它
 		list_move_tail(&page->lru, &lruvec->lists[lru]);
 		__count_vm_event(PGROTATED);
 	}
@@ -631,31 +665,36 @@ static void lru_deactivate_fn(struct page *page, struct lruvec *lruvec,
  * Either "cpu" is the current CPU, and preemption has already been
  * disabled; or "cpu" is being hot-unplugged, and is already dead.
  */
+//把cpu本地所有lru缓存上的page移动到 active/inactive lru链表
 void lru_add_drain_cpu(int cpu)
 {
+    //取出lru_add_pvecs这个pagevec
 	struct pagevec *pvecs = per_cpu(lru_add_pvecs, cpu);
 	struct pagevec *pvec;
 	int lru;
 
+    //取出lru_add_pvecs相关的所有pagevec，把里边的page添加到active 
 	for_each_lru(lru) {
 		pvec = &pvecs[lru - LRU_BASE];
-		if (pagevec_count(pvec))
-			__pagevec_lru_add(pvec, lru);
+		if (pagevec_count(pvec))//该pagevec有page
+			__pagevec_lru_add(pvec, lru);//把page添加到对应属性的lru链表
 	}
-
+    
+    //取出lru_rotate_pvecs这个pagevec
 	pvec = &per_cpu(lru_rotate_pvecs, cpu);
-	if (pagevec_count(pvec)) {
+	if (pagevec_count(pvec)) {//该pagevec有page
 		unsigned long flags;
 
 		/* No harm done if a racing interrupt already did this */
 		local_irq_save(flags);
-		pagevec_move_tail(pvec);
+		pagevec_move_tail(pvec);//把page添加到inactive lru链表尾部
 		local_irq_restore(flags);
 	}
-
+    
+    //取出lru_deactivate_pvecs这个pagevec
 	pvec = &per_cpu(lru_deactivate_pvecs, cpu);
-	if (pagevec_count(pvec))
-		pagevec_lru_move_fn(pvec, lru_deactivate_fn, NULL);
+	if (pagevec_count(pvec))//该pagevec有page
+		pagevec_lru_move_fn(pvec, lru_deactivate_fn, NULL);//把page添加到inactive lru链表头部
 
 	activate_page_drain(cpu);
 }
@@ -674,18 +713,21 @@ void deactivate_page(struct page *page)
 	 * In a workload with many unevictable page such as mprotect, unevictable
 	 * page deactivation for accelerating reclaim is pointless.
 	 */
-	if (PageUnevictable(page))
+	if (PageUnevictable(page))//page不可回收
 		return;
 
 	if (likely(get_page_unless_zero(page))) {
+        //取出cpu本地lru_deactivate_pvecs lru缓存pagevec
 		struct pagevec *pvec = &get_cpu_var(lru_deactivate_pvecs);
-
+        
+        //先尝试把page添加到本地cpu lru缓存pagevec，如果添加后lru缓存pagevec满了，则把lru缓存pagevec中的所有page移动到inactive lru链表
 		if (!pagevec_add(pvec, page))
 			pagevec_lru_move_fn(pvec, lru_deactivate_fn, NULL);
+        
 		put_cpu_var(lru_deactivate_pvecs);
 	}
 }
-
+//把cpu本地所有lru缓存上的page移动到 active/inactive lru链表
 void lru_add_drain(void)
 {
 	lru_add_drain_cpu(get_cpu());
@@ -841,21 +883,22 @@ void lru_add_page_tail(struct page *page, struct page *page_tail,
 		update_page_reclaim_stat(lruvec, file, active);
 }
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
-
+//设置page的lru和active属性，把page添加到lru编号指定属性的lru链表，mem cgroup中增加page个数统计，增加lru编号指定属性的page计数
 static void __pagevec_lru_add_fn(struct page *page, struct lruvec *lruvec,
-				 void *arg)
+				 void *arg)//arg就是lru的active、inactive、file、anon属性编号
 {
 	enum lru_list lru = (enum lru_list)arg;
-	int file = is_file_lru(lru);
-	int active = is_active_lru(lru);
+	int file = is_file_lru(lru);//文件页?匿名页?
+	int active = is_active_lru(lru);//active?inactive?
 
 	VM_BUG_ON(PageActive(page));
 	VM_BUG_ON(PageUnevictable(page));
 	VM_BUG_ON(PageLRU(page));
-
+    //设置page的lru属性
 	SetPageLRU(page);
-	if (active)
+	if (active)//设置page的active属性
 		SetPageActive(page);
+    //把page添加到lru编号指定属性的lru链表，mem cgroup中增加page个数统计，增加lru编号指定属性的page计数
 	add_page_to_lru_list(page, lruvec, lru);
 	update_page_reclaim_stat(lruvec, file, active);
 }
@@ -867,8 +910,8 @@ static void __pagevec_lru_add_fn(struct page *page, struct lruvec *lruvec,
 void __pagevec_lru_add(struct pagevec *pvec, enum lru_list lru)
 {
 	VM_BUG_ON(is_unevictable_lru(lru));
-
-	pagevec_lru_move_fn(pvec, __pagevec_lru_add_fn, (void *)lru);
+    //pvec这个lru缓存中PAGEVEC_SIZE个page添加到对应lru链表，增加page统计计数，
+	pagevec_lru_move_fn(pvec, __pagevec_lru_add_fn, (void *)lru);//lru是active anon/file
 }
 EXPORT_SYMBOL(__pagevec_lru_add);
 

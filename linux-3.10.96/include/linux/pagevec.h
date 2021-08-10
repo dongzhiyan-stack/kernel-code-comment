@@ -14,9 +14,13 @@
 struct page;
 struct address_space;
 
+//代表本地cpu lru缓存，page添加active/inactive file/anon lru链表时，总是先添加到本地cpu lru缓存，添加够PAGEVEC_SIZE个
+//再把这些page按照它的active/inactive file/anon属性添加到内存zone的active/inactive file/anon lru链表
+//pagevec的类型有lru_add_pvecs lru_rotate_pvecs lru_deactivate_pvecs，见mm/swap.c
 struct pagevec {
-	unsigned long nr;
+	unsigned long nr;//表示当前lru缓存保存了多少个page，见pagevec_add
 	unsigned long cold;
+    //lru缓存中的page存放在该pages[]数组
 	struct page *pages[PAGEVEC_SIZE];
 };
 
@@ -43,7 +47,7 @@ static inline unsigned pagevec_count(struct pagevec *pvec)
 {
 	return pvec->nr;
 }
-
+//pvec->nr表示当前lru缓存保存了多少个page，PAGEVEC_SIZE - pvec->nr表示lru缓存中还可以保存多少个page
 static inline unsigned pagevec_space(struct pagevec *pvec)
 {
 	return PAGEVEC_SIZE - pvec->nr;

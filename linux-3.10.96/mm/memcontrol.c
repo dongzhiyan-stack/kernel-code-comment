@@ -170,8 +170,12 @@ struct mem_cgroup_reclaim_iter {
  * per-zone information in memory controller.
  */
 //在 struct mem_cgroup_per_node结构中，alloc_mem_cgroup_per_zone_info 中分配初始化
+
+//每个内存node一个mem_cgroup_per_node结构，内存node里每个内存zone一个mem_cgroup_per_zone结构，每个mem_cgroup_per_zone一个lruvec结构
+//mem_cgroup_per_zone里的struct lruvec lruvec就是该mem cgroup的active/inactive lru链表，保存该mem cgroup分配的所有page
 struct mem_cgroup_per_zone {
 	struct lruvec		lruvec;
+    //mem cgroup，每个lru属性的page个数统计，见mem_cgroup_update_lru_size()
 	unsigned long		lru_size[NR_LRU_LISTS];
 
 	struct mem_cgroup_reclaim_iter reclaim_iter[DEF_PRIORITY + 1];
@@ -180,17 +184,20 @@ struct mem_cgroup_per_zone {
 	unsigned long long	usage_in_excess;/* Set to the value by which */
 						/* the soft limit is exceeded*/
 	bool			on_tree;
-    //指向对应的struct mem_cgroup
+    //指向对应的mem cgroup结构struct mem_cgroup
 	struct mem_cgroup	*memcg;		/* Back pointer, we cannot */
 						/* use container_of	   */
 };
 //mem_cgroup_css_alloc->alloc_mem_cgroup_per_zone_info 中分配
+
+//每个内存node一个mem_cgroup_per_node结构，内存node里每个内存zone一个mem_cgroup_per_zone结构，每个mem_cgroup_per_zone一个lruvec结构
+//mem_cgroup_per_zone里的struct lruvec lruvec就是该mem cgroup的active/inactive lru链表，保存该mem cgroup分配的所有page
 struct mem_cgroup_per_node {
 	struct mem_cgroup_per_zone zoneinfo[MAX_NR_ZONES];//内存节点的各个zone
 };
 
 struct mem_cgroup_lru_info {
-    //指向node的struct mem_cgroup_per_node，alloc_mem_cgroup_per_zone_info中赋值
+    //指向node的struct mem_cgroup_per_node，alloc_mem_cgroup_per_zone_info中赋值。代表mem cgroup的内存node
 	struct mem_cgroup_per_node *nodeinfo[0];
 };
 
@@ -1177,6 +1184,7 @@ skip_node:
  * divide up the memcgs in the hierarchy among all concurrent
  * reclaimers operating on the same zone and priority.
  */
+//根据root和prev遍历之下所有的mem cgroup并返回其mem_cgroup
 struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 				   struct mem_cgroup *prev,
 				   struct mem_cgroup_reclaim_cookie *reclaim)
@@ -1188,7 +1196,7 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 	if (mem_cgroup_disabled())
 		return NULL;
 
-	if (!root)
+	if (!root)//root_mem_cgroup管理的是每个zone所有的page吧
 		root = root_mem_cgroup;
 
 	if (prev && !reclaim)
@@ -1334,7 +1342,7 @@ struct lruvec *mem_cgroup_zone_lruvec(struct zone *zone,
 	struct mem_cgroup_per_zone *mz;
 	struct lruvec *lruvec;
 
-	if (mem_cgroup_disabled()) {
+	if (mem_cgroup_disabled()) {//不成立
 		lruvec = &zone->lruvec;
 		goto out;
 	}
@@ -1371,6 +1379,7 @@ out:
  * @page: the page
  * @zone: zone of the page
  */
+//返回page对应的mem cgroup所在内存zone的lruvec，该lruvec就是该mem cgroup的lru链表，保存了该mem cgroup的文件页、匿名页page
 struct lruvec *mem_cgroup_page_lruvec(struct page *page, struct zone *zone)
 {
 	struct mem_cgroup_per_zone *mz;
@@ -1378,12 +1387,14 @@ struct lruvec *mem_cgroup_page_lruvec(struct page *page, struct zone *zone)
 	struct page_cgroup *pc;
 	struct lruvec *lruvec;
 
+    //如果mem cgorup没有配置直接返回zone->lruvec即可
 	if (mem_cgroup_disabled()) {
 		lruvec = &zone->lruvec;
 		goto out;
 	}
-
+    //根据page页帧找到page_cgroup，page_cgroup的成员mem_cgroup就是page所属mem cgroup
 	pc = lookup_page_cgroup(page);
+    //返回所属mem cgroup
 	memcg = pc->mem_cgroup;
 
 	/*
@@ -1397,8 +1408,11 @@ struct lruvec *mem_cgroup_page_lruvec(struct page *page, struct zone *zone)
 	 */
 	if (!PageLRU(page) && !PageCgroupUsed(pc) && memcg != root_mem_cgroup)
 		pc->mem_cgroup = memcg = root_mem_cgroup;
-
+    
+    //返回mem cgroup的所在内存zone的结构mem_cgroup_per_zone，里边是mem cgroup对应的lruvec
 	mz = page_cgroup_zoneinfo(memcg, page);
+    
+    //返回page所在mem cgorup的内存节点对觢ruvec
 	lruvec = &mz->lruvec;
 out:
 	/*
@@ -1430,7 +1444,9 @@ void mem_cgroup_update_lru_size(struct lruvec *lruvec, enum lru_list lru,
 		return;
 
 	mz = container_of(lruvec, struct mem_cgroup_per_zone, lruvec);
+    //mz->lru_size是mem cgroup中统计lru各个属性page数的数组，变量lru是lru链表编号
 	lru_size = mz->lru_size + lru;
+    //mem cgroup增加nr_pages个page，nr_pages也可能是负数
 	*lru_size += nr_pages;
 	VM_BUG_ON((long)(*lru_size) < 0);
 }
@@ -1510,7 +1526,8 @@ int mem_cgroup_inactive_anon_is_low(struct lruvec *lruvec)
 		inactive_ratio = int_sqrt(10 * gb);
 	else
 		inactive_ratio = 1;
-
+    
+    //inactive page太少返回1
 	return inactive * inactive_ratio < active;
 }
 
@@ -3973,7 +3990,8 @@ static int __mem_cgroup_try_charge_swapin(struct mm_struct *mm,
 	struct mem_cgroup *memcg;
 	struct page_cgroup *pc;
 	int ret;
-
+    
+    //根据page页帧找到page_cgroup，page_cgroup的成员mem_cgroup就是page所属mem cgroup
 	pc = lookup_page_cgroup(page);
 	/*
 	 * Every swap fault against a single page tries to charge the
@@ -6114,11 +6132,12 @@ static int alloc_mem_cgroup_per_zone_info(struct mem_cgroup *memcg, int node)
 	 */
 	if (!node_state(node, N_NORMAL_MEMORY))
 		tmp = -1;
-    //应该是为内存node分配struct mem_cgroup_per_node结构
+    //应该是为内存node分配struct mem_cgroup_per_node结构。每个内存内存node一个mem_cgroup_per_node
 	pn = kzalloc_node(sizeof(*pn), GFP_KERNEL, tmp);
 	if (!pn)
 		return 1;
-    //依次初始化该node中各个zone对应的struct mem_cgroup_per_zone
+    
+    //依次初始化该node中各个zone对应的struct mem_cgroup_per_zone。内存node里每个内存zone一个mem_cgroup_per_zone
 	for (zone = 0; zone < MAX_NR_ZONES; zone++) {
         //即struct mem_cgroup_per_zone
 		mz = &pn->zoneinfo[zone];
@@ -6128,6 +6147,7 @@ static int alloc_mem_cgroup_per_zone_info(struct mem_cgroup *memcg, int node)
 		mz->on_tree = false;
 		mz->memcg = memcg;
 	}
+    //保存mem cgroup的内存node
 	memcg->info.nodeinfo[node] = pn;
 	return 0;
 }

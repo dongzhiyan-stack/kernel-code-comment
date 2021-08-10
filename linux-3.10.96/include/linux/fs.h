@@ -331,11 +331,11 @@ static inline size_t iov_iter_count(struct iov_iter *i)
  * mode.
  */
 typedef struct {
-	size_t written;
-	size_t count;
+	size_t written;//file_read_actor()已经读取到的文件数据量
+	size_t count;//初值是读取的文件字节数
 	union {
-		char __user *buf;
-		void *data;
+		char __user *buf;//指向用户空间buf，generic_file_aio_read
+		void *data;//剩余需要读取字节数，generic_file_aio_read
 	} arg;
 	int error;
 } read_descriptor_t;
@@ -404,7 +404,7 @@ int pagecache_write_end(struct file *, struct address_space *mapping,
 				struct page *page, void *fsdata);
 
 struct backing_dev_info;
-struct address_space {
+struct address_space {//文件页高速缓存核心结构
 	struct inode		*host;		/* owner: inode, block_device */
     //page cache的page添加到page_tree，见add_to_page_cache_locked()和replace_page_cache_page()，回刷脏数据时find_get_pages_tag()再取出
 	struct radix_tree_root	page_tree;	/* radix tree of all pages *///链接所有page，根root
@@ -589,7 +589,7 @@ struct inode {
       主次设备号，相等的
       */
 	dev_t			i_rdev;
-    //看着相识块设备总大小，就是该flash分区总大小
+    //看着像是块设备总大小，就是该flash分区总大小
 	loff_t			i_size;
 	struct timespec		i_atime;//文件时间都是更新到这几个inode的time里
 	struct timespec		i_mtime;
@@ -795,11 +795,14 @@ struct fown_struct {
  * Track a single file's readahead state
  */
 struct file_ra_state {
+    //预读开始的页面
 	pgoff_t start;			/* where readahead started */
+    //预读总page数
 	unsigned int size;		/* # of readahead pages */
+    //异步预读的页面数，表示当前窗口的页面数
 	unsigned int async_size;	/* do asynchronous readahead when
 					   there are only # of pages ahead */
-
+    //本次最大预读page数
 	unsigned int ra_pages;		/* Maximum readahead window */
 	unsigned int mmap_miss;		/* Cache miss stat for mmap accesses */
 	loff_t prev_pos;		/* Cache last read() position */
@@ -838,10 +841,10 @@ struct file {
 	atomic_long_t		f_count;
 	unsigned int 		f_flags;
 	fmode_t			f_mode;
-	loff_t			f_pos;
+	loff_t			f_pos;//文件指针
 	struct fown_struct	f_owner;
 	const struct cred	*f_cred;
-	struct file_ra_state	f_ra;
+	struct file_ra_state	f_ra;//表示预读窗口
 
 	u64			f_version;
 #ifdef CONFIG_SECURITY
