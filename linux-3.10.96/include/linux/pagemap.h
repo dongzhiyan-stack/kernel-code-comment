@@ -361,7 +361,7 @@ static inline void lock_page(struct page *page)
 static inline int lock_page_killable(struct page *page)
 {
 	might_sleep();
-	if (!trylock_page(page))
+	if (!trylock_page(page))//获取page锁失败则执行__lock_page_killable()休眠，等被唤醒后会获取PG_locked锁
 		return __lock_page_killable(page);
 	return 0;
 }
@@ -555,7 +555,7 @@ static inline int add_to_page_cache(struct page *page,
 
 	__set_page_locked(page);
 	error = add_to_page_cache_locked(page, mapping, offset, gfp_mask);
-	if (unlikely(error))
+	if (unlikely(error))//出错才成立
 		__clear_page_locked(page);
 	return error;
 }

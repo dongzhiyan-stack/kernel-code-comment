@@ -41,12 +41,14 @@ struct address_space;
 
 /*
 1 __pagevec_lru_add_fn() 设置page LRU和ACTIVE标记
-1 end_page_writeback()->rotate_reclaimable_page() 清除page回收状态并把page添加到inactive链表尾
-2 deactivate_page()->lru_deactivate_fn() 清除Active和Referenced标记，把page添加到lru缓存或者lru inactive 链表
-2 activate_page->__activate_page() 给page添加active，把page添加到lru缓存或者lru active 链表、
-3 lru_cache_add_lru() page添加到lru缓存或者链表，设置page 状态
-3 add_page_to_unevictable_list() 把page添加到 unevictable lru list
-
+2 end_page_writeback()->rotate_reclaimable_page() 清除page回收状态并把page添加到inactive链表尾
+3 deactivate_page()->lru_deactivate_fn() 清除Active和Referenced标记，把page添加到lru缓存或者lru inactive 链表
+4 activate_page->__activate_page() 给page添加active，把page添加到lru缓存或者lru active 链表、
+5 lru_cache_add_lru() page添加到lru缓存或者链表，设置page 状态
+6 add_page_to_unevictable_list() 把page添加到 unevictable lru list
+7 add_to_page_cache_lru->lru_cache_add_file,文件页page添加到LRU_INACTIVE_FILE链表
+8 shmem_replace_page->lru_cache_add_anon，匿名页page添加到LRU_INACTIVE_ANON链表
+9 putback_inactive_pages()函数将源自inactive lru链表上的page移动到active lru链表
 
 1 move_active_pages_to_lru 增加lru链表page数
 2 搜索__mod_zone_page_state关键字，就知道active/inactive file/anon page数的增加与减少
@@ -54,6 +56,22 @@ struct address_space;
 1 ext4_writepage->ext4_bio_write_page->set_page_writeback->test_set_page_writeback() 设置page"writeback"标记
 3 putback_inactive_pages 设置与清除page标记 SetPageLRU(page) __ClearPageLRU(page)  __ClearPageActive(page)
 
+1 __block_page_mkwrite()写文件数据前，执行lock_page(page)锁page，然后触发脏页回写
+2 write_cache_pages()回写脏页数据前，执行lock_page(page)锁page
+3 do_read_cache_page()
+4 find_lock_page()获取一个page前，执行lock_page(page)锁page
+5 do_read_cache_page()读取一个page前，执行lock_page(page)锁page
+6 mpage_end_io() page数据传输完成，设置page的"PageUptodate"状态状态，执行unlock_page(page)解锁page，执行end_page_writeback(page)
+
+2 SetPageUptodate()设置page"PageUptodate"状态
+
+1 add_to_page_cache->add_to_page_cache_locked里把page添加到radix tree，执行page_cache_get()令文件引用计数page->__count加1
+  add_to_page_cache->__set_page_locked/__clear_page_locked 加锁/释放锁 PG_locked
+
+  看do_generic_file_read()函数的注释，在读取文件数据到page页面内存时，就会对page加PG_locked锁，等数据全部读到page页面内存才会
+  unlock_page(page)解锁
+
+  只要执行__lru_cache_add()，就文件引用计数page->__count加1
 */
 struct page {
 	/* First double word block */

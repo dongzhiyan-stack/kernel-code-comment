@@ -82,6 +82,7 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
  *
  * selects the appropriately-sized optimised version depending on sizeof(n)
  */
+//就是求n的阶数，ilog2[2]=1,ilog2[4]=1,ilog2[8]=3，麻烦情况的n不足2的整数倍
 #define ilog2(n)				\
 (						\
 	__builtin_constant_p(n) ? (		\

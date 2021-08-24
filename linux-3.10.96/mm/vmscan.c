@@ -70,7 +70,7 @@ struct scan_control {
 	/* This context's GFP mask */
 	gfp_t gfp_mask;
 
-	int may_writepage;//为0，不能将匿名页和文件页lru链表上的脏页回写到磁盘，受分配内存flag __GFP_IO和__GFP_FS影响
+	int may_writepage;//为0则不能将匿名页、文件页lru链表上的脏页回写到磁盘，受分配内存flag __GFP_IO和__GFP_FS影响
 
 	/* Can mapped pages be reclaimed? */
 	int may_unmap;//为0，只能对没有进程映射的页进行内存回收
@@ -904,7 +904,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 				if (PageWriteback(page))
 					goto keep;//跟goto keep_locked处理差不多
 
-                //page是脏页标记，应该不太可能吧??????????
+                //page有脏页标记，应该不太可能吧??????????
 				if (PageDirty(page))
 					goto keep;//跟goto keep_locked处理差不多
 
@@ -1360,7 +1360,7 @@ putback_inactive_pages(struct lruvec *lruvec, struct list_head *page_list)
 		SetPageLRU(page);
         //如果page被标记了Active，则返回的lru代表active lru链表编号，否则返回的lru是inactive lru链表编号
 		lru = page_lru(page);
-        //把page添加到active/inactive  lru链表
+        //把page添加到active/inactive  lru链表头
 		add_page_to_lru_list(page, lruvec, lru);
 
         //如果page有Active标记
@@ -1473,8 +1473,10 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 			__count_zone_vm_events(PGSTEAL_DIRECT, zone,
 					       nr_reclaimed);
 	}
+    /*不知道inactive lru链表上的page就是这样被移动到active lru链表*/
     
-    //把page_list中的page按照条件移动到对应的lru链表，上边的shrink_page_list()函数会对page_list链表上部分page标记Active(比如page最近被访问了)
+    //把page_list中残留的page按照条件移动到对应的lru链表，上边的shrink_page_list()函数会对page_list链表上部分page标记Active
+    //(比如page最近被访问了)，则这种page就会再移动到active lru链表。
 	putback_inactive_pages(lruvec, &page_list);
 
     //更新file/anon NR_ISOLATED_ANON的page个数
@@ -1482,7 +1484,7 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 
 	spin_unlock_irq(&zone->lru_lock);
 
-    //这里把page_list链表还残留的page释放到伙伴系统，1表示释放到冷页，这里的page->_count应用计数应该是0
+    //这里把page_list链表还残留的page释放到伙伴系统，1表示释放到冷页，这里的page->_count引用计数应该是0
 	free_hot_cold_page_list(&page_list, 1);
 
 	/*
@@ -1624,9 +1626,9 @@ static void shrink_active_list(unsigned long nr_to_scan,
 	lru_add_drain();
 
 	if (!sc->may_unmap)
-		isolate_mode |= ISOLATE_UNMAPPED;
+		isolate_mode |= ISOLATE_UNMAPPED;//只隔离没有映射过的page
 	if (!sc->may_writepage)
-		isolate_mode |= ISOLATE_CLEAN;
+		isolate_mode |= ISOLATE_CLEAN;//只隔离干净页，不隔离脏页或者正在脏页回写的页
 
 	spin_lock_irq(&zone->lru_lock);
 
@@ -1832,7 +1834,7 @@ enum scan_balance {
  * nr[0] = anon inactive pages to scan; nr[1] = anon active pages to scan
  * nr[2] = file inactive pages to scan; nr[3] = file active pages to scan
  */
-//获取要扫描的anon/file lru链表上的page数，受很多参数影响
+//获取要扫描的anon/file lru链表上的page数，受内存回收sc->priority参数影响
 static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 			   unsigned long *nr)
 {
@@ -2014,7 +2016,7 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	unsigned long nr_to_reclaim = sc->nr_to_reclaim;
 	struct blk_plug plug;
 
-    //获取本次要扫描的active/inactive anon/file  page数于nr[]数组
+    //计算本次要扫描的active/inactive anon/file lru链表的page数保存到nr[]数组
 	get_scan_count(lruvec, sc, nr);
 
 	blk_start_plug(&plug);
@@ -2164,11 +2166,15 @@ static void shrink_zone(struct zone *zone, struct scan_control *sc)
 		nr_reclaimed = sc->nr_reclaimed;
         //初始扫描page数
 		nr_scanned = sc->nr_scanned;
-        //获取最上层的mem cgroup，如果是针对cgroup的内存回收，root是sc->target_mem_cgroup，即本次内存回收指定的cgroup。
-        //如果不是则root在mem_cgroup_iter函数会被赋值为root_mem_cgroup
+        //返回最上层的mem cgroup，如果是针对memory cgroup的内存回收，root是sc->target_mem_cgroup，即本次内存回收指定的cgroup。
+        //如果不是则root则是root_mem_cgroup，这个root_mem_cgroup管理的是整个内存zone的所有内存页
+        /*//非memory cgroup内存回收，返回的应该是root_mem_cgroup，管理的是内存zone所有的page。否则返回的memcg管理的page只是该memory cgroup在该内存zone分配的内存page*/
 		memcg = mem_cgroup_iter(root, NULL, &reclaim);
 		do {
 			struct lruvec *lruvec;
+            /*非memory cgroup内存回收，返回的lruvec管理的是内存zone所有的page，是吗，搞不清楚??????????。是否有多个lruvec?
+            否则返回的lruvec管理的page只是该memory cgroup在该内存zone分配的内存page?????????是否有多个lruvec?*/
+            
             //如果针对mem cgroup的内存回收，返回的是该mem cgroup的lruvec。如果是全局内存回收，返回的应该是整个zone的lruvec???????
             //似乎不对，即便是全局内存回收，返回的也是mem cgroup的lruvec，只不过是依次循环返回属于该zone的所有mem cgroup的lruvec?????
             //针对mem cgroup的内存回收，这里只是返回属于这个mem cgroup的lruvec，可能有多个，有子mem cgrop

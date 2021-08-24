@@ -525,18 +525,18 @@ EXPORT_SYMBOL(mark_page_accessed);
  * pages that are on the LRU, linear writes in subpage chunks would see
  * every PAGEVEC_SIZE page activated, which is unexpected.
  */
-//尝试把page添加到lru_add_pvecs这个lru缓存，lru缓存满了则把lru缓存的所有page添加到lru链表
+//尝试把page添加到lru_add_pvecs[lru]这个lru缓存，lru缓存满了则把lru缓存的page添加到lru链表
 void __lru_cache_add(struct page *page, enum lru_list lru)
 {
     //得到当前cpu的lru_add_pvecs链表上lru编号指定属性的lru缓存pagevec
 	struct pagevec *pvec = &get_cpu_var(lru_add_pvecs)[lru];
 
 	page_cache_get(page);
-    //如果当前cpu lru缓存已经存放了14个page，满了，先把这14个page移动到lru链表，清空，下边再把新的page添加到lru缓存
+    //如果当前cpu lru缓存已经存放了14个page，满了，先把这14个page移动到lru链表，下边再把这个新的page添加到lru缓存
 	if (!pagevec_space(pvec))
 		__pagevec_lru_add(pvec, lru);
     
-    //把page添加到lru缓存链表，其实只是把page指针保存到pvec->pages[]数组而已，pvec->pages[pvec->nr++] = page
+    //把page添加到lru缓存链表，其实只是把page指针保存到pvec->pages[]数组而已，即pvec->pages[pvec->nr++] = page
 	pagevec_add(pvec, page);
 	put_cpu_var(lru_add_pvecs);
 }
@@ -910,8 +910,8 @@ static void __pagevec_lru_add_fn(struct page *page, struct lruvec *lruvec,
 void __pagevec_lru_add(struct pagevec *pvec, enum lru_list lru)
 {
 	VM_BUG_ON(is_unevictable_lru(lru));
-    //pvec这个lru缓存中PAGEVEC_SIZE个page添加到对应lru链表，增加page统计计数，
-	pagevec_lru_move_fn(pvec, __pagevec_lru_add_fn, (void *)lru);//lru是active anon/file
+    //把pvec这个lru缓存中14个page添加到对应lru链表，增加page统计计数，
+	pagevec_lru_move_fn(pvec, __pagevec_lru_add_fn, (void *)lru);
 }
 EXPORT_SYMBOL(__pagevec_lru_add);
 

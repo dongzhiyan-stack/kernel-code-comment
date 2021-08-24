@@ -1394,8 +1394,8 @@ struct task_struct {
 	 * when (nr_dirtied >= nr_dirtied_pause), it's time to call
 	 * balance_dirty_pages() for some dirty throttling pause
 	 */
-	int nr_dirtied;
-	int nr_dirtied_pause;
+	int nr_dirtied;//进程脏页数
+	int nr_dirtied_pause;//当进程脏页数超过nr_dirtied_pause要强制回写脏页
 	unsigned long dirty_paused_when; /* start of a write-and-pause period */
 
 #ifdef CONFIG_LATENCYTOP

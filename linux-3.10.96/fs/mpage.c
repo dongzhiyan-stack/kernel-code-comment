@@ -41,6 +41,7 @@
  * status of that page is hard.  See end_buffer_async_read() for the details.
  * There is no point in duplicating all that complexity.
  */
+//blk_update_request->bio_endio->mpage_end_io
 static void mpage_end_io(struct bio *bio, int err)
 {
 	const int uptodate = test_bit(BIO_UPTODATE, &bio->bi_flags);
@@ -53,7 +54,7 @@ static void mpage_end_io(struct bio *bio, int err)
 			prefetchw(&bvec->bv_page->flags);
 		if (bio_data_dir(bio) == READ) {
 			if (uptodate) {
-				SetPageUptodate(page);
+				SetPageUptodate(page);//ÉèÖÃpageµÄ"PageUptodate"×´Ì¬
 			} else {
 				ClearPageUptodate(page);
 				SetPageError(page);

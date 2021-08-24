@@ -608,6 +608,7 @@ EXPORT_SYMBOL_GPL(add_page_wait_queue);
  * The mb is necessary to enforce ordering between the clear_bit and the read
  * of the waitqueue (to avoid SMP races with a parallel wait_on_page_locked()).
  */
+//清除page的PG_locked标记位，并唤醒在page PG_locked等待队列的休眠的进程
 void unlock_page(struct page *page)
 {
 	VM_BUG_ON(!PageLocked(page));
@@ -641,6 +642,7 @@ EXPORT_SYMBOL(end_page_writeback);
  * __lock_page - get a lock on the page, assuming we need to sleep to get it
  * @page: the page to lock
  */
+//在page的PG_locked等待队列休眠
 void __lock_page(struct page *page)
 {
 	DEFINE_WAIT_BIT(wait, &page->flags, PG_locked);
@@ -649,12 +651,12 @@ void __lock_page(struct page *page)
 							TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(__lock_page);
-
+//在page的PG_locked等待队列休眠，可被kill唤醒，等被唤醒后会获取PG_locked锁
 int __lock_page_killable(struct page *page)
 {
-	DEFINE_WAIT_BIT(wait, &page->flags, PG_locked);
+	DEFINE_WAIT_BIT(wait, &page->flags, PG_locked);//page的PG_locked等待队列
 
-	return __wait_on_bit_lock(page_waitqueue(page), &wait,
+	return __wait_on_bit_lock(page_waitqueue(page), &wait,//在page的PG_locked等待队列休眠
 					sleep_on_page_killable, TASK_KILLABLE);
 }
 EXPORT_SYMBOL_GPL(__lock_page_killable);
@@ -1112,19 +1114,18 @@ static void do_generic_file_read(struct file *filp, loff_t *ppos,//文件指针偏移
     //文件页高速缓存核心结构
 	struct address_space *mapping = filp->f_mapping;
 	struct inode *inode = mapping->host;
-	struct file_ra_state *ra = &filp->f_ra;//预读窗口
+	struct file_ra_state *ra = &filp->f_ra;//预读窗口结构体
 	pgoff_t index;
 	pgoff_t last_index;
 	pgoff_t prev_index;
 	unsigned long offset;      /* offset into pagecache page */
 	unsigned int prev_offset;
 	int error;
-    /*文件指针ppos指向保存文件数据的buf(用户空间的buf)，以4K,4K大小与文件页page构成文件映射*/
-    //以文件指针为本次读取的起始地址，计算出要读取的文件页page的索引index
+    //以ppos文件指针为本次读取的起始地址，计算出要读取起始文件页page的索引index
 	index = *ppos >> PAGE_CACHE_SHIFT;
 	prev_index = ra->prev_pos >> PAGE_CACHE_SHIFT;
 	prev_offset = ra->prev_pos & (PAGE_CACHE_SIZE-1);
-    //计算出本次要读取的文件结束地址文件页page索引，desc->count是本次读取的文件字节数
+    //计算出本次要读取的文件结束地址的文件页page索引，desc->count是本次读取的文件字节数
 	last_index = (*ppos + desc->count + PAGE_CACHE_SIZE-1) >> PAGE_CACHE_SHIFT;
     //文件指针ppos不足4K的余数，就是4K保存文件数据buf里的偏移,也就是在映射的page里的偏移
 	offset = *ppos & ~PAGE_CACHE_MASK;
@@ -1137,7 +1138,7 @@ static void do_generic_file_read(struct file *filp, loff_t *ppos,//文件指针偏移
 
 		cond_resched();
 find_page:
-        //本轮要读取index索引的文件页是否有文件缓存页page，准确说这个文件页对应的文件数据已经读取到了这个文件页page对应的内存，不太准确
+        //本轮要读取index索引的文件页是否有文件缓存页page，准确说这个文件页对应的4K文件数据已经读取到了这个文件页page对应的内存，不太准确
         /*注意，有文件缓存页page，并不代表page内存已经有了对应文件的实际数据*/
 		page = find_get_page(mapping, index);
 		if (!page) {
@@ -1150,27 +1151,46 @@ find_page:
 			if (unlikely(page == NULL))
 				goto no_cached_page;
 		}
-        //如果当前page设置"PG_Readahead"预读标记位，说明当前预读窗口正好命中本次读取的文件数据
+        
+        //如果当前page设置了"PG_Readahead"预读标记位，说明本次读取的文件页数据正好命中上一次的预读窗口的文件页
 		if (PageReadahead(page)) {
-            //这里再次发起异步文件预读
+            //这里发起异步文件预读
 			page_cache_async_readahead(mapping,
 					ra, filp, page,
 					index, last_index - index);
 		}
-        //判断page缓存页内存是否是最新文件数据，因为文件可能会被其他进程写入新的数据
+
+        
+      /*
+       判断page文件页数据是否更新到文件最新的。首先，该page文件页对应文件数据可能被其他进程写入新的数据，需要等待。在文件预读场景，
+       前边执行page_cache_sync_readahead/page_cache_async_readahead函数发起预读，执行page_cache_sync_readahead/page_cache_async_readahead
+       ->ondemand_readahead->__do_page_cache_readahead->read_pages->ext4_readpages->mpage_readpages->mpage_readpages
+       ->add_to_page_cache_lru->add_to_page_cache->__set_page_locked，发起文件预读，然后对该page加PG_locked锁。接着执行如下流程
+       1  从page_cache_sync_readahead/page_cache_async_readahead返回，因为这个文件预读是异步的，并不能保证已经把磁盘文件数据读取到
+          该文件页page对应的内存，所以接着执行到该if(!PageUptodate(page))，大概率因为还没把文件最新数据读取到page文件页内存，if成立。然后执行if (!trylock_page(page))
+       获取page锁失败，goto page_not_up_to_date。
+       2  goto page_not_up_to_date后，执行lock_page_killable(page)的在page的PG_locked等待队列休眠。
+       3  等把文件最新数据读取到该page文件页内存，产生中断执行回调函数blk_update_request->bio_endio->mpage_end_io，执行SetPageUptodate(page)设置page
+       的"PageUptodate"状态，还执行unlock_page(page)清理page的PG_locked锁，然后唤醒在page的PG_locked等待队列休眠的进程
+       4  好的，前边在page的PG_locked等待队列休眠的进程被唤醒了，则执行goto page_ok，跳到到这个分支，直接把page文件页数据复制到read
+       系统调用传入的buf即可。
+       5  最后，如果本次要求读取的数据全读完了，返回。否则继续大的for循环，继续尝试把下一个文件页page数据复制到read系统调用传入的buf。
+     */
 		if (!PageUptodate(page)) {
 			if (inode->i_blkbits == PAGE_CACHE_SHIFT ||
 					!mapping->a_ops->is_partially_uptodate)
 				goto page_not_up_to_date;
-            
+
+             //尝试对page加锁，如果page之前已经被其他进程加锁则加锁失败返回0，否则当前进程对page加锁成功并返回1
 			if (!trylock_page(page))//尝试lock page，对page上PG_locked标记
-				goto page_not_up_to_date;
+				goto page_not_up_to_date;//加锁失败则goto page_not_up_to_date;
 			/* Did it get truncated before we got the lock? */
 			if (!page->mapping)
 				goto page_not_up_to_date_locked;
 			if (!mapping->a_ops->is_partially_uptodate(page,
 								desc, offset))
 				goto page_not_up_to_date_locked;
+            
 			unlock_page(page);
 		}
         
@@ -1200,7 +1220,12 @@ page_ok://page对应的文件数据已经读取到了page指向的内存
 				goto out;
 			}
 		}
-        //nr是本次循环读取到的文件字节数，等于4K减去在本次缓存页page的偏移
+        
+        /*如果初次是从文件1K偏移地址读取，非4K对齐，则nr =4K-1K=3K，即第一轮循环读取的有效文件数据量最多只有3K。下边
+        offset += ret 和 offset &= ~PAGE_CACHE_MASK折腾后，offset始终是0。如此从第2轮读文件循环开始，offset始终是0，
+        nr始终是4K。用举例子能快速理解*/
+        
+        //即nr-offset=4k-offset，相减结果是本轮读取到有效文件数据量，小于等于4K
 		nr = nr - offset;
 
 		/* If users can be writing to this page using arbitrary
@@ -1216,6 +1241,8 @@ page_ok://page对应的文件数据已经读取到了page指向的内存
 		 */
 		if (prev_index != index || offset != prev_offset)
 			mark_page_accessed(page);
+
+        //prev_index保存最新一次读取的文件页page的索引
 		prev_index = index;
 
 		/*
@@ -1228,28 +1255,35 @@ page_ok://page对应的文件数据已经读取到了page指向的内存
 		 * "pos" here (the actor routine has to update the user buffer
 		 * pointers and the remaining count).
 		 */
-		//把本次读取到size大小的文件数据复制到read系统调用传入的用户空间buf，desc->count减去读取的字节数size
-		ret = actor(desc, page, offset, nr);//file_read_actor，返回值就是读取字节数.
-        //offset原本是在index对应文件页page的偏移，加上本次循环实际读取字节数
+		 
+		/*这里有个问题，就是最后一轮循环，读取到的文件页数据量是nr=4K，但是本次read读取的数据量只剩下3K，则实际只能向
+         read系统调用传入的用户空间buf赋值4K-3k=1K的数据量*/
+		//向read系统调用传入的用户空间buf赋值nr字节的数据量，本轮循环读取到的有效数据量<=4k，并且desc->count减去nr
+		ret = actor(desc, page, offset, nr);//file_read_actor，返回值是向用户空间buf复制的文件数据量，<=4k
+        //offset加上本次循环实际读取字节数
 		offset += ret;
-        //offset超过一个page大小，令index为当前缓存页page的一个page索引，下轮读取这个新的page对应的文件数据
+        //offset超过一个page大小，令index为当前缓存页page的一个page索引，下轮循环读取这个新的page对应的文件数据
 		index += offset >> PAGE_CACHE_SHIFT;
-        //offset被赋值为在新的内存页page里的偏移
+        //offset被赋值为在新的内存页page里的偏移，大概率
 		offset &= ~PAGE_CACHE_MASK;
-        //prev_offset保存offset
+        
+        //prev_offset保存最新一次读取的文件页里的偏移
 		prev_offset = offset;
 
 		page_cache_release(page);
-        //本轮需读取文件数据还没读完，继续循环
+        //需读取文件数据还没读完，继续循环
 		if (ret == nr && desc->count)
 			continue;
 
         //到这里应该是文件数据读取完了,结束本次文件读取
 		goto out;
 
-page_not_up_to_date:
+
+page_not_up_to_date://执行到这里，说明需要等待page文件页对应的文件数据被读取page文件页指向的内存
+
 		/* Get exclusive access to the page ... */
-		error = lock_page_killable(page);//等待page缓存页对应的文件页数据读取到page指向内存
+        //等待page文件页对应的文件数据被读取到page文件页指向的内存，然后被唤醒，会获取PG_locked锁
+		error = lock_page_killable(page);
 		if (unlikely(error))
 			goto readpage_error;
 
@@ -1262,12 +1296,19 @@ page_not_up_to_date_locked:
 		}
 
 		/* Did somebody else fill it already? */
-		if (PageUptodate(page)) {//page缓存页对应的文件页数据已经读取到page指向内存
-			unlock_page(page);//解锁PG_locked
+        //page缓存页对应的文件页数据已经读取到page指向内存则if成立
+		if (PageUptodate(page)) {
+		
+		    //执行到这里，应该page文件页数据是最新的，并且前边lock_page_killable()休眠等待page文件页数据更新，等
+		    //page文件页已经是最新的文件数据，产生中断执行回调函数blk_update_request->bio_endio->mpage_end_io，在mpage_end_io里
+		    //执行SetPageUptodate(page)和unlock_page(page)，然后执行这里，if (PageUptodate(page))成立，不用再执行unlock_page(page)
+		    //了吧，那里想错了?还是多执行一次unlock_page(page)没啥影响?不对，多执行一次unlock_page(page)肯定有不良影响，应该是那里
+		    //我没想到，想错了!!!!!!--------在前边lock_page_killable()函数返回后，已经获取了PG_locked锁，这里解锁正常
+			unlock_page(page);
 			goto page_ok;//page缓存页数据读取ok了，跳到page_ok
 		}
 
-readpage://这个标签是从磁盘文件读取index索引文件页数据到新分配的page对应的内存
+readpage://到这里说明上边的if (PageUptodate(page))不成立，即page文件页还不是最新的文件数据，有进程又修改它了，于是下边再尝试read
 		/*
 		 * A previous I/O error may have been due to temporary
 		 * failures, eg. multipath errors.
@@ -1275,6 +1316,7 @@ readpage://这个标签是从磁盘文件读取index索引文件页数据到新分配的page对应的内存
 		 */
 		ClearPageError(page);
 		/* Start the actual read. The read will unlock the page. */
+        //从磁盘文件读取index索引文件页数据到新分配的page对应的内存
 		error = mapping->a_ops->readpage(filp, page);//调用文件系统具体读取文件数据接口，如ext4_readpage()
 
 		if (unlikely(error)) {
@@ -1284,11 +1326,12 @@ readpage://这个标签是从磁盘文件读取index索引文件页数据到新分配的page对应的内存
 			}
 			goto readpage_error;
 		}
-        //对应文件页数据还没读取到page页对应内存
+        //如果对应文件页数据还没读取到page页对应内存则lock_page_killable(page)休眠
 		if (!PageUptodate(page)) {
-			error = lock_page_killable(page);//休眠等待文件页数据读取到page对应内存
+			error = lock_page_killable(page);//休眠等待文件页数据读取到page对应内存，唤醒后会获取PG_locked锁
 			if (unlikely(error))
 				goto readpage_error;
+            
             //唤醒后依然文件页数据没有读取到page对应内存，说明应该发生IO错误
 			if (!PageUptodate(page)) {
 				if (page->mapping == NULL) {
@@ -1304,7 +1347,8 @@ readpage://这个标签是从磁盘文件读取index索引文件页数据到新分配的page对应的内存
 				error = -EIO;
 				goto readpage_error;//IO错误
 			}
-			unlock_page(page);
+            
+			unlock_page(page);//解锁
 		}
 
 		goto page_ok;//page缓存页数据读取ok了，跳到page_ok
@@ -1340,10 +1384,12 @@ no_cached_page:
 	}
 
 out:
+    //prev_index保存最新一次读取的文件页page的索引，prev_offset保存最新一次读取的文件页里的偏移
 	ra->prev_pos = prev_index;
 	ra->prev_pos <<= PAGE_CACHE_SHIFT;
 	ra->prev_pos |= prev_offset;
 
+    //最新的文件指针
 	*ppos = ((loff_t)index << PAGE_CACHE_SHIFT) + offset;
 	file_accessed(filp);
 }
@@ -1354,6 +1400,8 @@ int file_read_actor(read_descriptor_t *desc, struct page *page,
 	char *kaddr;
 	unsigned long left, count = desc->count;
 
+    //count = desc->count表示还剩余多少字节数据没读取，如果还剩余1K，但是size表示本轮读取的文件页4K数据量，
+    //那size肯定要被赋值1K，只能向用户空间buf复制1K的数据量
 	if (size > count)
 		size = count;
 
@@ -2396,8 +2444,8 @@ again:
 		pagefault_enable();
 		flush_dcache_page(page);
 
-		mark_page_accessed(page);
-		status = a_ops->write_end(file, mapping, pos, bytes, copied,
+		mark_page_accessed(page);//这里标记page最近被访问
+		status = a_ops->write_end(file, mapping, pos, bytes, copied,//ext4_write_end   这里__set_page_dirty()page脏页
 						page, fsdata);
 		if (unlikely(status < 0))
 			break;
@@ -2422,7 +2470,7 @@ again:
 		pos += copied;
 		written += copied;
 
-		balance_dirty_pages_ratelimited(mapping);
+		balance_dirty_pages_ratelimited(mapping);//脏页平衡
 	} while (iov_iter_count(i));
 
 	return written ? written : status;

@@ -1128,7 +1128,7 @@ static int ext4_write_end(struct file *file,
 		if (ret < 0)
 			goto errout;
 		copied = ret;
-	} else
+	} else//这里，__set_page_dirty()page脏页
 		copied = block_write_end(file, mapping, pos,
 					 len, copied, page, fsdata);
 
@@ -2254,7 +2254,7 @@ static int ext4_writepage(struct page *page,
 		return __ext4_journalled_writepage(page, len);
 
 	memset(&io_submit, 0, sizeof(io_submit));
-	ret = ext4_bio_write_page(&io_submit, page, len, wbc);
+	ret = ext4_bio_write_page(&io_submit, page, len, wbc);//这里
 	ext4_io_submit(&io_submit);
 	return ret;
 }
@@ -3004,6 +3004,7 @@ static int ext4_readpage(struct file *file, struct page *page)
 	if (ext4_has_inline_data(inode))
 		ret = ext4_readpage_inline(inode, page);
 
+    //启动文件系统数据传输，调用到submit_bio，异步的，返回返回并不能保证文件数据已经读取到page
 	if (ret == -EAGAIN)
 		return mpage_readpage(page, ext4_get_block);
 

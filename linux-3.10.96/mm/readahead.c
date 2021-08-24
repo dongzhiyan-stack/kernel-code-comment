@@ -120,7 +120,8 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 	blk_start_plug(&plug);
 
 	if (mapping->a_ops->readpages) {
-		ret = mapping->a_ops->readpages(filp, mapping, pages, nr_pages);//具体文件系统read函数如 ext4_readpages
+        //具体文件系统read函数ext4_readpages，实际测试执行的是这个函数，一次读取nr_pages个page
+		ret = mapping->a_ops->readpages(filp, mapping, pages, nr_pages);
 		/* Clean up the remaining pages */
 		put_pages_list(pages);
 		goto out;
@@ -133,14 +134,15 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 		//再把page添加到文件页高速缓存mapping的radix tree和lru链表
 		if (!add_to_page_cache_lru(page, mapping,
 					page->index, GFP_KERNEL)) {
-			mapping->a_ops->readpage(filp, page);//具体文件系统read函数如 ext4_readpage
+		    //具体文件系统read函数,ext4的是ext4_readpage，执行完这个函数，文件数据并没有读取到page文件页
+			mapping->a_ops->readpage(filp, page);
 		}
 		page_cache_release(page);
 	}
 	ret = 0;
 
 out:
-    //真正启动文件系统block层磁盘数据传输
+    //真正启动文件系统block层磁盘数据传输，异步的，执行完该函数并不能保证文件数据已经传输到page文件页指向的内存
 	blk_finish_plug(&plug);
 
 	return ret;
@@ -196,9 +198,9 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 		page->index = page_offset;//新分配的page的页索引
 		list_add(&page->lru, &page_pool);//把预读的page添加到page_pool链表
 		
-        //
+         //是本次真正预读的第一个page，预读窗口page数ra->size减去真正预读的page数ra->async_size的结果
 		if (page_idx == nr_to_read - lookahead_size)
-			SetPageReadahead(page);//设置page的"PageReadahead"标记
+			SetPageReadahead(page);//设置该page的"PageReadahead"预读标记
 		ret++;
 	}
 
@@ -209,7 +211,7 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	 */
 	//ret表示预读的page数
 	if (ret)
-		read_pages(mapping, filp, &page_pool, ret);
+		read_pages(mapping, filp, &page_pool, ret);//这里调用文件系统read接口发起读取文件数据到page文件页指向的内存
 	BUG_ON(!list_empty(&page_pool));
 out:
 	return ret;
@@ -408,9 +410,9 @@ static int try_context_readahead(struct address_space *mapping,
  */
 
 /*
-hit_readahead_marker:同步false,异步true
-offset:do_generic_file_read函数传入的本次要读取的文件页缓存page索引
-req_size:do_generic_file_read函数传入的last_index - index，就是还剩余多少个文件页缓存还没读取
+hit_readahead_marker:同步预读false,异步预读true
+offset:do_generic_file_read函数里，本轮for循环要读取文件页page索引
+req_size:do_generic_file_read函数里，last_index - index，就是本次read系统调用还剩余多少个没读取文件页page数
 */
 static unsigned long
 ondemand_readahead(struct address_space *mapping,
@@ -418,6 +420,7 @@ ondemand_readahead(struct address_space *mapping,
 		   bool hit_readahead_marker, pgoff_t offset,//
 		   unsigned long req_size)
 {
+    //不同系统不一样，虚拟机里测试时max=2048
 	unsigned long max = max_sane_readahead(ra->ra_pages);
 
 	/*
@@ -431,7 +434,7 @@ ondemand_readahead(struct address_space *mapping,
 	 * Ramp up sizes, and push forward the readahead window.
 	 */
 	if ((offset == (ra->start + ra->size - ra->async_size) ||
-	     offset == (ra->start + ra->size))) {
+	     offset == (ra->start + ra->size))) {//本次读取的page页索引等于预读窗口的结束page索引?可能成立吗，搞不清楚这个for循环的意义
 		ra->start += ra->size;
 		ra->size = get_next_ra_size(ra, max);
 		ra->async_size = ra->size;
@@ -444,20 +447,26 @@ ondemand_readahead(struct address_space *mapping,
 	 * Query the pagecache for async_size, which normally equals to
 	 * readahead size. Ramp it up and use it as the new readahead size.
 	 */
-	if (hit_readahead_marker) {
+	if (hit_readahead_marker) {//传输中的异步预读，搞不清楚到底与同步预读有啥区别
 		pgoff_t start;
 
 		rcu_read_lock();
+        //从本次要实际读取的文件页page索引offset后开始搜索:在radix tree找到第一个hole index，hole index索引对应的page还没创建，
+        //对应索引的文件4K数据还没读取到这个page(简单说这是第一个还没跟文件建立映射的文件页，这个page是个空洞hole)。
+        //这个hole index就是本次预读窗口的第一个page索引
 		start = radix_tree_next_hole(&mapping->page_tree, offset+1,max);
 		rcu_read_unlock();
 
 		if (!start || start - offset > max)
 			return 0;
-
-		ra->start = start;
+        
+		ra->start = start;//该文件第一个hole index，是预读窗口的第一个page
+		//预读窗口大小(预读page文件页数)，这是啥算法，就用个预读窗口起始page索引-本次要读取的文件页索引糊弄?
 		ra->size = start - offset;	/* old async_size */
-		ra->size += req_size;
-		ra->size = get_next_ra_size(ra, max);//ra->size的4倍
+		ra->size += req_size;//预读窗口大小再加上本次read系统调用还剩余多少个没读取文件页page数
+		//根据预读窗口大小和max重新计算预读窗口大小，折腾
+		ra->size = get_next_ra_size(ra, max);
+        //ra->async_size初值与ra->size一直
 		ra->async_size = ra->size;
 		goto readit;
 	}
@@ -472,6 +481,8 @@ ondemand_readahead(struct address_space *mapping,
 	/*
 	 * sequential cache miss
 	 */
+	//(ra->prev_pos >> PAGE_CACHE_SHIFT)是上次read读取文件的最后一个page文件页索引，不包含预读的
+	//这个if一般情况不成立吧，除非重定向了文件指针?然后就goto initial_readahead重新初始化预读窗口
 	if (offset - (ra->prev_pos >> PAGE_CACHE_SHIFT) <= 1UL)
 		goto initial_readahead;
 
@@ -486,14 +497,20 @@ ondemand_readahead(struct address_space *mapping,
 	 * standalone, small random read
 	 * Read as is, and do not pollute the readahead state.
 	 */
+	//这里预读
 	return __do_page_cache_readahead(mapping, filp, offset, req_size, 0);
 
-initial_readahead://第一次读写文件在这里
-    //开始遇到页面索引
+initial_readahead://第一次读文件走这里
+    //本轮for循环要读取文件页page索引，预读的第一个文件页索引
 	ra->start = offset;
-    //根据最大预读page数max调整预读总page数赋于ra->size
+    //根据最大预读page数max调整预读总page数，并赋于ra->size
 	ra->size = get_init_ra_size(req_size, max);//req_size的4倍
-    //如果预读总page数大于本次预读数则ra->async_size被赋值二者差值，否则被赋值ra->size
+    /*如果预读总page数ra->size大于还剩余没读取的文件页page数req_size，则ra->async_size被赋值二者差值，否则被赋值ra->size.。什么情况
+    ra->size大于req_size，目前发现发生在同步预读时。比如read读取文件第一执行到do_generic_file_read....->ondemand_readahead，req_size=16，
+    ra->size在这里是64，则ra->async_size=64-16=48。之后将会预读64个page，但是page0~page15是本次read实际要读取的文件页数据，
+    page16~page63是才是本次真正预读的page数。所以我的理解是，ra->async_size表示真正预读的page数，ra->size表示预读窗口的page数。如果是
+    异步预读则ra->async_size=ra->size，如果是同步预读则ra->async_size=ra->size-req_size。同步预读时，预读窗口的文件页page与本次读取文件
+    的page文件页有重叠，异步预读二者没重叠*/
 	ra->async_size = ra->size > req_size ? ra->size - req_size : ra->size;
 
 readit:
@@ -502,11 +519,13 @@ readit:
 	 * If so, trigger the readahead marker hit now, and merge
 	 * the resulted next readahead window into the current one.
 	 */
+	//本次要实际读取的文件页page索引offset等于预读窗口的起始page索引?一般情况应该不成立，二般情况成立
 	if (offset == ra->start && ra->size == ra->async_size) {
 		ra->async_size = get_next_ra_size(ra, max);
 		ra->size += ra->async_size;
 	}
 
+    //这里实际完成page预读
 	return ra_submit(ra, mapping, filp);
 }
 
@@ -571,15 +590,15 @@ page_cache_async_readahead(struct address_space *mapping,
 	/*
 	 * Same bit is used for PG_readahead and PG_reclaim.
 	 */
-	if (PageWriteback(page))
+	if (PageWriteback(page))//page不能在脏页回写
 		return;
 
-	ClearPageReadahead(page);
+	ClearPageReadahead(page);//清除page预读标记
 
 	/*
 	 * Defer asynchronous read-ahead on IO congestion.
 	 */
-	if (bdi_read_congested(mapping->backing_dev_info))
+	if (bdi_read_congested(mapping->backing_dev_info))//不能bdi拥堵
 		return;
 
 	/* do read-ahead */

@@ -39,8 +39,14 @@ enum bdi_state {
 typedef int (congested_fn)(void *, int);
 
 enum bdi_stat_item {
+    //__set_page_dirty->account_page_dirtied标记脏页时，BDI_RECLAIMABLE的page加1，__delete_from_page_cache从pagecache中剔除page减1
 	BDI_RECLAIMABLE,
+  /*test_set_page_writeback判断page在回写则加1，这是在对page执行submit_bio把脏页刷回磁盘前前设置page的BDI_WRITEBACK标记.比如
+    ext4_writepage->ext4_bio_write_page->set_page_writeback->test_set_page_writeback()。 在脏页回写完成执行
+    end_page_writeback->test_clear_page_writeback减1*/
 	BDI_WRITEBACK,
+	/*__set_page_dirty->account_page_dirtied标记脏页时，BDI_DIRTIED的page加1，
+	ext4_writepage->redirty_page_for_writepage->account_page_redirty在submit_bio前减1*/
 	BDI_DIRTIED,
 	BDI_WRITTEN,
 	NR_BDI_STAT_ITEMS
@@ -70,6 +76,7 @@ struct bdi_writeback {
 struct backing_dev_info {
 	struct list_head bdi_list;
 	unsigned long ra_pages;	/* max readahead in PAGE_CACHE_SIZE units */
+    //脏页回写进程运行，wb_do_writeback()中设置BDI_writeback_running，该函数退出后清空BDI_writeback_running
 	unsigned long state;	/* Always use atomic bitops on this */
 	unsigned int capabilities; /* Device capabilities */
 	congested_fn *congested_fn; /* Function pointer if device is md/dm */

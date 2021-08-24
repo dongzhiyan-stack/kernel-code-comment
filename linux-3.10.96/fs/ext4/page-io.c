@@ -300,7 +300,7 @@ void ext4_io_submit(struct ext4_io_submit *io)
 
 	if (bio) {
 		bio_get(io->io_bio);
-		submit_bio(io->io_op, io->io_bio);
+		submit_bio(io->io_op, io->io_bio);//submit_bio()
 		BUG_ON(bio_flagged(io->io_bio, BIO_EOPNOTSUPP));
 		bio_put(io->io_bio);
 	}
@@ -364,6 +364,7 @@ submit_and_retry:
 	return 0;
 }
 
+//一般调用该函数后就会调用submit_bio发送IO请求
 int ext4_bio_write_page(struct ext4_io_submit *io,
 			struct page *page,
 			int len,
@@ -380,7 +381,7 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 	BUG_ON(!PageLocked(page));
 	BUG_ON(PageWriteback(page));
 
-	set_page_writeback(page);
+	set_page_writeback(page);//标记page"writeback"标记
 	ClearPageError(page);
 
 	/*
@@ -415,7 +416,7 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 			if (!buffer_mapped(bh))
 				clear_buffer_dirty(bh);
 			if (io->io_bio)
-				ext4_io_submit(io);
+				ext4_io_submit(io);//这里会调用 submit_bio()
 			continue;
 		}
 		if (buffer_new(bh)) {

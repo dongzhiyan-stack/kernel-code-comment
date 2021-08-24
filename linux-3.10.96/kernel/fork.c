@@ -1414,7 +1414,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->exit_state = 0;
 
 	p->nr_dirtied = 0;
-	p->nr_dirtied_pause = 128 >> (PAGE_SHIFT - 10);
+	p->nr_dirtied_pause = 128 >> (PAGE_SHIFT - 10);//nr_dirtied_pauseÄ¬ÈÏ128
 	p->dirty_paused_when = 0;
 
 	/*

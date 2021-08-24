@@ -625,8 +625,9 @@ static void __set_page_dirty(struct page *page,
 	spin_lock_irqsave(&mapping->tree_lock, flags);
 	if (page->mapping) {	/* Race with truncate? */
 		WARN_ON_ONCE(warn && !PageUptodate(page));
-        //增加脏页NR_FILE_DIRTY
+        //增加脏页NR_FILE_DIRTY、BDI_DIRTIED
 		account_page_dirtied(page, mapping);
+        //增加radix tree的PAGECACHE_TAG_DIRTY脏页统计
 		radix_tree_tag_set(&mapping->page_tree,
 				page_index(page), PAGECACHE_TAG_DIRTY);
 	}
@@ -1722,12 +1723,12 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 	 * drop the bh refcounts early.
 	 */
 	BUG_ON(PageWriteback(page));
-	set_page_writeback(page);
+	set_page_writeback(page);//设置page的"writeback"
 
 	do {
 		struct buffer_head *next = bh->b_this_page;
 		if (buffer_async_write(bh)) {
-			submit_bh(write_op, bh);
+			submit_bh(write_op, bh);//submit_bio
 			nr_underway++;
 		}
 		bh = next;
@@ -1934,7 +1935,7 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 				partial = 1;
 		} else {
 			set_buffer_uptodate(bh);
-			mark_buffer_dirty(bh);
+			mark_buffer_dirty(bh);//设置bh脏，page脏 __set_page_dirty()
 		}
 		clear_buffer_new(bh);
 
@@ -1948,6 +1949,7 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 	 * the next read(). Here we 'discover' whether the page went
 	 * uptodate as a result of this (potentially partial) write.
 	 */
+	//已经读取到数据，设置page状态为PG_uptodate
 	if (!partial)
 		SetPageUptodate(page);
 	return 0;
@@ -2012,7 +2014,7 @@ int block_write_end(struct file *file, struct address_space *mapping,
 	flush_dcache_page(page);
 
 	/* This could be a short (even 0-length) commit */
-	__block_commit_write(inode, page, start, start+copied);
+	__block_commit_write(inode, page, start, start+copied);//这里，__set_page_dirty()page脏页
 
 	return copied;
 }
@@ -2379,12 +2381,14 @@ int __block_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf,
 
 	ret = __block_write_begin(page, 0, end, get_block);
 	if (!ret)
-		ret = block_commit_write(page, 0, end);
+		ret = block_commit_write(page, 0, end);//触发写文件
 
 	if (unlikely(ret < 0))
 		goto out_unlock;
-	set_page_dirty(page);
-	wait_for_stable_page(page);
+    
+	set_page_dirty(page);//设置page脏页
+	
+	wait_for_stable_page(page);//等待page脏页回写完成
 	return 0;
 out_unlock:
 	unlock_page(page);

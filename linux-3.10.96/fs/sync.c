@@ -179,7 +179,7 @@ int vfs_fsync_range(struct file *file, loff_t start, loff_t end, int datasync)
 {
 	if (!file->f_op || !file->f_op->fsync)
 		return -EINVAL;
-	return file->f_op->fsync(file, start, end, datasync);
+	return file->f_op->fsync(file, start, end, datasync);//ext4_sync_file
 }
 EXPORT_SYMBOL(vfs_fsync_range);
 

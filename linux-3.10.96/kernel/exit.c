@@ -861,7 +861,7 @@ void do_exit(long code)
 	validate_creds_for_do_exit(tsk);
 
 	preempt_disable();
-	if (tsk->nr_dirtied)
+	if (tsk->nr_dirtied)//进程退出时把进程残留的脏页数累加到dirty_throttle_leaks这个per cpu变量
 		__this_cpu_add(dirty_throttle_leaks, tsk->nr_dirtied);
 	exit_rcu();
 

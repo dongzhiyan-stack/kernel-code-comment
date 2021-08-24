@@ -116,7 +116,14 @@ enum zone_stat_item {
 	NR_FILE_MAPPED,	/*8 pagecache pages mapped into pagetables.
 			   only modified from process context */
 	NR_FILE_PAGES,//9
+	
+	//__set_page_dirty->account_page_dirtied 标记脏页则NR_FILE_DIRTY加1，
+	//__delete_from_page_cache->dec_zone_page_state从pagecache中剔除则NR_FILE_DIRTY减1
 	NR_FILE_DIRTY,//10
+
+    /*ext4_writepage->ext4_bio_write_page->set_page_writeback->test_set_page_writeback->account_page_writeback->inc_zone_page_state(page, NR_WRITEBACK)
+     启动submit_bio刷脏页到磁盘前NR_WRITEBACK加1。等脏页回写完成时 test_clear_page_writeback->dec_zone_page_state(page, NR_WRITEBACK) 
+     正在回写page数 NR_WRITEBACK减1*/
 	NR_WRITEBACK,
 	NR_SLAB_RECLAIMABLE,
 	NR_SLAB_UNRECLAIMABLE,
@@ -201,10 +208,10 @@ struct zone_reclaim_stat {
 	unsigned long		recent_rotated[2];//隔离出来的page，被访问过，shrink_active_list,shrink_inactive_list,putback_inactive_pages
 	unsigned long		recent_scanned[2];//隔离的page数，见shrink_active_list,shrink_inactive_list,putback_inactive_pages
 };
-//active/inactive file/anon属性lru链表总代表。是stuct zone的成员。每次内存回收都是取出zone的lruvec，这个lruvec
+//active/inactive file/anon属性lru链表总代表。每次内存回收都是取出zone的lruvec，这个lruvec
 //包含了该zone的所有active、inactive和file、anon page，这些page分布在lruvec的成员struct list_head lists[NR_LRU_LISTS]链表。
 //获取时取出memory cgroup的lruvec，此时的lruvec只是包含了该memory cgroup的active、inactive和file、anon page。
-struct lruvec {
+struct lruvec {/*stuct zone的成员,struct mem_cgroup_per_zone的成员*/
     //5类lru链表:LRU_INACTIVE_ANON、LRU_ACTIVE_ANON、LRU_INACTIVE_FILE、LRU_ACTIVE_FILE、LRU_UNEVICTABLE
 	struct list_head lists[NR_LRU_LISTS];
 	struct zone_reclaim_stat reclaim_stat;//update_page_reclaim_stat()中增加

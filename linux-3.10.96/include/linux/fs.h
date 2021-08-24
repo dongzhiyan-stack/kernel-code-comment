@@ -491,7 +491,7 @@ struct block_device {
  * radix trees
  */
 #define PAGECACHE_TAG_DIRTY	0
-#define PAGECACHE_TAG_WRITEBACK	1
+#define PAGECACHE_TAG_WRITEBACK	1//增加radix tree的PAGECACHE_TAG_WRITEBACK脏页数，test_set_page_writeback()
 #define PAGECACHE_TAG_TOWRITE	2
 
 int mapping_tagged(struct address_space *mapping, int tag);
