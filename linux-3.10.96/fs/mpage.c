@@ -52,15 +52,15 @@ static void mpage_end_io(struct bio *bio, int err)
 
 		if (--bvec >= bio->bi_io_vec)
 			prefetchw(&bvec->bv_page->flags);
-		if (bio_data_dir(bio) == READ) {
+		if (bio_data_dir(bio) == READ) {//读文件
 			if (uptodate) {
 				SetPageUptodate(page);//设置page的"PageUptodate"状态
-			} else {
+			} else {//这个分支只有出错时才成立
 				ClearPageUptodate(page);
 				SetPageError(page);
 			}
 			unlock_page(page);
-		} else { /* bio_data_dir(bio) == WRITE */
+		} else { /* bio_data_dir(bio) == WRITE */ //写文件
 			if (!uptodate) {
 				SetPageError(page);
 				if (page->mapping)
@@ -283,7 +283,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	 * This page will go to BIO.  Do we need to send this BIO off first?
 	 */
 	if (bio && (*last_block_in_bio != blocks[0] - 1))
-		bio = mpage_bio_submit(READ, bio);
+		bio = mpage_bio_submit(READ, bio);//里边执行submit_bio
 
 alloc_new:
 	if (bio == NULL) {
@@ -296,7 +296,7 @@ alloc_new:
 
 	length = first_hole << blkbits;
 	if (bio_add_page(bio, page, length, 0) < length) {
-		bio = mpage_bio_submit(READ, bio);
+		bio = mpage_bio_submit(READ, bio);//里边执行submit_bio
 		goto alloc_new;
 	}
 
@@ -382,7 +382,7 @@ mpage_readpages(struct address_space *mapping, struct list_head *pages,
 		list_del(&page->lru);
 		if (!add_to_page_cache_lru(page, mapping,
 					page->index, GFP_KERNEL)) {
-			bio = do_mpage_readpage(bio, page,
+			bio = do_mpage_readpage(bio, page,//里边执行submit_bio
 					nr_pages - page_idx,
 					&last_block_in_bio, &map_bh,
 					&first_logical_block,
@@ -392,7 +392,7 @@ mpage_readpages(struct address_space *mapping, struct list_head *pages,
 	}
 	BUG_ON(!list_empty(pages));
 	if (bio)
-		mpage_bio_submit(READ, bio);
+		mpage_bio_submit(READ, bio);//里边执行submit_bio
 	return 0;
 }
 EXPORT_SYMBOL(mpage_readpages);

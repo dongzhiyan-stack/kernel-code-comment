@@ -1564,8 +1564,10 @@ static int mpage_da_submit_io(struct mpage_da_data *mpd,
 				unlock_page(page);
 				continue;
 			}
-
+            
+            //清理page脏页标记，脏页数减1
 			clear_page_dirty_for_io(page);
+            //设置page的writeback标记，调用submit_bio发送IO请求
 			err = ext4_bio_write_page(&io_submit, page, len,
 						  mpd->wbc);
 			if (!err)
@@ -1579,6 +1581,8 @@ static int mpage_da_submit_io(struct mpage_da_data *mpd,
 		}
 		pagevec_release(&pvec);
 	}
+    
+    //这里也有submit_bio()
 	ext4_io_submit(&io_submit);
 	return ret;
 }
@@ -1611,7 +1615,7 @@ static void ext4_da_block_invalidatepages(struct mpage_da_data *mpd)
 			BUG_ON(!PageLocked(page));
 			BUG_ON(PageWriteback(page));
 			block_invalidatepage(page, 0);
-			ClearPageUptodate(page);
+			ClearPageUptodate(page);//清理page的"Uptodate"标记
 			unlock_page(page);
 		}
 		index = pvec.pages[nr_pages - 1]->index + 1;
@@ -2255,7 +2259,7 @@ static int ext4_writepage(struct page *page,
 
 	memset(&io_submit, 0, sizeof(io_submit));
 	ret = ext4_bio_write_page(&io_submit, page, len, wbc);//这里
-	ext4_io_submit(&io_submit);
+	ext4_io_submit(&io_submit);//submit_bio()
 	return ret;
 }
 

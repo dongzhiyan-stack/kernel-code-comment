@@ -276,6 +276,7 @@ EXPORT_SYMBOL(filemap_flush);
  * Walk the list of under-writeback pages of the given address space
  * in the given range and wait for all of them.
  */
+//依次等待本次传输的所有page脏页落盘成功:先在page writeback等待队列上休眠，等数据传输完成唤醒
 int filemap_fdatawait_range(struct address_space *mapping, loff_t start_byte,
 			    loff_t end_byte)
 {
@@ -294,14 +295,15 @@ int filemap_fdatawait_range(struct address_space *mapping, loff_t start_byte,
 			PAGECACHE_TAG_WRITEBACK,
 			min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1)) != 0) {
 		unsigned i;
-
+        
+        //依次等待本次传输的所有page脏页落盘成功
 		for (i = 0; i < nr_pages; i++) {
 			struct page *page = pvec.pages[i];
 
 			/* until radix tree lookup accepts end_index */
 			if (page->index > end)
 				continue;
-
+            //在page writeback等待队列上休眠，等数据传输完成执行中断回调函数执行 end_page_writeback唤醒当前进程
 			wait_on_page_writeback(page);
 			if (TestClearPageError(page))
 				ret = -EIO;
@@ -371,16 +373,20 @@ EXPORT_SYMBOL(filemap_write_and_wait);
  * Note that `lend' is inclusive (describes the last byte to be written) so
  * that this function can be used to write to the very end-of-file (end = -1).
  */
+//将本次write要传输的所有文件脏页page传输到磁盘,对每个page清理脏页标记并脏页数减1，对page上writeback标记，最后执行submit_bio落盘。
+//接着,依次等待本次传输的所有page脏页落盘成功:先在page writeback等待队列上休眠，等数据传输完成唤醒
 int filemap_write_and_wait_range(struct address_space *mapping,
 				 loff_t lstart, loff_t lend)
 {
 	int err = 0;
 
 	if (mapping->nrpages) {
+        //将本次write要传输的所有文件脏页page传输到磁盘,对每个page清理脏页标记并脏页数减1，对page上writeback标记，最后执行submit_bio落盘
 		err = __filemap_fdatawrite_range(mapping, lstart, lend,
 						 WB_SYNC_ALL);
 		/* See comment of filemap_write_and_wait() */
 		if (err != -EIO) {
+            //依次等待本次传输的所有page脏页落盘成功:先在page writeback等待队列上休眠，等数据传输完成唤醒
 			int err2 = filemap_fdatawait_range(mapping,
 						lstart, lend);
 			if (!err)
@@ -1239,6 +1245,7 @@ page_ok://page对应的文件数据已经读取到了page指向的内存
 		 * When a sequential read accesses a page several times,
 		 * only mark it as accessed the first time.
 		 */
+		//在第一次读取该page文件页时，执行mark_page_accessed(page)标记page的，如果连续读取同一个page，不会重复执行mark_page_accessed(page)
 		if (prev_index != index || offset != prev_offset)
 			mark_page_accessed(page);
 
@@ -2431,7 +2438,7 @@ again:
 			break;
 		}
 
-		status = a_ops->write_begin(file, mapping, pos, bytes, flags,
+		status = a_ops->write_begin(file, mapping, pos, bytes, flags,//ext4_write_begin
 						&page, &fsdata);
 		if (unlikely(status))
 			break;
@@ -2440,6 +2447,7 @@ again:
 			flush_dcache_page(page);
 
 		pagefault_disable();
+        //把write系统调用传入的最新文件数据从用户空间buf复制到page文件页
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
 		pagefault_enable();
 		flush_dcache_page(page);

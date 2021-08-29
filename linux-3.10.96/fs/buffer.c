@@ -679,6 +679,7 @@ int __set_page_dirty_buffers(struct page *page)
 			bh = bh->b_this_page;
 		} while (bh != head);
 	}
+    //标记page脏页
 	newly_dirty = !TestSetPageDirty(page);
 	spin_unlock(&mapping->private_lock);
 
@@ -1143,6 +1144,7 @@ void mark_buffer_dirty(struct buffer_head *bh)
 	if (!test_set_buffer_dirty(bh)) {
         //bh所在的page
 		struct page *page = bh->b_page;
+        //标记page脏页,page之前没有脏页标记则返回0
 		if (!TestSetPageDirty(page)) {
 			struct address_space *mapping = page_mapping(page);
 			if (mapping)//标记page脏

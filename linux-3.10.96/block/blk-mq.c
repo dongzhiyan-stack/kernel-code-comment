@@ -1933,7 +1933,6 @@ static void blk_mq_try_issue_directly(struct blk_mq_hw_ctx *hctx,
   //从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag赋于rq->tag，然后
   //hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。分配失败则启动硬件IO数据派发，之后再尝试分配tag，循环,直到分配req成功。
   //然后调用磁盘驱动queue_rq接口函数向驱动派发req，启动磁盘数据传输。如果遇到磁盘驱动硬件忙，则释放req的tag,设置硬件队列忙.
-
 	ret = __blk_mq_try_issue_directly(hctx, rq, false);
     //如果硬件队列忙，把req添加到硬件队列hctx->dispatch队列，间接启动req硬件派发
 	if (ret == BLK_MQ_RQ_QUEUE_BUSY || ret == BLK_MQ_RQ_QUEUE_DEV_BUSY)

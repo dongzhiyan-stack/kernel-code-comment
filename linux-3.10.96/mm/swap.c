@@ -38,13 +38,14 @@
 /* How many pages do we try to swap or page in/out together? */
 int page_cluster;
 
-static DEFINE_PER_CPU(struct pagevec[NR_LRU_LISTS], lru_add_pvecs);//新的page先添加到lru_add_pvecs，见__lru_cache_add()
+//新的page先添加到lru_add_pvecs，见__lru_cache_add()，将来这些page要被添加到inactive lru链表，新的page肯定是先被添加到inactive lru链表
+static DEFINE_PER_CPU(struct pagevec[NR_LRU_LISTS], lru_add_pvecs);
 static DEFINE_PER_CPU(struct pagevec, lru_rotate_pvecs);//该链表page添加到inactive lru链表尾，见rotate_reclaimable_page()
 static DEFINE_PER_CPU(struct pagevec, lru_deactivate_pvecs);//见deactivate_page(),该链表page添加到inactive lru链表头
 
 /*
  * This path almost never happens for VM activity - pages are normally
- * freed via pagevecs.  But it gets used by networking.
+ * freed via pagevecs.  But it gets used by networking. lru_cache_add_anon
  */
 static void __page_cache_release(struct page *page)
 {
@@ -401,10 +402,10 @@ static void pagevec_move_tail(struct pagevec *pvec)
  * inactive list.
  */
 //内存回收完成后，被标记"reclaimable"的page的数据刷入了磁盘，执行rotate_reclaimable_page->end_page_writeback把该page移动到
-//inactive lru链表链表，下轮内存回收就会释放该page到伙伴系统
+//inactive lru链表尾，下轮内存回收就会释放该page到伙伴系统
 void rotate_reclaimable_page(struct page *page)
 {
-    //page没有上PG_locked，page不是脏页，page被标记acive标记，page没有设置不可回收标记，page在lru链表
+    //page没有上PG_locked，page不是脏页，page要有acive标记，page没有设置不可回收标记，page要在lru链表
 	if (!PageLocked(page) && !PageDirty(page) && !PageActive(page) &&
 	    !PageUnevictable(page) && PageLRU(page)) {
 		struct pagevec *pvec;
@@ -466,7 +467,7 @@ static void activate_page_drain(int cpu)
 	if (pagevec_count(pvec))
 		pagevec_lru_move_fn(pvec, __activate_page, NULL);
 }
-
+//把page从inactive lru链表移动到active lru链表
 void activate_page(struct page *page)
 {
     //if成立条件:page在链入链表，page没有Active标记,page可回收
@@ -505,14 +506,28 @@ void activate_page(struct page *page)
  * inactive,referenced		->	active,unreferenced
  * active,unreferenced		->	active,referenced
  */
+/* 1 page在inactive lru链表且page无referenced标记，则设置page的Referenced标记。
+   2 page在inactive lru链表且page有Referenced标记，则把page移动到active lru链表，并清理掉Referenced标记
+   3 page在active lru链表且无referenced标记，则把仅仅标记该page的Referenced标记
+
+   Referenced标记表示该page被访问了，上边这3步表示了page的3个状态的顺序变迁。
+   
+   一个page在inactive lru链表并且长时间未被访问，第一次有进程访问该page，则只是把page标记Referenced。第2次进程再访问该page，
+   则把该page移动到active lru链表，但清理掉Referenced标记。第3次再有进程访问该page，则标记该page Referenced。如下是转移过程
+   
+   page在inactive lru(unreferenced)->page在inactive lru(referenced)->page在active lru(unreferenced)->page在active lru(referenced)
+*/
 void mark_page_accessed(struct page *page)
 {
+    //page是inactive的、page有"Referenced"标记、page可回收、page在 lru链表
 	if (!PageActive(page) && !PageUnevictable(page) &&
 			PageReferenced(page) && PageLRU(page)) {
+		//把page从inactive lru链表移动到active lru链表
 		activate_page(page);
+        //清理page的"Referenced"标记
 		ClearPageReferenced(page);
-	} else if (!PageReferenced(page)) {
-		SetPageReferenced(page);
+	} else if (!PageReferenced(page)) {//page之前没有"Referenced"标记
+		SetPageReferenced(page);//设置page的"Referenced"标记
 	}
 }
 EXPORT_SYMBOL(mark_page_accessed);

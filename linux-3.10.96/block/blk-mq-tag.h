@@ -44,7 +44,7 @@ blk_mq_get_driver_tag¡£¿´×îºó¶¼µ÷ÓÃblk_mq_get_tag´Óbitmap_tagsµÃµ½Ò»¸ö¿ÕÏĞbit£¬´
      */
 	//static_rqsÖ¸ÕëÊı×é£¬¸ÃÊı×éÒ»¸ö³ÉÔ±±£´æÃ¿Ò»²ã¶ÓÁĞÉî¶È¶ÔÓ¦µÄrequest½á¹¹Ê×µØÖ·¡£Ó²¼ş¶ÓÁĞÃ¿Ò»²ãÉî¶È£¬¶ÔÓ¦Ò»¸örequest½á¹¹¡£
 	//·ÖÅä¹ı³Ì¼û__blk_mq_alloc_rq_map->blk_mq_alloc_rqs¡£Ê¹ÓÃ¹ı³Ì¼ûblk_mq_get_tag(),¸üÏêÏ¸¼ûÉÏ±ßnr_reserved_tags±äÁ¿µÄ×¢ÊÍ¡£
-	struct request **static_rqs;//bioĞèÒª×ª»»³Éreq,´Óstatic_rqsÈ¡³öreq
+	struct request **static_rqs;
 
 	//blk_mq_alloc_rqs()ÖĞ·ÖÅäpage,È»ºóÌí¼Óµ½page_list£¬
 	struct list_head page_list;

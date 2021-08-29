@@ -1814,14 +1814,14 @@ retry:
 	done_index = index;
 	while (!done && (index <= end)) {
 		int i;
-        //从mapping->page_tree找到脏页page保存到pvec.pages[ ]
+        //根据page索引index从radix tree找到脏页page,并把保存到pvec.pages[]，后边就是从pvec.pages[]取出page
 		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
 			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
 		if (nr_pages == 0)
 			break;
 
 		for (i = 0; i < nr_pages; i++) {
-			struct page *page = pvec.pages[i];//取出cache page
+			struct page *page = pvec.pages[i];//从pvec.pages[]数组取出page
 
 			/*
 			 * At this point, the page may be truncated or
@@ -1870,11 +1870,12 @@ continue_unlock:
 			}
 
 			BUG_ON(PageWriteback(page));
+            //清理page脏页和脏页数减1，如果page之前被标记了脏页返回1
 			if (!clear_page_dirty_for_io(page))
 				goto continue_unlock;
 
 			trace_wbc_writepage(wbc, mapping->backing_dev_info);
-            //__writepage()把该page的数据写入磁盘
+            //__writepage()把该page的数据写入磁盘，里边调用 ext4_writepage
 			ret = (*writepage)(page, wbc, data);
 			if (unlikely(ret)) {
 				if (ret == AOP_WRITEPAGE_ACTIVATE) {
@@ -1977,7 +1978,7 @@ int do_writepages(struct address_space *mapping, struct writeback_control *wbc)
 	if (mapping->a_ops->writepages)
 		ret = mapping->a_ops->writepages(mapping, wbc);//高版本的是 ext4_writepages
 	else
-		ret = generic_writepages(mapping, wbc);//低版本的在这里
+		ret = generic_writepages(mapping, wbc);//低版本的在这里，最后调用 ext4_writepage
 	return ret;
 }
 
@@ -2168,7 +2169,7 @@ int set_page_dirty(struct page *page)
 		 * process. But it's a trivial problem.
 		 */
 		ClearPageReclaim(page);
-#ifdef CONFIG_BLOCK
+#ifdef CONFIG_BLOCK//yes
 		if (!spd)
 			spd = __set_page_dirty_buffers;
 #endif
@@ -2217,6 +2218,7 @@ EXPORT_SYMBOL(set_page_dirty_lock);
  * This incoherency between the page's dirty flag and radix-tree tag is
  * unfortunate, but it only exists while the page is locked.
  */
+//清理page脏页和脏页数减1，如果page之前被标记了脏页返回1
 int clear_page_dirty_for_io(struct page *page)
 {
 	struct address_space *mapping = page_mapping(page);
@@ -2299,6 +2301,7 @@ int test_clear_page_writeback(struct page *page)
 		ret = TestClearPageWriteback(page);
 	}
 	if (ret) {
+        //writebaak页数减1
 		dec_zone_page_state(page, NR_WRITEBACK);
 		inc_zone_page_state(page, NR_WRITTEN);
 	}

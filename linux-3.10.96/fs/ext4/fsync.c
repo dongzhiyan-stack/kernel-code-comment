@@ -124,6 +124,8 @@ int ext4_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 
 	trace_ext4_sync_file_enter(file, datasync);
 
+    //将本次write要传输的所有文件脏页page传输到磁盘,对每个page清理脏页标记并脏页数减1，对page上writeback标记，最后执行submit_bio落盘。
+    //接着,依次等待本次传输的所有page脏页落盘成功:先在page writeback等待队列上休眠，等数据传输完成唤醒
 	ret = filemap_write_and_wait_range(inode->i_mapping, start, end);
 	if (ret)
 		return ret;

@@ -432,7 +432,7 @@ static pageout_t pageout(struct page *page, struct address_space *mapping,
         //标记page的Reclaim标记
 		SetPageReclaim(page);
         //调用文件系统write接口把page数据刷入磁盘，异步的，该函数返回并不能保证数据已经刷入磁盘。这个函数里边会设置page "Writeback"标记
-		res = mapping->a_ops->writepage(page, &wbc);
+		res = mapping->a_ops->writepage(page, &wbc);//ext4_writepage
 		if (res < 0)
 			handle_write_error(mapping, page, res);
 		if (res == AOP_WRITEPAGE_ACTIVATE) {
@@ -642,10 +642,10 @@ static enum page_references page_check_references(struct page *page,
 					  &vm_flags);
     
     //清除page引用标记位,应该再返回以前的page状态
-	referenced_page = TestClearPageReferenced(page);
+	referenced_page = TestClearPageReferenced(page);//执行mark_page_accessed(page)标记page的Referenced
 
-    /*referenced_ptes 和 referenced_page 有区别，referenced_ptes不为0表示映射该page的进程最近访问过该page，referenced_page表示
-     最近映射该page的进程最近没访问过该page，但增加访问过该page ????????????????是吗*/
+    /*referenced_ptes和referenced_page有区别，referenced_ptes不为0表示映射该page的进程最近访问过该page，进程虚拟空间与映射该page的物理内存
+      referenced_page表示该page与文件构成映射，进程最近读写文件访问了该文件页page*/
 
 	/*
 	 * Mlock lost the isolation race with us.  Let try_to_unmap()
@@ -654,7 +654,8 @@ static enum page_references page_check_references(struct page *page,
 	if (vm_flags & VM_LOCKED)
 		return PAGEREF_RECLAIM;
 
-    //基本上，如果page最近被访问过就return PAGEREF_ACTIVATE，该page将被移动到active  lru list
+    //进程页表页目录映射了该page物理内存，这个page多次被访问，则return PAGEREF_ACTIVATE，之后page将被移动到active  lru list。
+    //如果page只被访问了一次，则return PAGEREF_KEEP，之后page依旧保持在inactive lru list，本轮循环不回收它
 	if (referenced_ptes) {
 		if (PageSwapBacked(page))
 			return PAGEREF_ACTIVATE;
@@ -672,6 +673,7 @@ static enum page_references page_check_references(struct page *page,
 		 * so that recently deactivated but used pages are
 		 * quickly recovered.
 		 */
+		//设置page的Referenced
 		SetPageReferenced(page);
         
         //page被访问过，page将被移动到active lru list
@@ -689,10 +691,11 @@ static enum page_references page_check_references(struct page *page,
 	}
 
 	/* Reclaim if clean, defer dirty pages to writeback */
-    //page被访问过，并且page不是swap cache
+    //文件页page被访问过，并且page不是swap cache(即page是文件页)，
 	if (referenced_page && !PageSwapBacked(page))
 		return PAGEREF_RECLAIM_CLEAN;
 
+    //到这里，page一次都没被访问过，则return PAGEREF_RECLAIM，该page将被回收
 	return PAGEREF_RECLAIM;
 }
 
@@ -832,9 +835,9 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		 * The page is mapped into the page tables of one or more
 		 * processes. Try to unmap it here.
 		 */
-		//有多个进程映射了此内存page，尝试解除映射。对匿名页和文件页的处理不一样，对于文件页的处理是清空进程的页表项，每清空一个进程
-		//的映射page->_count减1，这里边还牵涉到反向映射。
-		/*进程mmap映射内存page的情况吧，page_mapped(page)才成立.正常文件读写产生的page cache，没有进程映射吧，page_mapped(page)不成立*/
+		 
+        /*基本上只要page最近被访问过，返回PAGEREF_ACTIVATE，page将被移动到active list，或者返回PAGEREF_KEEP，
+         本轮内存回收不回收它。如果page最近没被访问过，返回PAGEREF_RECLAIM或PAGEREF_RECLAIM_CLEAN，该page将被回收*/
 		if (page_mapped(page) && mapping) {
 			switch (try_to_unmap(page, ttu_flags)) {
 			case SWAP_FAIL:

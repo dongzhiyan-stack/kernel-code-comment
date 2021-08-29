@@ -138,7 +138,7 @@ struct dentry {
 	 * d_alias and d_rcu can share memory
 	 */
 	union {
-     //通过d_alids挂入对应的inode链表
+        //通过d_alids挂入对应的inode链表
 		struct hlist_node d_alias;	/* inode alias list *///__d_alloc中分配
 	 	struct rcu_head d_rcu;
 	} d_u;
