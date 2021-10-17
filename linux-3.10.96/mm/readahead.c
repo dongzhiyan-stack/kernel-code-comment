@@ -111,7 +111,7 @@ int read_cache_pages(struct address_space *mapping, struct list_head *pages,
 EXPORT_SYMBOL(read_cache_pages);
 
 static int read_pages(struct address_space *mapping, struct file *filp,
-		struct list_head *pages, unsigned nr_pages)//遇到的page在struct list_head *pages这个链表，nr_pages是预读page数
+		struct list_head *pages, unsigned nr_pages)//预读的文件页page链接在struct list_head *pages这个链表，nr_pages是预读page数
 {
 	struct blk_plug plug;
 	unsigned page_idx;

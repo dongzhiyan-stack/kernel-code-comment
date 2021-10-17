@@ -17,15 +17,15 @@
 #ifdef CONFIG_BLOCK
 
 enum bh_state_bits {
-	BH_Uptodate,	/* Contains valid data */
-	BH_Dirty,	/* Is dirty */
-	BH_Lock,	/* Is locked */
+	BH_Uptodate,	/* Contains valid data *///bh 数据是最新的
+	BH_Dirty,	/* Is dirty *///bh 脏
+	BH_Lock,	/* Is locked *///bh lock
 	BH_Req,		/* Has been submitted for I/O */
 	BH_Uptodate_Lock,/* Used by the first bh in a page, to serialise
 			  * IO completion of other buffers in the page
 			  */
 
-	BH_Mapped,	/* Has a disk mapping */
+	BH_Mapped,	/* Has a disk mapping *///bh mapped
 	BH_New,		/* Disk mapping was newly created by get_block */
 	BH_Async_Read,	/* Is under end_buffer_async_read I/O */
 	BH_Async_Write,	/* Is under end_buffer_async_write I/O */
@@ -61,9 +61,11 @@ typedef void (bh_end_io_t)(struct buffer_head *bh, int uptodate);
 struct buffer_head {
 	unsigned long b_state;		/* buffer state bitmap (see above) */
 	struct buffer_head *b_this_page;/* circular list of page's buffers */
+    //bh映射的page
 	struct page *b_page;		/* the page this bh is mapped to */
-
+    //bh映射的起始磁盘物理块号，见map_bh
 	sector_t b_blocknr;		/* start block number */
+    //bh映射文件物理块大小
 	size_t b_size;			/* size of mapping */
     //bh对应物理块数据保存在b_data指定的内存
 	char *b_data;			/* pointer to data within the page */
@@ -313,7 +315,7 @@ sb_find_get_block(struct super_block *sb, sector_t block)
 {
 	return __find_get_block(sb->s_bdev, block, sb->s_blocksize);
 }
-
+//设置bh的"mapped"，赋值bh映射的起始磁盘物理块号bh->b_blocknr
 static inline void
 map_bh(struct buffer_head *bh, struct super_block *sb, sector_t block)
 {

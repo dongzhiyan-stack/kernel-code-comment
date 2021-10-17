@@ -507,7 +507,7 @@ out:
 	return error;
 }
 EXPORT_SYMBOL(add_to_page_cache_locked);
-
+//page按照索引index添加到radix tree，并且把page添加到LRU_INACTIVE_FILE链表
 int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 				pgoff_t offset, gfp_t gfp_mask)
 {
@@ -1148,7 +1148,7 @@ find_page:
         /*注意，有文件缓存页page，并不代表page内存已经有了对应文件的实际数据*/
 		page = find_get_page(mapping, index);
 		if (!page) {
-            //index对应的文件页没有缓存page，开始同步预读
+            //index对应的文件页没有缓存page，开始同步预读。同步预读是本次要读取的文件页没有缓存page，不得不读取文件页到page页内存
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
@@ -1160,7 +1160,7 @@ find_page:
         
         //如果当前page设置了"PG_Readahead"预读标记位，说明本次读取的文件页数据正好命中上一次的预读窗口的文件页
 		if (PageReadahead(page)) {
-            //这里发起异步文件预读
+            //这里发起异步文件预读，异步预读是本次要读取的文件页有缓存page，发起预读是未雨绸缪
 			page_cache_async_readahead(mapping,
 					ra, filp, page,
 					index, last_index - index);

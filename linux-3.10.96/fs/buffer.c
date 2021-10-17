@@ -73,7 +73,7 @@ void __lock_buffer(struct buffer_head *bh)
 							TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(__lock_buffer);
-
+//唤醒在bh的BH_Lock等待队列的进程
 void unlock_buffer(struct buffer_head *bh)
 {
 	clear_bit_unlock(BH_Lock, &bh->b_state);
@@ -87,6 +87,7 @@ EXPORT_SYMBOL(unlock_buffer);
  * from becoming locked again - you have to lock it yourself
  * if you want to preserve its state.
  */
+//在bh的BH_Lock等待队列休眠
 void __wait_on_buffer(struct buffer_head * bh)
 {
 	wait_on_bit(&bh->b_state, BH_Lock, sleep_on_buffer, TASK_UNINTERRUPTIBLE);

@@ -35,7 +35,7 @@ struct blk_mq_tags {
 blk_mq_get_driver_tag。看最后都调用blk_mq_get_tag从bitmap_tags得到一个空闲bit，代表的空闲的tag。有必要执行两次吗，啥意思
 ?????????????????????????????*/
 
-    //在blk_mq_get_driver_tag()->blk_mq_get_tag，hctx->tags->rqs[req->tag]=req，req来自进程的plug->mq_list链表，
+    //在blk_mq_get_driver_tag()->blk_mq_get_tag，hctx->  tags->rqs[req->tag]=req，req来自进程的plug->mq_list链表，
     //赋值后就建立了req与硬件队列的关系。这里保存从static_rqs分配得到的req。
 	struct request **rqs;//在__blk_mq_alloc_request()这里边保存的req是刚从static_rqs[]得到的空闲的req
 

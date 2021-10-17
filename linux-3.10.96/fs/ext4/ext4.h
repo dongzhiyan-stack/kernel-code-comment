@@ -170,9 +170,10 @@ struct ext4_allocation_request {
 				 EXT4_MAP_UNINIT | EXT4_MAP_FROM_CLUSTER)
 
 struct ext4_map_blocks {
-	ext4_fsblk_t m_pblk;
+	ext4_fsblk_t m_pblk;//bh映射的磁盘物理块首地址
+	//本次读取的文件逻辑块号，见_ext4_get_block()，这是相对于文件起始地址的，从0开始。如果磁盘物理块4K大小，则文件地址0~4K的m_lblk是0
 	ext4_lblk_t m_lblk;
-	unsigned int m_len;
+	unsigned int m_len;//该bh映射了几个磁盘物理块，见_ext4_get_block()
 	unsigned int m_flags;
 };
 

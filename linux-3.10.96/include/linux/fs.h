@@ -589,14 +589,15 @@ struct inode {
       主次设备号，相等的
       */
 	dev_t			i_rdev;
-    //看着像是块设备总大小，就是该flash分区总大小
+    //看着像是块设备总大小，就是该flash分区总大小，错了，是文件大小吧
 	loff_t			i_size;
 	struct timespec		i_atime;//文件时间都是更新到这几个inode的time里
 	struct timespec		i_mtime;
 	struct timespec		i_ctime;
 	spinlock_t		i_lock;	/* i_blocks, i_bytes, maybe i_size */
 	unsigned short          i_bytes;
-    //与超级快struct super_block 的s_blocksize_bits相等，及块大小的bit数，bd_set_size赋值
+    //与超级快struct super_block 的s_blocksize_bits相等，bd_set_size()赋值。表示文件系统一个物理块大小的bit数，
+    //ext4文件系统一个磁盘物理块大小若为4K，则i_blkbits=12，2^12=4K
 	unsigned int		i_blkbits;
 	blkcnt_t		i_blocks;
 

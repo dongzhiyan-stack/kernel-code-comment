@@ -134,8 +134,8 @@ struct request *blk_mq_sched_get_request(struct request_queue *q,
 				rq->cmd_flags |= REQ_QUEUED;
 		} else
 		/*从硬件队列的blk_mq_tags结构体的tags->bitmap_tags或者tags->nr_reserved_tags分配一个空闲tag，然后req = tags->static_rqs[tag]
-        从static_rqs[]分配一个req，再req->tag=tag。接着hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。
-        分配失败则启动硬件IO数据派发，之后再尝试分配tag*/
+        从static_rqs[]分配一个req，再req->tag=tag。接着hctx->tags->rqs[rq->tag] = rq，一个req必须分配一个tag才能IO传输。一个tag是一个
+        编号而已。分配失败则启动硬件IO数据派发，之后再尝试分配tag*/
 			rq = __blk_mq_alloc_request(data, op);
 	} else {//无调度器
 	
@@ -149,6 +149,7 @@ struct request *blk_mq_sched_get_request(struct request_queue *q,
 			if (e && e->type->icq_cache)
 				blk_mq_sched_assign_ioc(q, rq, bio);
 		}
+        //分配到req后，queued++
 		data->hctx->queued++;
 		return rq;
 	}

@@ -598,7 +598,7 @@ int bio_get_nr_vecs(struct block_device *bdev)
 
 }
 EXPORT_SYMBOL(bio_get_nr_vecs);
-
+//分配一个新的bio_vec，向bio添加新的bio_vec
 static int __bio_add_page(struct request_queue *q, struct bio *bio, struct page
 			  *page, unsigned int len, unsigned int offset,
 			  unsigned short max_sectors)
@@ -671,8 +671,9 @@ static int __bio_add_page(struct request_queue *q, struct bio *bio, struct page
 	 * setup the new entry, we might clear it again later if we
 	 * cannot add the page
 	 */
+	//从bio->bi_io_vec[]数组以bio->bi_vcnt为数组下标取出一个bio_vec，
 	bvec = &bio->bi_io_vec[bio->bi_vcnt];
-	bvec->bv_page = page;
+	bvec->bv_page = page;//本次的page
 	bvec->bv_len = len;
 	bvec->bv_offset = offset;
 
@@ -705,10 +706,10 @@ static int __bio_add_page(struct request_queue *q, struct bio *bio, struct page
 	if (bio->bi_vcnt && (BIOVEC_PHYS_MERGEABLE(bvec-1, bvec)))
 		bio->bi_flags &= ~(1 << BIO_SEG_VALID);
 
-	bio->bi_vcnt++;
-	bio->bi_phys_segments++;
+	bio->bi_vcnt++;//bio的bvec结构加1，一个bvec代表一个page页和磁盘物理块
+	bio->bi_phys_segments++;//bio累加的磁盘物理块个数加1
  done:
-	bio->bi_size += len;
+	bio->bi_size += len;//bio->bi_size累计本次添加到文件页page代表的文件数据大小
 	return len;
 }
 

@@ -558,6 +558,7 @@ static void ext4_map_blocks_es_recheck(handle_t *handle,
  *
  * It returns the error in case of allocation failure.
  */
+//为bh的找到磁盘物理块，函数返回时map.m_pblk就是bh映射的第一个磁盘物理块地址吧，成功返回值大于0
 int ext4_map_blocks(handle_t *handle, struct inode *inode,
 		    struct ext4_map_blocks *map, int flags)
 {
@@ -760,7 +761,13 @@ has_zeroout:
 /* Maximum number of blocks we map for direct IO at once. */
 #define DIO_MAX_BLOCKS 4096
 
-static int _ext4_get_block(struct inode *inode, sector_t iblock,
+//根据本次读写的文件起始磁盘逻辑块号iblock和最大读取的文件数据量bh->b_size，完成文件磁盘逻辑地址与一片连续的磁盘物理块的映射。
+//函数返回后，bh->b_blocknr是映射的磁盘物理块地址，bh->b_size是实际完成映射的磁盘物理块数量*块大小。注意，本次
+//读取文件磁盘逻辑地址并不能全部完成映射。比如文件64*4K大小，但是这64*4K数据在物理磁盘分成两块，如磁盘物理地址0~32*4k和64*4k~96*4k。
+//则第一次执行_ext4_get_block完成文件地址0~32*4K与磁盘物理块0~32*4k的映射，之后就知道了文件地址0~32*4K对应的磁盘物理块地址，执行
+//submit_bio把文件数据传输到对应磁盘物理块(这是写，读则反过来)。接着执行_ext4_get_block完成文件地址32*4~64*4K与磁盘物理块64*4k~96*4k
+//的映射，最后同样执行submit_bio把文件数据传输到对应磁盘物理块(这是写，读则反过来).
+static int _ext4_get_block(struct inode *inode, sector_t iblock,//iblock是本次读写的起始磁盘逻辑块号
 			   struct buffer_head *bh, int flags)
 {
 	handle_t *handle = ext4_journal_current_handle();
@@ -770,8 +777,11 @@ static int _ext4_get_block(struct inode *inode, sector_t iblock,
 
 	if (ext4_has_inline_data(inode))
 		return -ERANGE;
-
+    
+    //本次读取的文件的逻辑块号
 	map.m_lblk = iblock;
+    //bh->b_size是本次读取的文件大小，相除后的map.m_len是本次读取文件大小对应的磁盘物理块个数。注意，这些磁盘物理块并不一定是
+    //连续的!
 	map.m_len = bh->b_size >> inode->i_blkbits;
 
 	if (flags && !(flags & EXT4_GET_BLOCKS_NO_LOCK) && !handle) {
@@ -787,11 +797,22 @@ static int _ext4_get_block(struct inode *inode, sector_t iblock,
 		}
 		started = 1;
 	}
-
+    
+    //为bh的找到映射的磁盘物理块，函数返回时map.m_pblk就是bh映射的第一个磁盘物理块号，map.m_len是实际映射的磁盘物理块个数。
+    //这些磁盘映射成功的磁盘物理块是物理地址连续的。成功返回值大于0。
 	ret = ext4_map_blocks(handle, inode, &map, flags);
 	if (ret > 0) {
+        //设置bh->b_state的"mapped"，赋值bh映射的起始磁盘物理块号bh->b_blocknr为map.m_pblk
 		map_bh(bh, inode->i_sb, map.m_pblk);
 		bh->b_state = (bh->b_state & ~EXT4_MAP_FLAGS) | map.m_flags;
+        //按照bh实际映射的磁盘物理块个数更新bh->b_size，_ext4_get_block函数刚执行时，bh->b_size是本次读取的文件数据大小，这是
+        //文件逻辑地址，逻辑地址连续，但是这片逻辑地址映射的磁盘物理块地址未必连续。比如本次读取0~64*4K的文件，bh->b_size刚开始
+        //是64*4K，但是文件0~64*4K数据在磁盘物理块不连续，分成两片如磁盘物理地址0~32*4K和64*4K~96*4k。则第一次执行ext4_map_blocks后，只映射了前32*4K的文件
+        //数据,map.m_len是32*4K，这里会更新bh->b_size=32*4K。默认ext4文件系统是4K，相当于第一执行_ext4_get_block()，只完成文件逻辑
+        //地址0~32*4K与磁盘物理块的映射关系，知道了文件0~32*4K地址对应磁盘物理块地址，之后就可以调用submit_bio把文件文件数据传输
+        //文件0~32*4K地址范围的磁盘物理块(或者反过来)。传输完成后，继续执行_ext4_get_block()完成文件地址32*4k~64*4K逻辑地址与磁盘
+        //物理块的映射，知道了文件32*4K~64*4K地址对应磁盘物理块地址，继续调用submit_bio这32*4K~64*4K的文件数据到磁盘物理块。总之，
+        //ext4_map_blocks()执行后只能完成文件逻辑地址与一片连续的磁盘物理地址的映射。
 		bh->b_size = inode->i_sb->s_blocksize * map.m_len;
 		ret = 0;
 	}
