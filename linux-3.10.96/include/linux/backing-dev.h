@@ -47,8 +47,8 @@ enum bdi_stat_item {
 	BDI_WRITEBACK,
 	/*__set_page_dirty->account_page_dirtied标记脏页时，BDI_DIRTIED的page加1，
 	ext4_writepage->redirty_page_for_writepage->account_page_redirty在submit_bio前减1*/
-	BDI_DIRTIED,
-	BDI_WRITTEN,
+	BDI_DIRTIED,//当前bdi块设备的脏页数
+	BDI_WRITTEN, //当前bdi块设备已经回写的脏页数
 	NR_BDI_STAT_ITEMS
 };
 
@@ -85,11 +85,17 @@ struct backing_dev_info {
 	char *name;//打印结果是"device"
 
 	struct percpu_counter bdi_stat[NR_BDI_STAT_ITEMS];
-
+    //bdi->bw_time_stamp是上次执行__bdi_update_bandwidth()计算bdi->dirty_ratelimit的系统时间
 	unsigned long bw_time_stamp;	/* last time write bw is updated */
-	unsigned long dirtied_stamp;
+	unsigned long dirtied_stamp;//当前bdi块设备的脏页数
+	//当前bdi块设备已经回写的脏页数
 	unsigned long written_stamp;	/* pages written at bw_time_stamp */
+
+    /*write_bandwidth、avg_write_bandwidth、dirty_ratelimit、balanced_dirty_ratelimit 的单位都是文件页page数，初值bdi_init()都是
+     100MB字节对应的page数*/
+    //bdi->write_bandwidth表示最近一段时间单位时间内bdi块设备回写磁盘的脏页数，见bdi_update_write_bandwidth()
 	unsigned long write_bandwidth;	/* the estimated write bandwidth */
+    //单位时间内bdi块设备回写磁盘的脏页数，缓慢接近bdi->write_bandwidth，见bdi_update_write_bandwidth()
 	unsigned long avg_write_bandwidth; /* further smoothed write bw */
 
 	/*
@@ -98,10 +104,15 @@ struct backing_dev_info {
 	 * @dirty_ratelimit tracks the estimated @balanced_dirty_ratelimit
 	 * in small steps and is much more smooth/stable than the latter.
 	 */
+	//dirty_ratelimit表示bdi块设备脏页速率限制page数，与balanced_dirty_ratelimit无限接近。见bdi_update_dirty_ratelimit()
 	unsigned long dirty_ratelimit;
+    //balanced_dirty_ratelimit表示因脏页平衡而脏页速率限制的page数，与bdi脏页产生速率和脏页回写磁盘速率有关，见bdi_update_dirty_ratelimit()
+    //最大值是前一次单位时间内bdi块设备回写磁盘的脏页数avg_write_bandwidth。
 	unsigned long balanced_dirty_ratelimit;
 
 	struct fprop_local_percpu completions;
+    //balance_dirty_pages()中进程脏页太多，并且bdi脏页太多，则bdi->dirty_exceeded=1表示脏页太多。然后进程可能休眠，
+    //退出balance_dirty_pages()时再清0
 	int dirty_exceeded;
 
 	unsigned int min_ratio;

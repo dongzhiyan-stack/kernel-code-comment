@@ -661,6 +661,8 @@ unsigned long bdi_dirty_limit(struct backing_dev_info *bdi, unsigned long dirty)
  *   card's bdi_dirty may rush to many times higher than bdi_setpoint.
  * - the bdi dirty thresh drops quickly due to change of JBOD workload
  */
+//pos_ratio的计算是个玄学，与脏页数有关系。全局pos_ratio介于0~2之间，系统脏页nr_dirty越多pos_ratio越小，nr_dirty超过
+//最大脏页阀值pos_ratio是0，这表示系统脏页太多了，进程要立即进行脏页平衡而休眠。bdi pos_ratio的计算是个玄学，搞不清楚
 static unsigned long bdi_position_ratio(struct backing_dev_info *bdi,
 					unsigned long thresh,
 					unsigned long bg_thresh,
@@ -668,8 +670,11 @@ static unsigned long bdi_position_ratio(struct backing_dev_info *bdi,
 					unsigned long bdi_thresh,
 					unsigned long bdi_dirty)
 {
+    //单位时间内bdi块设备回写磁盘的脏页数，缓慢接近bdi->write_bandwidth
 	unsigned long write_bw = bdi->avg_write_bandwidth;
+    //freerun=(thresh+bg_thresh)/2 最小脏页阀值
 	unsigned long freerun = dirty_freerun_ceiling(thresh, bg_thresh);
+    //limit是最大脏页阀值
 	unsigned long limit = hard_dirty_limit(thresh);
 	unsigned long x_intercept;
 	unsigned long setpoint;		/* dirty pages' target balance point */
@@ -697,6 +702,7 @@ static unsigned long bdi_position_ratio(struct backing_dev_info *bdi,
 	 * (5) the closer to setpoint, the smaller |df/dx| (and the reverse)
 	 *     => fast response on large errors; small oscillation near setpoint
 	 */
+	//setpoint对freerun+limit取半
 	setpoint = (freerun + limit) / 2;
 	x = div_s64(((s64)setpoint - (s64)dirty) << RATELIMIT_CALC_SHIFT,
 		    limit - setpoint + 1);
@@ -787,7 +793,7 @@ static unsigned long bdi_position_ratio(struct backing_dev_info *bdi,
 
 static void bdi_update_write_bandwidth(struct backing_dev_info *bdi,
 				       unsigned long elapsed,
-				       unsigned long written)
+				       unsigned long written)//written是当前bdi块设备已经回写的脏页数
 {
 	const unsigned long period = roundup_pow_of_two(3 * HZ);
 	unsigned long avg = bdi->avg_write_bandwidth;
@@ -801,9 +807,16 @@ static void bdi_update_write_bandwidth(struct backing_dev_info *bdi,
 	 * write_bandwidth = ---------------------------------------------------
 	 *                                          period
 	 *
+     假设 period = 3HZ ，elapsed=1HZ
+	 则 bw = written * HZ / elapsed=written
+	    write_bandwidth =  (written * HZ + write_bandwidth *2HZ)/3HZ，
+	    write_bandwidth表示一段内bdi块设备回写的脏页数增加速率
+	    
 	 * @written may have decreased due to account_page_redirty().
 	 * Avoid underflowing @bw calculation.
 	 */
+	//bdi->written_stamp是上次执行__bdi_update_bandwidth()赋值的bdi块设备回写脏页数，written是现在bdi块设备回写脏页数
+	//二者相减是计算最近两次时间间隔内bdi块设备回写的脏页数
 	bw = written - min(written, bdi->written_stamp);
 	bw *= HZ;
 	if (unlikely(elapsed > period)) {
@@ -811,21 +824,24 @@ static void bdi_update_write_bandwidth(struct backing_dev_info *bdi,
 		avg = bw;
 		goto out;
 	}
+    //就是 bw * elapsed + write_bandwidth * (period - elapsed)
 	bw += (u64)bdi->write_bandwidth * (period - elapsed);
+    //就是 (bw * elapsed + write_bandwidth * (period - elapsed))/period
 	bw >>= ilog2(period);
 
 	/*
 	 * one more level of smoothing, for filtering out sudden spikes
 	 */
-	if (avg > old && old >= (unsigned long)bw)
+	if (avg > old && old >= (unsigned long)bw)//avg > old >bw，则avg减少(avg - old)/8，使得avg接近bw
 		avg -= (avg - old) >> 3;
 
-	if (avg < old && old <= (unsigned long)bw)
+	if (avg < old && old <= (unsigned long)bw)//avg < old < bw，则avg增加(avg - old)/8，使得avg接近bw
 		avg += (old - avg) >> 3;
 
 out:
+    //根据最近一段时间回写的脏页数计算单位时间内bdi块设备回写磁盘的脏页数bdi->write_bandwidth
 	bdi->write_bandwidth = bw;
-	bdi->avg_write_bandwidth = avg;
+	bdi->avg_write_bandwidth = avg;//bdi->avg_write_bandwidth缓慢接近bdi->write_bandwidth
 }
 
 /*
@@ -899,11 +915,15 @@ static void bdi_update_dirty_ratelimit(struct backing_dev_info *bdi,
 				       unsigned long dirtied,
 				       unsigned long elapsed)
 {
+    //freerun=(thresh+bg_thresh)/2 最小脏页阀值
 	unsigned long freerun = dirty_freerun_ceiling(thresh, bg_thresh);
+    //limit是最大脏页阀值
 	unsigned long limit = hard_dirty_limit(thresh);
+    //setpoint是
 	unsigned long setpoint = (freerun + limit) / 2;
+    //write_bw=bdi->write_bandwidth表示前一次单位时间内bdi块设备回写磁盘的脏页数
 	unsigned long write_bw = bdi->avg_write_bandwidth;
-	unsigned long dirty_ratelimit = bdi->dirty_ratelimit;
+	unsigned long dirty_ratelimit = bdi->dirty_ratelimit;//前一次bdi块设备速率限制脏页数
 	unsigned long dirty_rate;
 	unsigned long task_ratelimit;
 	unsigned long balanced_dirty_ratelimit;
@@ -915,13 +935,18 @@ static void bdi_update_dirty_ratelimit(struct backing_dev_info *bdi,
 	 * The dirty rate will match the writeout rate in long term, except
 	 * when dirty pages are truncated by userspace or re-dirtied by FS.
 	 */
+	//dirtied是bdi块设备当前的脏页数，bdi->dirtied_stamp是前一次执行bdi_update_dirty_ratelimit()计算dirty_ratelimit的脏页数，
+	//elapsed这两次的时间差。二者相除计算出来的dirty_rate就是这段时间内，bdi块设备产生的脏页数。再乘以HZ是为了跟系统时间
+	//扯上关系吧，本质没啥意义!
 	dirty_rate = (dirtied - bdi->dirtied_stamp) * HZ / elapsed;
-
+    //pos_ratio的计算是个玄学，与脏页数有关系。全局pos_ratio介于0~2之间，系统脏页nr_dirty越多pos_ratio越小，nr_dirty超过
+    //最大脏页阀值pos_ratio是0，这表示系统脏页太多了，进程要立即进行脏页平衡而休眠。bdi pos_ratio的计算是个玄学，搞不清楚
 	pos_ratio = bdi_position_ratio(bdi, thresh, bg_thresh, dirty,
 				       bdi_thresh, bdi_dirty);
 	/*
 	 * task_ratelimit reflects each dd's dirty rate for the past 200ms.
 	 */
+	//dirty_ratelimit是上一次计算的 bdi->dirty_ratelimit，从而计算出task_ratelimit
 	task_ratelimit = (u64)dirty_ratelimit *
 					pos_ratio >> RATELIMIT_CALC_SHIFT;
 	task_ratelimit++; /* it helps rampup dirty_ratelimit from tiny values */
@@ -956,11 +981,17 @@ static void bdi_update_dirty_ratelimit(struct backing_dev_info *bdi,
 	 * the dirty count meet the setpoint, but also where the slope of
 	 * pos_ratio is most flat and hence task_ratelimit is least fluctuated.
 	 */
+	//write_bw是前一次单位时间内bdi块设备回写磁盘的脏页数，dirty_rate是前一次到这次时间内刷回磁盘的脏页数
+	//balanced_dirty_ratelimit = task_ratelimit *(write_bw/dirty_rate)，按照内核说明，这是为了计算对一个进程的
+	//脏页速率限制数，搞不清楚，dirty_rate跟写文件的进程数有啥关系
 	balanced_dirty_ratelimit = div_u64((u64)task_ratelimit * write_bw,
 					   dirty_rate | 1);
 	/*
 	 * balanced_dirty_ratelimit ~= (write_bw / N) <= write_bw
 	 */
+	//balanced_dirty_ratelimit最大不能超过write_bw，write_bw是前一次计算的单位时间内bdi块设备回写磁盘的脏页数。就是说
+	//本次计算出来的balanced_dirty_ratelimit脏页平衡脏页速率限制page数，不能超过前一次单位时间内bdi块设备回写磁盘的脏页数。
+	//这是什么逻辑?
 	if (unlikely(balanced_dirty_ratelimit > write_bw))
 		balanced_dirty_ratelimit = write_bw;
 
@@ -1022,6 +1053,7 @@ static void bdi_update_dirty_ratelimit(struct backing_dev_info *bdi,
 	 */
 	step = (step + 7) / 8;
 
+    //dirty_ratelimit是在上一次的基础上增加或者减少step，从而更接近本次计算的balanced_dirty_ratelimit
 	if (dirty_ratelimit < balanced_dirty_ratelimit)
 		dirty_ratelimit += step;
 	else
@@ -1042,6 +1074,8 @@ void __bdi_update_bandwidth(struct backing_dev_info *bdi,
 			    unsigned long start_time)
 {
 	unsigned long now = jiffies;
+    //bdi->bw_time_stamp是上次执行__bdi_update_bandwidth()计算bdi->dirty_ratelimit的系统时间，相减后elapsed需要大于200ms，才能
+    //再次计算bdi->dirty_ratelimit
 	unsigned long elapsed = now - bdi->bw_time_stamp;
 	unsigned long dirtied;
 	unsigned long written;
@@ -1049,10 +1083,12 @@ void __bdi_update_bandwidth(struct backing_dev_info *bdi,
 	/*
 	 * rate-limit, only update once every 200ms.
 	 */
+	//每两次的时间间隔要大于200ms
 	if (elapsed < BANDWIDTH_INTERVAL)
 		return;
-
+    //当前bdi块设备的脏页数
 	dirtied = percpu_counter_read(&bdi->bdi_stat[BDI_DIRTIED]);
+    //当前bdi块设备已经回写的脏页数
 	written = percpu_counter_read(&bdi->bdi_stat[BDI_WRITTEN]);
 
 	/*
@@ -1069,12 +1105,14 @@ void __bdi_update_bandwidth(struct backing_dev_info *bdi,
 					   bdi_thresh, bdi_dirty,
 					   dirtied, elapsed);
 	}
+    
+    //这里计算bdi->write_bandwidth和bdi->avg_write_bandwidth
 	bdi_update_write_bandwidth(bdi, elapsed, written);
 
 snapshot:
-	bdi->dirtied_stamp = dirtied;
-	bdi->written_stamp = written;
-	bdi->bw_time_stamp = now;
+	bdi->dirtied_stamp = dirtied;//当前bdi块设备的脏页数
+	bdi->written_stamp = written;//当前bdi块设备已经回写的脏页数
+	bdi->bw_time_stamp = now;//记录__bdi_update_bandwidth()函数中更新bdi->dirty_ratelimit的时间
 }
 
 static void bdi_update_bandwidth(struct backing_dev_info *bdi,
@@ -1085,6 +1123,7 @@ static void bdi_update_bandwidth(struct backing_dev_info *bdi,
 				 unsigned long bdi_dirty,
 				 unsigned long start_time)
 {
+    //需要间隔200ms才能再次执行__bdi_update_bandwidth()
 	if (time_is_after_eq_jiffies(bdi->bw_time_stamp + BANDWIDTH_INTERVAL))
 		return;
 	spin_lock(&bdi->wb.list_lock);
@@ -1123,6 +1162,8 @@ static unsigned long bdi_max_pause(struct backing_dev_info *bdi,
 	 *
 	 * 8 serves as the safety ratio.
 	 */
+	//bdi_dirty脏页越多，bw代表的前一次单位时间内bdi块设备回写磁盘的脏页数，bw越少，计算出max_pause越大。就是说，脏页越多
+	//而bdi块设备回写磁盘的脏页数太少，则因脏页平衡而休眠的时间应该越大??????
 	t = bdi_dirty / (1 + bw / roundup_pow_of_two(1 + HZ / 8));
 	t++;
 
@@ -1142,7 +1183,7 @@ static long bdi_min_pause(struct backing_dev_info *bdi,
 	int pages;	/* target nr_dirtied_pause */
 
 	/* target for 10ms pause on 1-dd case */
-	t = max(1, HZ / 100);
+	t = max(1, HZ / 100);//t这里表示进程因脏页平衡而休眠的时间，初值10ms
 
 	/*
 	 * Scale up pause time for concurrent dirtiers in order to reduce CPU
@@ -1172,6 +1213,8 @@ static long bdi_min_pause(struct backing_dev_info *bdi,
 	 *    nr_dirtied_pause will remain as stable as dirty_ratelimit.
 	 */
 	t = min(t, 1 + max_pause / 2);
+    //这里计算出来pages就是nr_dirtied_pause，进程要进行脏页平衡的脏页阀值，与dirty_ratelimit这个脏页平衡限制速率page数
+    //和因脏页平衡而休眠的时间t成正比。
 	pages = dirty_ratelimit * t / roundup_pow_of_two(HZ);
 
 	/*
@@ -1201,6 +1244,8 @@ static long bdi_min_pause(struct backing_dev_info *bdi,
 	/*
 	 * The minimal pause time will normally be half the target pause time.
 	 */
+	//t这里表示进程因脏页平衡而休眠的时间，nr_dirtied_pause大于128个page时，min_pause=t/2，否则min_pause=t.nr_dirtied_pause
+	//越大min_pause越小?????????
 	return pages >= DIRTY_POLL_THRESH ? 1 + t / 2 : t;
 }
 
@@ -1262,15 +1307,16 @@ static void balance_dirty_pages(struct address_space *mapping,
 		freerun = dirty_freerun_ceiling(dirty_thresh,
 						background_thresh);
         
-        //如果进程脏页不多这里直接break了  task_struct
+        //如果进程脏页不多这里直接break了，不会休眠
 		if (nr_dirty <= freerun) {
-			current->dirty_paused_when = now;
-			current->nr_dirtied = 0;//为什么要对进程脏页数清0???????
-			current->nr_dirtied_pause =
+			current->dirty_paused_when = now;//更新进程的dirty_paused_when
+			//每次执行balance_dirty_pages()函数都对current->nr_dirtied清0，这表示进行了脏页平衡所以对清0???????
+			current->nr_dirtied = 0;
+			current->nr_dirtied_pause =//测试时这里dirty_poll_interval()基本返回256
 				dirty_poll_interval(nr_dirty, dirty_thresh);
 			break;
 		}
-        //脏页回写进程没有运行的话则唤醒它
+        //脏页太多而该bdi块设备脏页回写内核worker进程没运行，则唤醒bdi块设备脏页回写内核worker进程
 		if (unlikely(!writeback_in_progress(bdi)))
 			bdi_start_background_writeback(bdi);
 
@@ -1312,9 +1358,8 @@ static void balance_dirty_pages(struct address_space *mapping,
 				    bdi_stat(bdi, BDI_WRITEBACK);
 		}
 
-        /*bdi_dirty 和 nr_dirty 都超标则dirty_exceeded=1，bdi_dirty和nr_dirty有啥区别呢?
-         其实我看二者都表示脏页+正在回写的脏页，但是nr_dirty包含了 NR_UNSTABLE_NFS 的脏页
-        */
+        /*bdi_dirty 和 nr_dirty 都超标则dirty_exceeded=1，bdi_dirty和nr_dirty有啥区别呢?其实我看二者都表示脏页+正在回写的脏页
+        ，但是nr_dirty包含了 NR_UNSTABLE_NFS 的脏页。测试脏页平衡休眠时，有时dirty_exceeded为1，有时dirty_exceeded是0*/
 		dirty_exceeded = (bdi_dirty > bdi_thresh) &&
 				  (nr_dirty > dirty_thresh);
 
@@ -1325,41 +1370,42 @@ static void balance_dirty_pages(struct address_space *mapping,
         //计算bdi->write_bandwidth和bdi->dirty_ratelimit，过程很复杂
 		bdi_update_bandwidth(bdi, dirty_thresh, background_thresh,
 				     nr_dirty, bdi_thresh, bdi_dirty,
-				     start_time);
+				     start_time);//计算bdi->dirty_ratelimit时用到了start_time
 
 		dirty_ratelimit = bdi->dirty_ratelimit;
-        //pos_ratio的计算也很复杂
+        //pos_ratio的计算也很复杂，pos_ratio>>RATELIMIT_CALC_SHIFT后介于0~2左右，是个比例值，下边dirty_ratelimit乘以这个比例值得到task_ratelimit
 		pos_ratio = bdi_position_ratio(bdi, dirty_thresh,
 					       background_thresh, nr_dirty,
 					       bdi_thresh, bdi_dirty);
         
         //根据dirty_ratelimit和pos_ratio计算进程的task_ratelimit，task_ratelimit用来限制进程因脏页太多而休眠的时间
+        //task_ratelimit = dirty_ratelimit *(pos_ratio/1024),pos_ratio/1024在0~2左右，是个比例值
 		task_ratelimit = ((u64)dirty_ratelimit * pos_ratio) >>
 							RATELIMIT_CALC_SHIFT;
 
-        //根据bdi_dirty计算最大休眠时间mac_pause
+        //根据bdi_dirty计算最大休眠时间mac_pause，bdi_dirty越大休眠时间越长
 		max_pause = bdi_max_pause(bdi, bdi_dirty);
         //根据max_pause、task_ratelimit、dirty_ratelimit计算最小休眠时间
 		min_pause = bdi_min_pause(bdi, max_pause,
 					  task_ratelimit, dirty_ratelimit,
-					  &nr_dirtied_pause);
+					  &nr_dirtied_pause);//进程脏页数超过nr_dirtied_pause就要脏页平衡
 
-        //如果
+        //测试测试task_ratelimit会出现0，但是概率很低，此时脏页太多必须休眠
 		if (unlikely(task_ratelimit == 0)) {
 			period = max_pause;
 			pause = max_pause;
 			goto pause;
 		}
-        //period=当前进程脏页数pages_dirtied除以task_ratelimit，因脏页太多而最大休眠时间，与脏页数有关。与HZ相乘后,单位就和jiffies一样了
+        //period=当前进程脏页数pages_dirtied除以task_ratelimit，因脏页太多而要休眠的时间，与脏页数有关。与HZ相乘后,单位就和jiffies一样了
 		period = HZ * pages_dirtied / task_ratelimit;
 
         //pause很重要，表示当前进程因为脏页太多而被迫休眠的时间
 		pause = period;
 
-        //dirty_paused_when是进程上一次因为脏页太多被迫休眠的时间点，now-current->dirty_paused_when表示当前休眠时间与
-        //上一次休眠时间的时间差，pause减去这个时间差是何意?减少休眠时间?
+        //current->dirty_paused_when是进程上一次执行balance_dirty_pages()脏页平衡的时间点(或者再加上休眠的时间点)，
+        //now-current->dirty_paused_when这个时间差可能为正或者负数。时间差为正数时减少pause休眠时间，时间差为负数时增大pause休眠时间。
 		if (current->dirty_paused_when)
-			pause -= now - current->dirty_paused_when;
+			pause -= now - current->dirty_paused_when;//now - current->dirty_paused_when会出现负数
 		/*
 		 * For less than 1s think time (ext3/4 may block the dirtier
 		 * for up to 800ms from time to time on 1-HDD; so does xfs,
@@ -1367,7 +1413,7 @@ static void balance_dirty_pages(struct address_space *mapping,
 		 * future periods by updating the virtual time; otherwise just
 		 * do a reset, as it may be a light dirtier.
 		 */
-		//pause小于最小休眠时间min_pause直接break，就是说休眠时间太小干脆不休眠了
+		//pause小于最小休眠时间min_pause直接break，休眠时间太小干脆不休眠了
 		if (pause < min_pause) {
 			trace_balance_dirty_pages(bdi,
 						  dirty_thresh,
@@ -1383,20 +1429,24 @@ static void balance_dirty_pages(struct address_space *mapping,
 						  start_time);
 			if (pause < -HZ) {
 				current->dirty_paused_when = now;//current->dirty_paused_when太小被更新为当前时间
+				//每次执行balance_dirty_pages()函数都对current->nr_dirtied清0，这表示进行了脏页平衡所以对清0???????
 				current->nr_dirtied = 0;
-			} else if (period) {
+			} else if (period) {//period >=-HZ 且不为0
 				current->dirty_paused_when += period;//current->dirty_paused_when
+				//每次执行balance_dirty_pages()函数都对current->nr_dirtied清0，这表示进行了脏页平衡所以对清0???????
 				current->nr_dirtied = 0;
+            //这里在period为0时成立，
 			} else if (current->nr_dirtied_pause <= pages_dirtied)
+			    //current->nr_dirtied_pause累加当前进程的脏页数pages_dirtied，越来越大
 				current->nr_dirtied_pause += pages_dirtied;
             
 			break;
 		}
-        
+        //pause超过最大休眠时间则被赋值max_pause
 		if (unlikely(pause > max_pause)) {
 			/* for occasional dropped task_ratelimit */
 			now += min(pause - max_pause, max_pause);
-			pause = max_pause;//最大休眠时间
+			pause = max_pause;
 		}
 
 pause:
@@ -1413,13 +1463,16 @@ pause:
 					  pause,
 					  start_time);
 		__set_current_state(TASK_KILLABLE);
-        //休眠
+        //休眠pause毫秒
 		io_schedule_timeout(pause);
 
-        //更新进程task_struct的dirty_paused_when、nr_dirtied、nr_dirtied_pause
+        //current->dirty_paused_when这里记录脏页balance_dirty_pages的时间=当前时间+休眠时间，pause最大200ms。如果系统脏页太多，
+        //进程很快又执行到balance_dirty_pages()里的pause -= now-current->dirty_paused_when ，计算进程因为脏页太多休眠的时间，
+        //会出现now-current->dirty_paused_when是负数，导致pause很大，进程又要休眠。这样的目的应该是系统脏页太多了，进程多休眠。
 		current->dirty_paused_when = now + pause;
+        //每次执行balance_dirty_pages()函数都对current->nr_dirtied清0，这表示进行了脏页平衡所以对清0???????
 		current->nr_dirtied = 0;
-		current->nr_dirtied_pause = nr_dirtied_pause;
+		current->nr_dirtied_pause = nr_dirtied_pause;//脏页太多休眠唤醒后current->nr_dirtied_pause赋初值
 
 		/*
 		 * This is typically equal to (nr_dirty < dirty_thresh) and can
@@ -1445,7 +1498,8 @@ pause:
 			break;
 	}
 
-    //脏页不超标了则对bdi->dirty_exceeded清0
+    //脏页不超标了则对bdi->dirty_exceeded清0。这里有个理解误区，当进程1在balance_dirty_pages()函数前边bdi->dirty_exceeded=1置1，
+    //但是进程1执行到这里不会对bdi->dirty_exceeded=0清0，因为dirty_exceeded是1。需另外的进程执行到这里才会bdi->dirty_exceeded=0清0
 	if (!dirty_exceeded && bdi->dirty_exceeded)
 		bdi->dirty_exceeded = 0;
 
@@ -1518,10 +1572,11 @@ void balance_dirty_pages_ratelimited(struct address_space *mapping)
 	if (!bdi_cap_account_dirty(bdi))
 		return;
 
-    //进程task结构的nr_dirtied_pause，即进程达到多少脏页时，进程写文件需要balance_dirty平衡脏页数
-	ratelimit = current->nr_dirtied_pause;
+    //进程task结构的nr_dirtied_pause，即进程达到多少脏页时，进程需要执行balance_dirty_pages()进行脏页平衡
+	ratelimit = current->nr_dirtied_pause;//测试时ratelimit=current->nr_dirtied_pause 有64，32，256
+	//如果已经执行balance_dirty_pages()进行脏页平衡，重新计算ratelimit，会很小(8)，这样很容易执行下边的balance_dirty_pages()
 	if (bdi->dirty_exceeded)
-		ratelimit = min(ratelimit, 32 >> (PAGE_SHIFT - 10));
+		ratelimit = min(ratelimit, 32 >> (PAGE_SHIFT - 10));//降低ratelimit，32 >> (PAGE_SHIFT - 10)=8
 
 	preempt_disable();
 	/*
@@ -1530,11 +1585,11 @@ void balance_dirty_pages_ratelimited(struct address_space *mapping)
 	 * 1000+ tasks, all of them start dirtying pages at exactly the same
 	 * time, hence all honoured too large initial task->nr_dirtied_pause.
 	 */
-	//在标记page脏页时执行account_page_dirtied()令bdp_ratelimits加1，表示当前cpu的脏页数?
-	p =  &__get_cpu_var(bdp_ratelimits);//p指向per cpu变量bdp_ratelimits，crash打印参数是0xc4、0xc8、0x2a、0xd
+	//在标记page脏页时执行account_page_dirtied()令bdp_ratelimits加1，表示当前cpu的脏页数
+	p =  &__get_cpu_var(bdp_ratelimits);//测试时bdp_ratelimits由1曾大到63还有256，进程脏页太多下边的if才成立
 	if (unlikely(current->nr_dirtied >= ratelimit))
-		*p = 0;//对per cpu变量bdp_ratelimits变量清0，啥意思呢
-	else if (unlikely(*p >= ratelimit_pages)) {//ratelimit_pages=32 
+		*p = 0;//对per cpu变量bdp_ratelimits变量清0，这表示脏页太多，下边就要执行balance_dirty_pages进行脏页平衡了
+	else if (unlikely(*p >= ratelimit_pages)) {//ratelimit_page初值32 ，实际1982，这里很少成立
 		*p = 0;
 		ratelimit = 0;
 	}
@@ -1545,14 +1600,14 @@ void balance_dirty_pages_ratelimited(struct address_space *mapping)
 	 */
 	//进程退出时把进程残留的脏页数累加到dirty_throttle_leaks这个per cpu变量
 	p = &__get_cpu_var(dirty_throttle_leaks);
-	if (*p > 0 && current->nr_dirtied < ratelimit) {
+	if (*p > 0 && current->nr_dirtied < ratelimit) {//测试时if很少成立，dirty_throttle_leaks基本是0，有时会大于0
 		unsigned long nr_pages_dirtied;
 		nr_pages_dirtied = min(*p, ratelimit - current->nr_dirtied);
 		*p -= nr_pages_dirtied;
-		current->nr_dirtied += nr_pages_dirtied;
+		current->nr_dirtied += nr_pages_dirtied;//增加当前进程脏页数nr_pages_dirtied
 	}
 	preempt_enable();
-
+    //当前进程脏页数大于ratelimit才会执行balance_dirty_pages()进行脏页平衡
 	if (unlikely(current->nr_dirtied >= ratelimit))
 		balance_dirty_pages(mapping, current->nr_dirtied);
 }

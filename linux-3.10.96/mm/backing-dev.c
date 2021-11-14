@@ -439,7 +439,7 @@ static void bdi_wb_init(struct bdi_writeback *wb, struct backing_dev_info *bdi)
 /*
  * Initial write bandwidth: 100 MB/s
  */
-#define INIT_BW		(100 << (20 - PAGE_SHIFT))
+#define INIT_BW		(100 << (20 - PAGE_SHIFT))// 100M转成4K大小的page数
 //初始化bdi->wb->delayed_work，bdi_writeback_workfn函数指针赋值于dwork->work->func
 int bdi_init(struct backing_dev_info *bdi)
 {

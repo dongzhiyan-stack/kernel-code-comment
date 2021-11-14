@@ -413,7 +413,7 @@ out:
  *
  *	Insert an item into the radix tree at position @index.
  */
-//把item插入的radix树
+//把item插入的radix树---不要看这个SB，看957-27内核的，radix tree有详细注释
 int radix_tree_insert(struct radix_tree_root *root,
 			unsigned long index, void *item)
 {

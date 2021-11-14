@@ -1394,8 +1394,11 @@ struct task_struct {
 	 * when (nr_dirtied >= nr_dirtied_pause), it's time to call
 	 * balance_dirty_pages() for some dirty throttling pause
 	 */
-	int nr_dirtied;//进程脏页数
-	int nr_dirtied_pause;//当进程脏页数超过nr_dirtied_pause要强制回写脏页
+	//进程脏页数,但是执行balance_dirty_pages()函数不管是否会因为平衡而休眠，nr_dirtied都清0，此时并进程脏页数并没有清0
+	int nr_dirtied;
+	//balance_dirty_pages_ratelimited(),如果进程脏页数超过nr_dirtied_pause,则要执行balance_dirty_pages()看是否需要因为脏页太多回写而休眠
+	int nr_dirtied_pause;
+	//记录进程脏页balance的时间，基本每次执行balance_dirty_pages()函数都会更新进程结构dirty_paused_when为当前系统时间
 	unsigned long dirty_paused_when; /* start of a write-and-pause period */
 
 #ifdef CONFIG_LATENCYTOP

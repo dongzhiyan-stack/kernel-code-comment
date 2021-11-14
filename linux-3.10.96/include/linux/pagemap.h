@@ -98,7 +98,7 @@ static inline void mapping_set_gfp_mask(struct address_space *m, gfp_t mask)
 #define PAGE_CACHE_ALIGN(addr)	(((addr)+PAGE_CACHE_SIZE-1)&PAGE_CACHE_MASK)
 //page->_count加1
 #define page_cache_get(page)		get_page(page)
-//page->_count减1
+//page->_count减1，如果page引用计数为0则释放struct page结构
 #define page_cache_release(page)	put_page(page)
 void release_pages(struct page **pages, int nr, int cold);
 

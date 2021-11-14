@@ -484,10 +484,11 @@ int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 		page->mapping = mapping;
         //在文件内偏移作为page->index
 		page->index = offset;
-
+        /*这里的锁保证向radix tree中添加page不会被其他进程打断*/
 		spin_lock_irq(&mapping->tree_lock);
         //page插入文件自己的address_space的radix_tree_root树
 		error = radix_tree_insert(&mapping->page_tree, offset, page);
+        //page插入成功error返回0
 		if (likely(!error)) {
 			mapping->nrpages++;//mapping->nrpages++，插入radix_tree_root树的page数加1
 			__inc_zone_page_state(page, NR_FILE_PAGES);
@@ -498,6 +499,7 @@ int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 			/* Leave page->index set: truncation relies upon it */
 			spin_unlock_irq(&mapping->tree_lock);
 			mem_cgroup_uncharge_cache_page(page);
+            //page->_count减1，如果page引用计数为0则释放struct page结构
 			page_cache_release(page);
 		}
 		radix_tree_preload_end();
@@ -2380,7 +2382,9 @@ repeat:
 	status = add_to_page_cache_lru(page, mapping, index,
 						GFP_KERNEL & ~gfp_notmask);
 	if (unlikely(status)) {
+        //释放掉上边__page_cache_alloc分配的page结构
 		page_cache_release(page);
+        //如果同一个索引的page已经添加到了radix tree,该if成立，goto repeat 后再次从radix tree中找到已经添加的page
 		if (status == -EEXIST)
 			goto repeat;
 		return NULL;
