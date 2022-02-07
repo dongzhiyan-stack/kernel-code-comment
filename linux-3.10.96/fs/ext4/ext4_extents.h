@@ -72,9 +72,13 @@ struct ext4_extent_tail {
  * This is the extent on-disk structure.
  * It's used at the bottom of the tree.
  */
+//ext4 extent叶子节点，真正包含逻辑块地址和物理块地址的映射关系
 struct ext4_extent {
+    //起始逻辑块地址
 	__le32	ee_block;	/* first logical block extent covers */
+    //映射的block个数
 	__le16	ee_len;		/* number of blocks covered by extent */
+    //由ee_start_hi和ee_start_lo一起组成物理块地址
 	__le16	ee_start_hi;	/* high 16 bits of physical block */
 	__le32	ee_start_lo;	/* low 32 bits of physical block */
 };
@@ -83,8 +87,11 @@ struct ext4_extent {
  * This is index on-disk structure.
  * It's used at all the levels except the bottom.
  */
+//ext4 extent B+数的索引节点
 struct ext4_extent_idx {
+    //起始逻辑块地址
 	__le32	ei_block;	/* index covers logical blocks from 'block' */
+    //由ei_leaf_lo和ei_leaf_hi组成起始逻辑块地址对应的物理块地址
 	__le32	ei_leaf_lo;	/* pointer to the physical block of the next *
 				 * level. leaf or next index could be there */
 	__le16	ei_leaf_hi;	/* high 16 bits of physical block */
@@ -94,6 +101,7 @@ struct ext4_extent_idx {
 /*
  * Each block (leaves and indexes), even inode-stored has header.
  */
+//ext4 extent头信息
 struct ext4_extent_header {
 	__le16	eh_magic;	/* probably will support different formats */
 	__le16	eh_entries;	/* number of valid entries */
@@ -121,11 +129,15 @@ find_ext4_extent_tail(struct ext4_extent_header *eh)
  * Truncate uses it to simulate recursive walking.
  */
 struct ext4_ext_path {
-	ext4_fsblk_t			p_block;
-	__u16				p_depth;
+	ext4_fsblk_t			p_block;//ext4_ext_find_extent()中赋值，物理块地址
+	__u16				p_depth;//处于ext4 extent B+树第几层
+	//ext4_ext_binsearch()中赋值，指向起始逻辑块地址最接近传入的起始逻辑块地址block的ext4_extent
 	struct ext4_extent		*p_ext;
+    //ext4_ext_binsearch_idx()中赋值，指向起始逻辑块地址最接近传入的起始逻辑块地址block的ext4_extent_idx
 	struct ext4_extent_idx		*p_idx;
+    //指向ext4 extent B+头结点结构体,ext4_ext_find_extent()中赋值
 	struct ext4_extent_header	*p_hdr;
+    //磁盘物理块映射的bh
 	struct buffer_head		*p_bh;
 };
 
@@ -137,7 +149,7 @@ struct ext4_ext_path {
  * Maximum number of logical blocks in a file; ext4_extent's ee_block is
  * __le32.
  */
-#define EXT_MAX_BLOCKS	0xffffffff
+#define EXT_MAX_BLOCKS	0xffffffff//0x8000-1
 
 /*
  * EXT_INIT_MAX_LEN is the maximum number of blocks we can have in an
@@ -159,7 +171,7 @@ struct ext4_ext_path {
 #define EXT_INIT_MAX_LEN	(1UL << 15)
 #define EXT_UNINIT_MAX_LEN	(EXT_INIT_MAX_LEN - 1)
 
-
+//ext4 extent B+树叶子节点第一个ext4_extent结构内存地址，不一定有ext4_extent结构
 #define EXT_FIRST_EXTENT(__hdr__) \
 	((struct ext4_extent *) (((char *) (__hdr__)) +		\
 				 sizeof(struct ext4_extent_header)))
@@ -169,6 +181,7 @@ struct ext4_ext_path {
 #define EXT_HAS_FREE_INDEX(__path__) \
 	(le16_to_cpu((__path__)->p_hdr->eh_entries) \
 				     < le16_to_cpu((__path__)->p_hdr->eh_max))
+//ext4 extent B+树叶子节点最后一个ext4_extent结构内存地址
 #define EXT_LAST_EXTENT(__hdr__) \
 	(EXT_FIRST_EXTENT((__hdr__)) + le16_to_cpu((__hdr__)->eh_entries) - 1)
 #define EXT_LAST_INDEX(__hdr__) \
@@ -197,12 +210,14 @@ static inline void ext4_ext_mark_uninitialized(struct ext4_extent *ext)
 {
 	/* We can not have an uninitialized extent of zero length! */
 	BUG_ON((le16_to_cpu(ext->ee_len) & ~EXT_INIT_MAX_LEN) == 0);
+    //设置ext4_extent的uninitialized标记，无非是设置bit15为1
 	ext->ee_len |= cpu_to_le16(EXT_INIT_MAX_LEN);
 }
 
 static inline int ext4_ext_is_uninitialized(struct ext4_extent *ext)
 {
 	/* Extent with ee_len of 0x8000 is treated as an initialized extent */
+    //ext->ee_len大于0x8000，说明ext4_extent是没有初始化过的
 	return (le16_to_cpu(ext->ee_len) > EXT_INIT_MAX_LEN);
 }
 
@@ -269,7 +284,7 @@ static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 	ix->ei_leaf_hi = cpu_to_le16((unsigned long) ((pb >> 31) >> 1) &
 				     0xffff);
 }
-
+//ext4_extent映射的逻辑块范围可能发生变化了，标记对应的物理块映射的bh或者文件inode脏.
 #define ext4_ext_dirty(handle, inode, path) \
 		__ext4_ext_dirty(__func__, __LINE__, (handle), (inode), (path))
 int __ext4_ext_dirty(const char *where, unsigned int line, handle_t *handle,

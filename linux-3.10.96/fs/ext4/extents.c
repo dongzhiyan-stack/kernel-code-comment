@@ -49,6 +49,7 @@
 /*
  * used by extent splitting.
  */
+//zeroout看着一般用不到，像是如果把ext4_extent因内存不足分割失败后恢复之用
 #define EXT4_EXT_MAY_ZEROOUT	0x1  /* safe to zeroout if split fails \
 					due to ENOSPC */
 #define EXT4_EXT_MARK_UNINIT1	0x2  /* mark first half uninitialized */
@@ -157,6 +158,8 @@ static int ext4_ext_get_access(handle_t *handle, struct inode *inode,
  *  - ENOMEM
  *  - EIO
  */
+//ext4_extent映射的逻辑块范围可能发生变化了，标记对应的物理块映射的bh或者文件inode脏.
+//为什么ext4_extent变化会影响到物理块映射的bh或者文件inode脏呢?
 int __ext4_ext_dirty(const char *where, unsigned int line, handle_t *handle,
 		     struct inode *inode, struct ext4_ext_path *path)
 {
@@ -601,19 +604,26 @@ void ext4_ext_drop_refs(struct ext4_ext_path *path)
  * binary search for the closest index of the given block
  * the header must be checked before calling this
  */
+//利用二分法在ext4 extent B+树path->p_hdr[]后边的ext4_extent_idx[]数组中，找到起始逻辑块
+//地址最接近传入的起始逻辑块地址block的ext4_extent_idx。path->p_idx指向这个ext4_extent_idx
 static void
 ext4_ext_binsearch_idx(struct inode *inode,
 			struct ext4_ext_path *path, ext4_lblk_t block)
-{
+{//block是传入的起始逻辑块地址
 	struct ext4_extent_header *eh = path->p_hdr;
 	struct ext4_extent_idx *r, *l, *m;
 
 
 	ext_debug("binsearch for %u(idx):  ", block);
 
-	l = EXT_FIRST_INDEX(eh) + 1;
-	r = EXT_LAST_INDEX(eh);
-	while (l <= r) {
+	l = EXT_FIRST_INDEX(eh) + 1;//l指向ext4_extent_header后边的ext4_extent_idx数组的第2个ext4_extent_idx成员
+	r = EXT_LAST_INDEX(eh);//r指向ext4_extent_header后边的ext4_extent_idx数组的最后一个ext4_extent_idx成员
+
+    //在l和r指向的ext4_extent_idx数组之间，找到一个ext4_extent_idx->ei_block最接近
+    //传入的起始逻辑块地址block的。ext4_extent_idx是extent B+数索引节点，其成员ei_block是
+    //这个索引节点的起始逻辑块地址。注意，这个ext4_extent_idx->ei_block <= 传入的
+    //起始逻辑块地址block，并且ext4_extent_idx->ei_block最接近传入的起始逻辑块地址block
+    while (l <= r) {
 		m = l + (r - l) / 2;
 		if (block < le32_to_cpu(m->ei_block))
 			r = m - 1;
@@ -623,7 +633,7 @@ ext4_ext_binsearch_idx(struct inode *inode,
 				m, le32_to_cpu(m->ei_block),
 				r, le32_to_cpu(r->ei_block));
 	}
-
+    //path->p_idx指向起始逻辑块地址最接近传入的起始逻辑块地址block的ext4_extent_idx
 	path->p_idx = l - 1;
 	ext_debug("  -> %u->%lld ", le32_to_cpu(path->p_idx->ei_block),
 		  ext4_idx_pblock(path->p_idx));
@@ -661,10 +671,12 @@ ext4_ext_binsearch_idx(struct inode *inode,
  * binary search for closest extent of the given block
  * the header must be checked before calling this
  */
+//利用二分法在ext4 extent B+树path->p_hdr[]后边的ext4_extent[]数组中，找到起始逻辑块地址
+//最接近传入的起始逻辑块地址block的ext4_extent。path->p_ext指向这个ext4_extent
 static void
 ext4_ext_binsearch(struct inode *inode,
 		struct ext4_ext_path *path, ext4_lblk_t block)
-{
+{//block是传入的起始逻辑块地址
 	struct ext4_extent_header *eh = path->p_hdr;
 	struct ext4_extent *r, *l, *m;
 
@@ -678,9 +690,15 @@ ext4_ext_binsearch(struct inode *inode,
 
 	ext_debug("binsearch for %u:  ", block);
 
+    //l指向ext4_extent_header后边的ext4_extent数组的第2个ext4_extent成员
 	l = EXT_FIRST_EXTENT(eh) + 1;
+    //r指向ext4_extent_header后边的ext4_extent数组的最后一个ext4_extent成员
 	r = EXT_LAST_EXTENT(eh);
 
+    //在l和r指向的ext4_extent数组之间，找到一个ext4_extent->ee_block最接近
+    //传入的起始逻辑块地址block的。ext4_extent是extent B+数叶子节点，其成员ee_block是
+    //这个叶子节点的起始逻辑块地址。注意，这个ext4_extent->ee_block <= 传入的
+    //起始逻辑块地址block，并且ext4_extent->ei_block最接近传入的起始逻辑块地址block
 	while (l <= r) {
 		m = l + (r - l) / 2;
 		if (block < le32_to_cpu(m->ee_block))
@@ -691,7 +709,7 @@ ext4_ext_binsearch(struct inode *inode,
 				m, le32_to_cpu(m->ee_block),
 				r, le32_to_cpu(r->ee_block));
 	}
-
+    //path->p_ext指向起始逻辑块地址最接近传入的起始逻辑块地址block的ext4_extent
 	path->p_ext = l - 1;
 	ext_debug("  -> %d:%llu:[%d]%d ",
 			le32_to_cpu(path->p_ext->ee_block),
@@ -730,21 +748,25 @@ int ext4_ext_tree_init(handle_t *handle, struct inode *inode)
 	ext4_mark_inode_dirty(handle, inode);
 	return 0;
 }
-
+/*根据ext4 extent B+树的根节点的ext4_extent_header，先找到每一层索引节点中最接近传入的起始
+逻辑块地址block的ext4_extent_idx保存到path[ppos]->p_idx.然后找到最后一层的叶子节点中最接近
+传入的起始逻辑块地址block的ext4_extent，保存到path[ppos]->p_ext。这个ext4_extent才包含了逻辑块地址和物理块地址的映射关系。*/
 struct ext4_ext_path *
 ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
-					struct ext4_ext_path *path)
+					struct ext4_ext_path *path)//block是传入的起始逻辑块地址
 {
 	struct ext4_extent_header *eh;
 	struct buffer_head *bh;
 	short int depth, i, ppos = 0, alloc = 0;
 	int ret;
-
+    //从ext4_inode_info->i_data数组得到ext4 extent B+树的根节点
 	eh = ext_inode_hdr(inode);
+    //xt4 extent B+树深度
 	depth = ext_depth(inode);
 
 	/* account possible depth increase */
 	if (!path) {
+        //按照B+树的深度分配ext4_ext_path结构
 		path = kzalloc(sizeof(struct ext4_ext_path) * (depth + 2),
 				GFP_NOFS);
 		if (!path)
@@ -755,16 +777,33 @@ ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
 	path[0].p_bh = NULL;
 
 	i = depth;
+
+    /*ext4 extent B+树由索引节点和叶子节点组成
+索引节点    ext4_extent_header + ext4_extent_idx +  ext4_extent_idx + ........
+                                     |
+索引节点               ext4_extent_header + ext4_extent_idx + ext4_extent_idx+ ........
+                                               |
+叶子节点                                    ext4_extent_header + ext4_extent + ext4_extent+ ........
+
+    path[0].p_hdr指向B+树的根节点的ext4_extent_header。
+    下边这个while循环是根据这个B+树的根节点的ext4_extent_header，先找到每一层
+    索引节点中最接近传入的起始逻辑块地址block的ext4_extent_idx保存到path[ppos]->p_idx，
+    然后找到最后一层的叶子节点中最接近传入的起始逻辑块地址block的ext4_extent，保存到
+    path[ppos]->p_ext。这个ext4_extent才包含了逻辑块地址和物理块地址的映射关系。
+    */
 	/* walk through the tree */
 	while (i) {
 		ext_debug("depth %d: num %d, max %d\n",
 			  ppos, le16_to_cpu(eh->eh_entries), le16_to_cpu(eh->eh_max));
-
+        
+        //利用二分法在ext4 extent B+树path[ppos]->p_hdr[]后边的ext4_extent_idx[]数组中，
+        //找到起始逻辑块地址最接近传入的起始逻辑块地址block的ext4_extent_idx。path[ppos]->p_idx指向这个ext4_extent_idx
 		ext4_ext_binsearch_idx(inode, path + ppos, block);
-		path[ppos].p_block = ext4_idx_pblock(path[ppos].p_idx);
-		path[ppos].p_depth = i;
+		path[ppos].p_block = ext4_idx_pblock(path[ppos].p_idx);//物理块起始地址
+		path[ppos].p_depth = i;//B+树层数
 		path[ppos].p_ext = NULL;
 
+        //根据物理块地址path[ppos].p_block得到其代表的磁盘物理块映射的bh
 		bh = sb_getblk(inode->i_sb, path[ppos].p_block);
 		if (unlikely(!bh)) {
 			ret = -ENOMEM;
@@ -802,9 +841,11 @@ ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
 	path[ppos].p_idx = NULL;
 
 	/* find extent */
+  //利用二分法在ext4 extent B+树path[ppos]->p_hdr[]后边的ext4_extent[]数组中，找到起始逻辑块地址
+  //最接近传入的起始逻辑块地址block的ext4_extent。path[ppos]->p_ext指向这个ext4_extent
 	ext4_ext_binsearch(inode, path + ppos, block);
 	/* if not an empty leaf */
-	if (path[ppos].p_ext)
+	if (path[ppos].p_ext)//物理块地址
 		path[ppos].p_block = ext4_ext_pblock(path[ppos].p_ext);
 
 	ext4_ext_show_path(inode, path);
@@ -1511,7 +1552,7 @@ static ext4_lblk_t ext4_ext_next_leaf_block(struct ext4_ext_path *path)
 	depth = path->p_depth;
 
 	/* zero-tree has no leaf blocks at all */
-	if (depth == 0)
+	if (depth == 0)//没有叶子节点
 		return EXT_MAX_BLOCKS;
 
 	/* go to index block */
@@ -1534,6 +1575,7 @@ static ext4_lblk_t ext4_ext_next_leaf_block(struct ext4_ext_path *path)
  * then we have to correct all indexes above.
  * TODO: do we need to correct tree in all cases?
  */
+//看着是修改ext4 extent B+树索引节点的数据，因为叶子节点有更新了
 static int ext4_ext_correct_indexes(handle_t *handle, struct inode *inode,
 				struct ext4_ext_path *path)
 {
@@ -1590,7 +1632,7 @@ static int ext4_ext_correct_indexes(handle_t *handle, struct inode *inode,
 
 	return err;
 }
-
+//测试ex1和它后边的ex2这两个ext4_extent的逻辑块和物理块地址是否紧挨着，是则ex1可以合并到ex2并返回1。不能合并发乎0
 int
 ext4_can_extents_be_merged(struct inode *inode, struct ext4_extent *ex1,
 				struct ext4_extent *ex2)
@@ -1603,17 +1645,19 @@ ext4_can_extents_be_merged(struct inode *inode, struct ext4_extent *ex1,
 	 * the extent that was written properly split out and conversion to
 	 * initialized is trivial.
 	 */
+	//参与合并的ext4_extent必须是initialized状态
 	if (ext4_ext_is_uninitialized(ex1) || ext4_ext_is_uninitialized(ex2))
 		return 0;
 
 	if (ext4_ext_is_uninitialized(ex1))
 		max_len = EXT_UNINIT_MAX_LEN;
 	else
-		max_len = EXT_INIT_MAX_LEN;
+		max_len = EXT_INIT_MAX_LEN;//ext4_extent最大逻辑块个数max_len是0x8000
 
 	ext1_ee_len = ext4_ext_get_actual_len(ex1);
 	ext2_ee_len = ext4_ext_get_actual_len(ex2);
 
+    //ex1的逻辑块结束地址必须紧挨着ex2逻辑块起始地址
 	if (le32_to_cpu(ex1->ee_block) + ext1_ee_len !=
 			le32_to_cpu(ex2->ee_block))
 		return 0;
@@ -1623,13 +1667,14 @@ ext4_can_extents_be_merged(struct inode *inode, struct ext4_extent *ex1,
 	 * as an RO_COMPAT feature, refuse to merge to extents if
 	 * this can result in the top bit of ee_len being set.
 	 */
+	//ex1和ex2的逻辑块个数之和不能超过max_len，因为ext4_extent最大逻辑块个数max_len，0x8000
 	if (ext1_ee_len + ext2_ee_len > max_len)
 		return 0;
 #ifdef AGGRESSIVE_TEST
 	if (ext1_ee_len >= 4)
 		return 0;
 #endif
-
+    //ex1的物理块结束地址必须紧挨着ex2物理块起始地址
 	if (ext4_ext_pblock(ex1) + ext1_ee_len == ext4_ext_pblock(ex2))
 		return 1;
 	return 0;
@@ -1642,6 +1687,8 @@ ext4_can_extents_be_merged(struct inode *inode, struct ext4_extent *ex1,
  * Returns 0 if the extents (ex and ex+1) were _not_ merged and returns
  * 1 if they got merged.
  */
+//尝试把ex后边的ex+1、ex+2 ....这些ext4_extent的逻辑块和物理块地址循环合并到ex，当然合并
+//的前提是两个ext4_extent的逻辑块地址和物理块地址前后紧挨着
 static int ext4_ext_try_to_merge_right(struct inode *inode,
 				 struct ext4_ext_path *path,
 				 struct ext4_extent *ex)
@@ -1655,24 +1702,32 @@ static int ext4_ext_try_to_merge_right(struct inode *inode,
 	BUG_ON(path[depth].p_hdr == NULL);
 	eh = path[depth].p_hdr;
 
+    //ex不能是ext4_extent B+树叶子节点中最后一个ext4_extent结构，否则还咋合并
 	while (ex < EXT_LAST_EXTENT(eh)) {
+        //测试ex1和它后边的ex + 1这两个ext4_extent的逻辑块和物理块地址是否紧挨着，是ex1则可以合并到ex2并返回1。不能合并返回0
 		if (!ext4_can_extents_be_merged(inode, ex, ex + 1))
 			break;
 		/* merge with next extent! */
 		if (ext4_ext_is_uninitialized(ex))
 			uninitialized = 1;
+        //ex->ee_len重新赋值为ex和ex+1这两个ext4_extent的逻辑块数之和
 		ex->ee_len = cpu_to_le16(ext4_ext_get_actual_len(ex)
 				+ ext4_ext_get_actual_len(ex + 1));
 		if (uninitialized)
 			ext4_ext_mark_uninitialized(ex);
 
+        //ex+1不是最后一个ext4_extent结构
 		if (ex + 1 < EXT_LAST_EXTENT(eh)) {
+            //len是ex+1这个ext4_extent结构体的长度
 			len = (EXT_LAST_EXTENT(eh) - ex - 1)
 				* sizeof(struct ext4_extent);
+            //把ex+1这个ext4_extent结构体的内容复制到ex+2，这样不是会把ex+2的内容覆盖了
+            //，为什么要这样操作?????
 			memmove(ex + 1, ex + 2, len);
 		}
+        //ext4 extent B+树extent树减1
 		le16_add_cpu(&eh->eh_entries, -1);
-		merge_done = 1;
+		merge_done = 1;//置1表示合并成功
 		WARN_ON(eh->eh_entries == 0);
 		if (!eh->eh_entries)
 			EXT4_ERROR_INODE(inode, "eh->eh_entries = 0!");
@@ -1730,6 +1785,7 @@ static void ext4_ext_try_to_merge_up(handle_t *handle,
  * This function tries to merge the @ex extent to neighbours in the tree.
  * return 1 if merge left else 0.
  */
+//尝试把ex前后的ext4_extent结构的逻辑块和物理块地址合并到ex
 static void ext4_ext_try_to_merge(handle_t *handle,
 				  struct inode *inode,
 				  struct ext4_ext_path *path,
@@ -1743,9 +1799,11 @@ static void ext4_ext_try_to_merge(handle_t *handle,
 	eh = path[depth].p_hdr;
 
 	if (ex > EXT_FIRST_EXTENT(eh))
+        //尝试把(ex-1)后边的ex、ex+1 ....这些ext4_extent循环合并到ex-1,有一次合并则返回1
 		merge_done = ext4_ext_try_to_merge_right(inode, path, ex - 1);
 
 	if (!merge_done)
+        //上边没有发生ext4_extent合并，这里则尝试把ex后边的ex+1、ex+2 ....这些ext4_extent循环合并到ex
 		(void) ext4_ext_try_to_merge_right(inode, path, ex);
 
 	ext4_ext_try_to_merge_up(handle, inode, path);
@@ -1810,7 +1868,7 @@ out:
  */
 int ext4_ext_insert_extent(handle_t *handle, struct inode *inode,
 				struct ext4_ext_path *path,
-				struct ext4_extent *newext, int flag)
+				struct ext4_extent *newext, int flag)//newext是要插入extent B+数的ext4_extent
 {
 	struct ext4_extent_header *eh;
 	struct ext4_extent *ex, *fex;
@@ -1826,6 +1884,7 @@ int ext4_ext_insert_extent(handle_t *handle, struct inode *inode,
 		return -EIO;
 	}
 	depth = ext_depth(inode);
+    //ext4 extent B+树叶子节点，指向起始逻辑块地址最接近map->m_lblk这个起始逻辑块地址的ext4_extent
 	ex = path[depth].p_ext;
 	eh = path[depth].p_hdr;
 	if (unlikely(path[depth].p_hdr == NULL)) {
@@ -1843,19 +1902,22 @@ int ext4_ext_insert_extent(handle_t *handle, struct inode *inode,
 		 * left, or on the right from the searched position. This
 		 * will make merging more effective.
 		 */
+		//newext在要插入的ex逻辑地址后边
 		if (ex < EXT_LAST_EXTENT(eh) &&
 		    (le32_to_cpu(ex->ee_block) +
 		    ext4_ext_get_actual_len(ex) <
 		    le32_to_cpu(newext->ee_block))) {
-			ex += 1;
+			ex += 1;//ex++  指向后边的ext4_extent结构
 			goto prepend;
+        //newext在要插入的ex逻辑地址前边
 		} else if ((ex > EXT_FIRST_EXTENT(eh)) &&
 			   (le32_to_cpu(newext->ee_block) +
 			   ext4_ext_get_actual_len(newext) <
 			   le32_to_cpu(ex->ee_block)))
-			ex -= 1;
+			ex -= 1;//ex--  指向前边的ext4_extent结构，为啥?????????
 
 		/* Try to append newex to the ex */
+        //测试ex和它后边的newext这两个ext4_extent的逻辑块和物理块地址是否紧挨着，是则合并二者逻辑块地址并返回1
 		if (ext4_can_extents_be_merged(inode, ex, newext)) {
 			ext_debug("append [%d]%d block to %u:[%d]%d"
 				  "(from %llu)\n",
@@ -1876,19 +1938,24 @@ int ext4_ext_insert_extent(handle_t *handle, struct inode *inode,
 			 * both aren't. Thus we need to check only one of
 			 * them here.
 			 */
+			//ex没有初始化过则uninitialized = 1
 			if (ext4_ext_is_uninitialized(ex))
 				uninitialized = 1;
+            //把newext的逻辑块地址范围合并到ex
 			ex->ee_len = cpu_to_le16(ext4_ext_get_actual_len(ex)
 					+ ext4_ext_get_actual_len(newext));
 			if (uninitialized)
-				ext4_ext_mark_uninitialized(ex);
+				ext4_ext_mark_uninitialized(ex);//标记ex未初始化
 			eh = path[depth].p_hdr;
-			nearex = ex;
-			goto merge;
+            
+			nearex = ex;//nearex是ex
+			
+			goto merge;//跳转到merge分支
 		}
 
 prepend:
 		/* Try to prepend newex to the ex */
+        //测试newext和它后边的ex这两个ext4_extent的逻辑块和物理块地址是否紧挨着，是则合并二者逻辑块地址并返回1
 		if (ext4_can_extents_be_merged(inode, newext, ex)) {
 			ext_debug("prepend %u[%d]%d block to %u:[%d]%d"
 				  "(from %llu)\n",
@@ -1910,30 +1977,45 @@ prepend:
 			 * both aren't. Thus we need to check only one of
 			 * them here.
 			 */
+			//ex没有初始化过则uninitialized = 1
 			if (ext4_ext_is_uninitialized(ex))
 				uninitialized = 1;
+            //把ex的逻辑块地址范围合并到newext，但最终还是以ex
 			ex->ee_block = newext->ee_block;
+            //更新ex的起始物理块地址为newext的逻辑块地址
 			ext4_ext_store_pblock(ex, ext4_ext_pblock(newext));
+            //ex->ee_len和ex和newext的逻辑块个数之和
 			ex->ee_len = cpu_to_le16(ext4_ext_get_actual_len(ex)
 					+ ext4_ext_get_actual_len(newext));
 			if (uninitialized)
 				ext4_ext_mark_uninitialized(ex);
 			eh = path[depth].p_hdr;
-			nearex = ex;
-			goto merge;
+            
+			nearex = ex;//nearex是ex
+			
+			goto merge;//跳转到merge分支
 		}
 	}
 
+    /*走到这里，说明ex和newex没有发生合并，*/
+    
 	depth = ext_depth(inode);
 	eh = path[depth].p_hdr;
+    //eh->eh_max是ext4_extent B+树叶子节点最大ext4_extent个数，没有超过则跳到has_space分支
 	if (le16_to_cpu(eh->eh_entries) < le16_to_cpu(eh->eh_max))
 		goto has_space;
 
+    /*到这里说明ext4_extent B+叶子节点空间不够，需要扩容*/
+    
 	/* probably next leaf has space for us? */
+    //ext4 extent B+树叶子节点最后一个ext4_extent结构
 	fex = EXT_LAST_EXTENT(eh);
-	next = EXT_MAX_BLOCKS;
+	next = EXT_MAX_BLOCKS;//0x8000-1
+
+    //如果要插入的newext
 	if (le32_to_cpu(newext->ee_block) > le32_to_cpu(fex->ee_block))
 		next = ext4_ext_next_leaf_block(path);
+    
 	if (next != EXT_MAX_BLOCKS) {
 		ext_debug("next leaf block - %u\n", next);
 		BUG_ON(npath != NULL);
@@ -1965,21 +2047,24 @@ prepend:
 	eh = path[depth].p_hdr;
 
 has_space:
+    //nearex指向起始逻辑块地址最接近map->m_lblk这个起始逻辑块地址的ext4_extent
 	nearex = path[depth].p_ext;
 
 	err = ext4_ext_get_access(handle, inode, path + depth);
 	if (err)
 		goto cleanup;
 
-	if (!nearex) {
+	if (!nearex) {//ext4 extent B+树叶子节点没有extent结构，可能吗?
 		/* there is no extent in this leaf, create first one */
 		ext_debug("first extent in the leaf: %u:%llu:[%d]%d\n",
 				le32_to_cpu(newext->ee_block),
 				ext4_ext_pblock(newext),
 				ext4_ext_is_uninitialized(newext),
 				ext4_ext_get_actual_len(newext));
+        //nearex指向ext4 extent B+树叶子节点第一个ext4_extent结构内存地址，此时没有ext4_extent结构
 		nearex = EXT_FIRST_EXTENT(eh);
 	} else {
+	    //newext的起始逻辑块地址在nearex后边
 		if (le32_to_cpu(newext->ee_block)
 			   > le32_to_cpu(nearex->ee_block)) {
 			/* Insert after */
@@ -1990,7 +2075,7 @@ has_space:
 					ext4_ext_is_uninitialized(newext),
 					ext4_ext_get_actual_len(newext),
 					nearex);
-			nearex++;
+			nearex++;//nearex++指向后边的一个ext4_extent结构
 		} else {
 			/* Insert before */
 			BUG_ON(newext->ee_block == nearex->ee_block);
@@ -2002,6 +2087,8 @@ has_space:
 					ext4_ext_get_actual_len(newext),
 					nearex);
 		}
+        //这是计算nearex这个ext4_extent结构到叶子节点最后一个ext4_extent结构之间的
+        //ext4_extent结构个数???
 		len = EXT_LAST_EXTENT(eh) - nearex + 1;
 		if (len > 0) {
 			ext_debug("insert %u:%llu:[%d]%d: "
@@ -2011,24 +2098,36 @@ has_space:
 					ext4_ext_is_uninitialized(newext),
 					ext4_ext_get_actual_len(newext),
 					len, nearex, nearex + 1);
+            //这是把nearex这个ext4_extent结构 ~ 最后一个ext4_extent结构之间的所有
+            //ext4_extent结构的数据整体向后移动一个ext4_extent结构大小，腾出原来
+            //nearex这个ext4_extent结构的空间，下边看着是用newext来填充
 			memmove(nearex + 1, nearex,
 				len * sizeof(struct ext4_extent));
 		}
 	}
 
-	le16_add_cpu(&eh->eh_entries, 1);
-	path[depth].p_ext = nearex;
+    /*下边是把newext的逻辑块起始地址、物理块起始地址、映射的物理块个数等信息赋值
+    给nearex，相当于把newext添加到ext4 extent B+树叶子节点原来nearex的位置。然后叶子节点
+    ext4_extent个数加1。path[depth].p_ext指向newext*/
+	le16_add_cpu(&eh->eh_entries, 1);//ext4 extent B+树叶子节点ext4_extent个数加1
+	path[depth].p_ext = nearex;//相当于path[depth].p_ext指向newext
+	
+    //nearex->ee_block赋值为newext起始逻辑块地址
 	nearex->ee_block = newext->ee_block;
+    //用newext起始物理块地址赋值给nearex
 	ext4_ext_store_pblock(nearex, ext4_ext_pblock(newext));
-	nearex->ee_len = newext->ee_len;
+	nearex->ee_len = newext->ee_len;//nearex->ee_len赋值为newext的
 
+/*到这里后，newext要么已经合并到了ex，要么已经插入ext4 extent B+树，下边的没啥重要操作*/
 merge:
 	/* try to merge extents */
 	if (!(flag & EXT4_GET_BLOCKS_PRE_IO))
+        //尝试把ex前后的ext4_extent结构的逻辑块和物理块地址合并到ex
 		ext4_ext_try_to_merge(handle, inode, path, nearex);
 
 
 	/* time to correct all indexes above */
+    //看着是修改ext4 extent B+树索引节点的数据，因为叶子节点有更新了
 	err = ext4_ext_correct_indexes(handle, inode, path);
 	if (err)
 		goto cleanup;
@@ -3018,7 +3117,7 @@ static int ext4_ext_zeroout(struct inode *inode, struct ext4_extent *ex)
 static int ext4_split_extent_at(handle_t *handle,
 			     struct inode *inode,
 			     struct ext4_ext_path *path,
-			     ext4_lblk_t split,
+			     ext4_lblk_t split,//map->m_lblk + map->m_len
 			     int split_flag,
 			     int flags)
 {
@@ -3038,9 +3137,14 @@ static int ext4_split_extent_at(handle_t *handle,
 	ext4_ext_show_leaf(inode, path);
 
 	depth = ext_depth(inode);
+    //ext4 extent B+树叶子节点，指向起始逻辑块地址最接近map->m_lblk这个起始逻辑块地址的ext4_extent
 	ex = path[depth].p_ext;
+    //ext4 extent B+树叶子节点，ext4_extent结构代表的起始逻辑块地址
 	ee_block = le32_to_cpu(ex->ee_block);
+    //ext4 extent B+树叶子节点，ext4_extent结构代表的映射的物理块个数
 	ee_len = ext4_ext_get_actual_len(ex);
+    //ee_block是ex起始逻辑块地址，split是分割点的逻辑块地址，split>ee_block，二者都在ex这个
+    //ext4_extent的逻辑块范围内。newblock是分割点的逻辑块地址对应的物理块地址
 	newblock = split - ee_block + ext4_ext_pblock(ex);
 
 	BUG_ON(split < ee_block || split >= (ee_block + ee_len));
@@ -3053,6 +3157,7 @@ static int ext4_split_extent_at(handle_t *handle,
 	if (err)
 		goto out;
 
+    //分割点的逻辑块地址等于ex起始逻辑块地址，不用分割
 	if (split == ee_block) {
 		/*
 		 * case b: block @split is the block that the extent begins with
@@ -3060,18 +3165,24 @@ static int ext4_split_extent_at(handle_t *handle,
 		 * is not needed.
 		 */
 		if (split_flag & EXT4_EXT_MARK_UNINIT2)
-			ext4_ext_mark_uninitialized(ex);
+			ext4_ext_mark_uninitialized(ex);//有"UNINIT2"标记就要标记ex "uninitialized"
 		else
 			ext4_ext_mark_initialized(ex);
 
 		if (!(flags & EXT4_GET_BLOCKS_PRE_IO))
+            //尝试把ex前后的ext4_extent结构的逻辑块和物理块地址合并到ex
 			ext4_ext_try_to_merge(handle, inode, path, ex);
 
+        //ext4_extent映射的逻辑块范围可能发生变化了，标记对应的物理块映射的bh或者文件inode脏.
 		err = ext4_ext_dirty(handle, inode, path + path->p_depth);
 		goto out;
 	}
 
+    /*下边这是把ex的逻辑块分割成两部分(ee_block~split)和(split~ee_len)。分割后，ex新的
+    逻辑块范围是(ee_block~split)，ex2的逻辑块范围是(split~ee_len)
+    */
 	/* case a */
+    //orig_ex先保存ex原有数据
 	memcpy(&orig_ex, ex, sizeof(orig_ex));
 	ex->ee_len = cpu_to_le16(split - ee_block);
 	if (split_flag & EXT4_EXT_MARK_UNINIT1)
@@ -3085,14 +3196,16 @@ static int ext4_split_extent_at(handle_t *handle,
 	if (err)
 		goto fix_extent_len;
 
-	ex2 = &newex;
-	ex2->ee_block = cpu_to_le32(split);
-	ex2->ee_len   = cpu_to_le16(ee_len - (split - ee_block));
-	ext4_ext_store_pblock(ex2, newblock);
+	ex2 = &newex;//ex2获得ex分割后的后半段的逻辑块范围
+	ex2->ee_block = cpu_to_le32(split);//ex2的逻辑块起始地址
+	ex2->ee_len   = cpu_to_le16(ee_len - (split - ee_block));//ex2逻辑块个数
+	ext4_ext_store_pblock(ex2, newblock);//ex2的起始物理块地址
 	if (split_flag & EXT4_EXT_MARK_UNINIT2)
 		ext4_ext_mark_uninitialized(ex2);
 
 	err = ext4_ext_insert_extent(handle, inode, path, &newex, flags);
+
+    //err是ENOSPC一般不会成立吧
 	if (err == -ENOSPC && (EXT4_EXT_MAY_ZEROOUT & split_flag)) {
 		if (split_flag & (EXT4_EXT_DATA_VALID1|EXT4_EXT_DATA_VALID2)) {
 			if (split_flag & EXT4_EXT_DATA_VALID1) {
@@ -3132,14 +3245,16 @@ static int ext4_split_extent_at(handle_t *handle,
 		err = ext4_es_zeroout(inode, &zero_ex);
 
 		goto out;
-	} else if (err)
+	}
+    else if (err)//这里一般也不成立
 		goto fix_extent_len;
 
 out:
 	ext4_ext_show_leaf(inode, path);
-	return err;
+	return err;//一般这里返回0
 
 fix_extent_len:
+    //显然这是ex split失败，进而恢复ex原有的数据
 	ex->ee_len = orig_ex.ee_len;
 	ext4_ext_dirty(handle, inode, path + depth);
 	return err;
@@ -3179,12 +3294,15 @@ static int ext4_split_extent(handle_t *handle,
 
 	if (map->m_lblk + map->m_len < ee_block + ee_len) {
 		split_flag1 = split_flag & EXT4_EXT_MAY_ZEROOUT;
-		flags1 = flags | EXT4_GET_BLOCKS_PRE_IO;
+        
+		flags1 = flags | EXT4_GET_BLOCKS_PRE_IO;//flag加上EXT4_GET_BLOCKS_PRE_IO标记
 		if (uninitialized)
 			split_flag1 |= EXT4_EXT_MARK_UNINIT1 |
 				       EXT4_EXT_MARK_UNINIT2;
+        
 		if (split_flag & EXT4_EXT_DATA_VALID2)
 			split_flag1 |= EXT4_EXT_DATA_VALID1;
+        
 		err = ext4_split_extent_at(handle, inode, path,
 				map->m_lblk + map->m_len, split_flag1, flags1);
 		if (err)
@@ -3270,10 +3388,15 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 	if (eof_block < map->m_lblk + map_len)
 		eof_block = map->m_lblk + map_len;
 
+    //ext4 extent B+树深度
 	depth = ext_depth(inode);
+    //指向ext4 extent B+树叶子节点头部
 	eh = path[depth].p_hdr;
+//ext4 extent B+树叶子节点，指向起始逻辑块地址最接近map->m_lblk这个起始逻辑块地址的ext4_extent
 	ex = path[depth].p_ext;
+    //叶子节点ext4_extent结构代表的起始逻辑块地址
 	ee_block = le32_to_cpu(ex->ee_block);
+    //ext4 extent B+树叶子节点，ext4_extent结构映射的物理块个数
 	ee_len = ext4_ext_get_actual_len(ex);
 	zero_ex.ee_len = 0;
 
@@ -3298,18 +3421,34 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 	 *  - L2: we only attempt to merge with an extent stored in the
 	 *    same extent tree node.
 	 */
+
+    /*下边这两个大的if判断，在要求映射的物理块数map_len要小于ex已经映射的物理块数ee_len
+    的情况下，如果ex前边或者后边的ext4_extent结构abut_ex，逻辑块地址紧挨着:1 ex的起始逻辑
+    块地址是它前边的ext4_extent即abut_ex的结束逻辑块地址;2 ex的结束逻辑块地址是它后边的
+    ext4_extent即abut_ex的起始逻辑块地址。这两种情况，都是把ex靠前或者靠后的map_len个逻辑块
+    合并到abut_ex，ex的逻辑块个数只剩下ee_len-map_len。合并后，ex设置成未初始化状态
+    ，abut_ex保持初始化状态。allocated是abut_ex增加的逻辑块个数map_len，如果没有发生合并
+    则allocated保持0*/
+    
+	//要映射的起始逻辑块地址map->m_lblk等于ex的起始逻辑块地址
 	if ((map->m_lblk == ee_block) &&
 		/* See if we can merge left */
-		(map_len < ee_len) &&		/*L1*/
+		(map_len < ee_len) &&		/*L1*///要求映射的物理块数map_len要小于ex已经映射的物理块数ee_len
+		//ex是指向叶子节点ext4_extent_header后第2个及以后ext4_extent结构
 		(ex > EXT_FIRST_EXTENT(eh))) {	/*L2*/
 		ext4_lblk_t prev_lblk;
 		ext4_fsblk_t prev_pblk, ee_pblk;
 		unsigned int prev_len;
 
+        //abut_ex指向ex上一个struct ext4_extent结构
 		abut_ex = ex - 1;
+		//上一个struct ext4_extent结构代表的起始逻辑块地址
 		prev_lblk = le32_to_cpu(abut_ex->ee_block);
+        //上一个struct ext4_extent结构映射的物理块个数
 		prev_len = ext4_ext_get_actual_len(abut_ex);
+        //上一个struct ext4_extent结构代表的起始物理块地址
 		prev_pblk = ext4_ext_pblock(abut_ex);
+        //ex这个struct ext4_extent结构代表的起始物理块地址
 		ee_pblk = ext4_ext_pblock(ex);
 
 		/*
@@ -3321,10 +3460,19 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 		 * - C4: abut_ex can receive the additional blocks without
 		 *   overflowing the (initialized) length limit.
 		 */
-		if ((!ext4_ext_is_uninitialized(abut_ex)) &&		/*C1*/
-			((prev_lblk + prev_len) == ee_block) &&		/*C2*/
+		 
+		/*ex前边的ext4_extent即abut_ex。abut_ex已经初始化过，并且abut_ex和ex紧挨着，并且
+        要求映射的物理块数map_len要小于ex已经映射的物理块数ee_len。此时，abut_ex吞并了ex的
+        逻辑块范围:把ex之前的逻辑块范围ee_block~ee_block+map_len划分给abut_ex这个
+        ext4_extent，ex新的逻辑块地址范围是(ee_block + map_len)~(ee_block + ee_len)这一小片*/
+		if ((!ext4_ext_is_uninitialized(abut_ex)) &&/*C1*///abut_ex->ee_len不大于0x8000
+             //abut_ex的逻辑块地址和物理块地址与ex的紧挨着
+            ((prev_lblk + prev_len) == ee_block) &&	/*C2*/
 			((prev_pblk + prev_len) == ee_pblk) &&		/*C3*/
-			(prev_len < (EXT_INIT_MAX_LEN - map_len))) {	/*C4*/
+			//abut_ex和ex的映射的物理块个数总和小于0x8000，一个ext4_extent结构最大映射的
+			//物理块个数不能超过0x8000，这是要把abut_ex和ex这两个ext4_extent合并???
+			(prev_len < (EXT_INIT_MAX_LEN - map_len))) /*C4*/
+		{
 			err = ext4_ext_get_access(handle, inode, path + depth);
 			if (err)
 				goto out;
@@ -3333,29 +3481,41 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 				map, ex, abut_ex);
 
 			/* Shift the start of ex by 'map_len' blocks */
-			ex->ee_block = cpu_to_le32(ee_block + map_len);
-			ext4_ext_store_pblock(ex, ee_pblk + map_len);
-			ex->ee_len = cpu_to_le16(ee_len - map_len);
+            //下边是重新划分ex这个ext4_extent结构的势力范围，把之前ee_block~ee_block+map_len
+            //划分给abut_ex这个ext4_extent，ex新的逻辑块地址范围是(ee_block + map_len)~
+            //(ee_block + ee_len)
+			ex->ee_block = cpu_to_le32(ee_block + map_len);//设置新的逻辑块首地址
+			ext4_ext_store_pblock(ex, ee_pblk + map_len);//设置新的物理块首地址
+			ex->ee_len = cpu_to_le16(ee_len - map_len);//设置新的映射的物理块个数
+            //把ex这个ext4_extent设置"uninitialized"标记
 			ext4_ext_mark_uninitialized(ex); /* Restore the flag */
 
 			/* Extend abut_ex by 'map_len' blocks */
 			abut_ex->ee_len = cpu_to_le16(prev_len + map_len);
 
 			/* Result: number of initialized blocks past m_lblk */
+            //allocated是abut_ex增大的逻辑块个数
 			allocated = map_len;
 		}
-	} else if (((map->m_lblk + map_len) == (ee_block + ee_len)) &&
-		   (map_len < ee_len) &&	/*L1*/
-		   ex < EXT_LAST_EXTENT(eh)) {	/*L2*/
+	} 
+    //要映射的结束逻辑块地址map->m_lblk+map_len等于ex的结束逻辑块地址ee_block + ee_len
+    else if (((map->m_lblk + map_len) == (ee_block + ee_len)) &&
+		   (map_len < ee_len) &&	/*L1*///要求映射的物理块数map_len要小于ex已经映射的物理块数ee_len
+		   ex < EXT_LAST_EXTENT(eh)) {	/*L2*///ex是指向叶子节点ext4_extent_header后的ext4_extent，不是最后一个
 		/* See if we can merge right */
 		ext4_lblk_t next_lblk;
 		ext4_fsblk_t next_pblk, ee_pblk;
 		unsigned int next_len;
 
+        //abut_ex指向ex下一个struct ext4_extent结构
 		abut_ex = ex + 1;
+        //下一个struct ext4_extent结构代表的起始逻辑块地址
 		next_lblk = le32_to_cpu(abut_ex->ee_block);
+        //下一个struct ext4_extent结构映射的物理块个数
 		next_len = ext4_ext_get_actual_len(abut_ex);
+        //下一个struct ext4_extent结构代表的起始物理块地址
 		next_pblk = ext4_ext_pblock(abut_ex);
+        //ex这个struct ext4_extent结构代表的起始物理块地址
 		ee_pblk = ext4_ext_pblock(ex);
 
 		/*
@@ -3367,9 +3527,17 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 		 * - C4: abut_ex can receive the additional blocks without
 		 *   overflowing the (initialized) length limit.
 		 */
-		if ((!ext4_ext_is_uninitialized(abut_ex)) &&		/*C1*/
-		    ((map->m_lblk + map_len) == next_lblk) &&		/*C2*/
+		 
+		/*ex和它后边的abut_ex逻辑块地址紧挨着，即ex结束逻辑块地址等于abut的起始逻辑块地址，
+         并且要求映射的物理块数map_len要小于ex已经映射的物理块数ee_len等等。把ex的
+         (ex->ee_block + ee_len - map_len)~(ex->ee_block + ee_len)这map_len个逻辑块合并到
+         abut_ex。合并后abut_ex的逻辑块范围是(ex->ee_block + ee_len - map_len)~
+         (next_lblk+next_len),ex的逻辑块范围缩小为ex->ee_block~(ee_len - map_len)*/
+		if ((!ext4_ext_is_uninitialized(abut_ex)) &&/*C1*///abut_ex->ee_len不大于0x8000
+             //abut_ex的逻辑块地址和物理块地址与ex的紧挨着,abut_ex在ex后边
+            ((map->m_lblk + map_len) == next_lblk) &&/*C2*/
 		    ((ee_pblk + ee_len) == next_pblk) &&		/*C3*/
+		    //abut_ex和ex的映射的物理块个数总和小于0x8000，一个ext4_extent结构最大映射的物理块个数不能超过0x8000
 		    (next_len < (EXT_INIT_MAX_LEN - map_len))) {	/*C4*/
 			err = ext4_ext_get_access(handle, inode, path + depth);
 			if (err)
@@ -3379,26 +3547,40 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 				map, ex, abut_ex);
 
 			/* Shift the start of abut_ex by 'map_len' blocks */
+            //下边这是把ex的逻辑块范围(ex->ee_block + ee_len - map_len)~(ex->ee_block + ee_len)
+            //这map_len个逻辑块合并到后边的abut_ex，合并后abut_ex的逻辑块范围是
+            //(ex->ee_block + ee_len - map_len)~(next_lblk+next_len),ex的逻辑块范围缩小为
+            //ex->ee_block~ee_len - map_len
 			abut_ex->ee_block = cpu_to_le32(next_lblk - map_len);
-			ext4_ext_store_pblock(abut_ex, next_pblk - map_len);
-			ex->ee_len = cpu_to_le16(ee_len - map_len);
+			ext4_ext_store_pblock(abut_ex, next_pblk - map_len);//设置新的物理块首地址
+            //ex映射的逻辑块范围只剩下ex->ee_block~(ex->ee_block + ee_len - map_len)
+            ex->ee_len = cpu_to_le16(ee_len - map_len);
+            //标记ex为"uninitialized"状态
 			ext4_ext_mark_uninitialized(ex); /* Restore the flag */
 
 			/* Extend abut_ex by 'map_len' blocks */
+            //abut_ex逻辑块个数增大到(next_len + map_len)个
 			abut_ex->ee_len = cpu_to_le16(next_len + map_len);
 
 			/* Result: number of initialized blocks past m_lblk */
+            //abut_ex逻辑块个数增加了map+len个
 			allocated = map_len;
 		}
 	}
-	if (allocated) {
+
+
+    if (allocated) {//allocated非0说明abut_ex逻辑块范围吞并了ex map_len个逻辑块
 		/* Mark the block containing both extents as dirty */
+        //ext4_extent映射的逻辑块范围可能发生变化了，标记对应的物理块映射的bh或者文件inode脏.
 		ext4_ext_dirty(handle, inode, path + depth);
 
 		/* Update path to point to the right extent */
+        //ext4 extent叶子节点变为abut_ex，原来的ex废弃了
 		path[depth].p_ext = abut_ex;
-		goto out;
+        
+		goto out;//退出该函数
 	} else
+	//如果abut_ex没有吞并ex的逻辑块，allocated是ex的逻辑块范围map->m_lblk到ee_len的逻辑块数
 		allocated = ee_len - (map->m_lblk - ee_block);
 
 	WARN_ON(map->m_lblk < ee_block);
@@ -3417,6 +3599,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 		err = ext4_ext_zeroout(inode, ex);
 		if (err)
 			goto out;
+        //把ex逻辑块信息复制给zero_ex，zero_ex啥用?
 		zero_ex.ee_block = ex->ee_block;
 		zero_ex.ee_len = cpu_to_le16(ext4_ext_get_actual_len(ex));
 		ext4_ext_store_pblock(&zero_ex, ext4_ext_pblock(ex));
@@ -3424,6 +3607,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 		err = ext4_ext_get_access(handle, inode, path + depth);
 		if (err)
 			goto out;
+        //ex标记"initialized"状态
 		ext4_ext_mark_initialized(ex);
 		ext4_ext_try_to_merge(handle, inode, path, ex);
 		err = ext4_ext_dirty(handle, inode, path + path->p_depth);
@@ -3555,8 +3739,11 @@ static int ext4_convert_unwritten_extents_endio(handle_t *handle,
 	int err = 0;
 
 	depth = ext_depth(inode);
+    //ex指向起始逻辑块地址最接近map->m_lblk这个起始逻辑块地址的ext4_extent
 	ex = path[depth].p_ext;
+    //ext4_extent结构代表的起始逻辑块地址
 	ee_block = le32_to_cpu(ex->ee_block);
+    //ext4_extent结构代表的映射的物理块个数
 	ee_len = ext4_ext_get_actual_len(ex);
 
 	ext_debug("ext4_convert_unwritten_extents_endio: inode %lu, logical"
@@ -3803,7 +3990,8 @@ ext4_ext_handle_uninitialized_extents(handle_t *handle, struct inode *inode,
 						    allocated, newblock);
 
 	/* get_block() before submit the IO, split the extent */
-	if ((flags & EXT4_GET_BLOCKS_PRE_IO)) {
+    //这个if在direct IO模式才成立
+	if ((flags & EXT4_GET_BLOCKS_PRE_IO/*0x0008*/)) {
 		ret = ext4_split_unwritten_extents(handle, inode, map,
 						   path, flags);
 		if (ret <= 0)
@@ -3822,8 +4010,11 @@ ext4_ext_handle_uninitialized_extents(handle_t *handle, struct inode *inode,
 			map->m_flags |= EXT4_MAP_UNINIT;
 		goto out;
 	}
+
+    
 	/* IO end_io complete, convert the filled extent to written */
-	if ((flags & EXT4_GET_BLOCKS_CONVERT)) {
+    //这个貌似是DIO模式，IO传输完成回调函数end_io()时执行到的
+	if ((flags & EXT4_GET_BLOCKS_CONVERT/*0x0010*/)) {
 		ret = ext4_convert_unwritten_extents_endio(handle, inode, map,
 							path);
 		if (ret >= 0) {
@@ -3838,18 +4029,20 @@ ext4_ext_handle_uninitialized_extents(handle_t *handle, struct inode *inode,
 		map->m_len = allocated;
 		goto out2;
 	}
-	/* buffered IO case */
+    
+	/* buffered IO case 一般的文件读写走这里*/
 	/*
 	 * repeat fallocate creation request
 	 * we already have an unwritten extent
 	 */
-	if (flags & EXT4_GET_BLOCKS_UNINIT_EXT) {
+	if (flags & EXT4_GET_BLOCKS_UNINIT_EXT/*0x0002*/) {
 		map->m_flags |= EXT4_MAP_UNWRITTEN;
 		goto map_out;
 	}
 
 	/* buffered READ or buffered write_begin() lookup */
-	if ((flags & EXT4_GET_BLOCKS_CREATE) == 0) {
+    //这个分支看着像是第一次读写文件，ext4 e
+	if ((flags & EXT4_GET_BLOCKS_CREATE/*0x0001*/) == 0) {
 		/*
 		 * We have blocks reserved already.  We
 		 * return allocated blocks so that delalloc
@@ -3906,7 +4099,7 @@ out:
 
 map_out:
 	map->m_flags |= EXT4_MAP_MAPPED;
-	if ((flags & EXT4_GET_BLOCKS_KEEP_SIZE) == 0) {
+	if ((flags & EXT4_GET_BLOCKS_KEEP_SIZE/*0x0080*/) == 0) {
 		err = check_eofblocks_fl(handle, inode, map->m_lblk, path,
 					 map->m_len);
 		if (err < 0)
@@ -4067,13 +4260,17 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 	trace_ext4_ext_map_blocks_enter(inode, map->m_lblk, map->m_len, flags);
 
 	/* find extent for this block */
+
+/*根据ext4 extent B+树的根节点，先找到每一层索引节点中最接近传入的起始逻辑块地址map->m_lblk
+ 的ext4_extent_idx保存到path[ppos]->p_idx.然后找到最后一层的叶子节点中最接近传入的
+ 起始逻辑块地址map->m_lblk的ext4_extent，保存到path[ppos]->p_ext。这个ext4_extent才包含了逻辑块地址和物理块地址的映射关系。*/
 	path = ext4_ext_find_extent(inode, map->m_lblk, NULL);
 	if (IS_ERR(path)) {
 		err = PTR_ERR(path);
 		path = NULL;
 		goto out2;
 	}
-
+    //ext4 extent B+树深度
 	depth = ext_depth(inode);
 
 	/*
@@ -4089,10 +4286,12 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 		err = -EIO;
 		goto out2;
 	}
-
+    //指向起始逻辑块地址最接近map->m_lblk这个起始逻辑块地址的ext4_extent
 	ex = path[depth].p_ext;
 	if (ex) {
+        //ext4_extent结构代表的起始逻辑块地址
 		ext4_lblk_t ee_block = le32_to_cpu(ex->ee_block);
+        //ext4_extent结构代表的起始物理块地址
 		ext4_fsblk_t ee_start = ext4_ext_pblock(ex);
 		unsigned short ee_len;
 
@@ -4100,15 +4299,22 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 		 * Uninitialized extents are treated as holes, except that
 		 * we split out initialized portions during a write.
 		 */
+		//ext4_extent结构代表的映射的物理块个数
 		ee_len = ext4_ext_get_actual_len(ex);
 
 		trace_ext4_ext_show_extent(inode, ee_block, ee_start, ee_len);
 
 		/* if found extent covers block, simply return it */
+        //如果map->m_lblk在ext4_extent代表的起始逻辑块地址范围内，奇怪，为什么只是
+        //map->m_lblk，没有map->m_lblk+m_len呢?map->m_lblk~map->m_lblk+m_len才是本次要映射
+        //的逻辑块地址范围呀
 		if (in_range(map->m_lblk, ee_block, ee_len)) {
+            //newblock : map->m_lblk这个起始逻辑块地址对应的物理块地址
 			newblock = map->m_lblk - ee_block + ee_start;
 			/* number of remaining blocks in the extent */
-			allocated = ee_len - (map->m_lblk - ee_block);
+   //allocated : map->m_lblk到(ext4_extent->ee_block+ext4_extent->ee_len)这个范围的block个数
+   //ext4_extent->ee_block+ext4_extent->ee_len是ext4_extent结构的结束逻辑块地址
+            allocated = ee_len - (map->m_lblk - ee_block);
 			ext_debug("%u fit into %u:%d -> %llu\n", map->m_lblk,
 				  ee_block, ee_len, newblock);
 
