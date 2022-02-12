@@ -72,7 +72,8 @@ struct ext4_extent_tail {
  * This is the extent on-disk structure.
  * It's used at the bottom of the tree.
  */
-//ext4 extent叶子节点，真正包含逻辑块地址和物理块地址的映射关系
+//ext4 extent B+树叶子节点的ext4_extent，真正包含逻辑块地址和物理块地址的映射关系
+//ext4 extent B+树叶子节点上的ext4_extent是按照其起始逻辑块地址从小到大、从左到右顺序排列的
 struct ext4_extent {
     //起始逻辑块地址
 	__le32	ee_block;	/* first logical block extent covers */
@@ -101,7 +102,7 @@ struct ext4_extent_idx {
 /*
  * Each block (leaves and indexes), even inode-stored has header.
  */
-//ext4 extent头信息
+//ext4 extent索引节点或叶子节点头结构体信息
 struct ext4_extent_header {
 	__le16	eh_magic;	/* probably will support different formats */
 	__le16	eh_entries;	/* number of valid entries */
@@ -128,14 +129,16 @@ find_ext4_extent_tail(struct ext4_extent_header *eh)
  * Creation/lookup routines use it for traversal/splitting/etc.
  * Truncate uses it to simulate recursive walking.
  */
+//根据一个逻辑块地址找到它所属于的ext4 ext4_extent B+树索引节点和叶子节点信息，
+//保存到ext4_ext_path
 struct ext4_ext_path {
 	ext4_fsblk_t			p_block;//ext4_ext_find_extent()中赋值，物理块地址
 	__u16				p_depth;//处于ext4 extent B+树第几层
-	//ext4_ext_binsearch()中赋值，指向起始逻辑块地址最接近传入的起始逻辑块地址block的ext4_extent
+	//ext4_ext_binsearch()中赋值，指向起始逻辑块地址最接近传入的起始逻辑块地址map->m_lblk的ext4_extent
 	struct ext4_extent		*p_ext;
-    //ext4_ext_binsearch_idx()中赋值，指向起始逻辑块地址最接近传入的起始逻辑块地址block的ext4_extent_idx
+    //ext4_ext_binsearch_idx()中赋值，指向起始逻辑块地址最接近传入的起始逻辑块地址map->m_lblk的ext4_extent_idx
 	struct ext4_extent_idx		*p_idx;
-    //指向ext4 extent B+头结点结构体,ext4_ext_find_extent()中赋值
+    //指向ext4 extent B+索引节点和叶子节点的头结点结构体,ext4_ext_find_extent()中赋值
 	struct ext4_extent_header	*p_hdr;
     //磁盘物理块映射的bh
 	struct buffer_head		*p_bh;
@@ -178,16 +181,20 @@ struct ext4_ext_path {
 #define EXT_FIRST_INDEX(__hdr__) \
 	((struct ext4_extent_idx *) (((char *) (__hdr__)) +	\
 				     sizeof(struct ext4_extent_header)))
+//ext4 extent B+树索引节点或者叶子节点的ext4_extent_idx或ext4_extent个数小于eh_max返回1
 #define EXT_HAS_FREE_INDEX(__path__) \
 	(le16_to_cpu((__path__)->p_hdr->eh_entries) \
 				     < le16_to_cpu((__path__)->p_hdr->eh_max))
 //ext4 extent B+树叶子节点最后一个ext4_extent结构内存地址
 #define EXT_LAST_EXTENT(__hdr__) \
 	(EXT_FIRST_EXTENT((__hdr__)) + le16_to_cpu((__hdr__)->eh_entries) - 1)
+//ext4 extent B+树索引节点最后一个ext4_extent_idx结构内存地址
 #define EXT_LAST_INDEX(__hdr__) \
 	(EXT_FIRST_INDEX((__hdr__)) + le16_to_cpu((__hdr__)->eh_entries) - 1)
+//ext4 extent B+树最大最靠后的ext4_extent结构，eh_max大于eh_entries
 #define EXT_MAX_EXTENT(__hdr__) \
 	(EXT_FIRST_EXTENT((__hdr__)) + le16_to_cpu((__hdr__)->eh_max) - 1)
+//ext4 extent B+树最大最靠后的ext4_extent_idx结构
 #define EXT_MAX_INDEX(__hdr__) \
 	(EXT_FIRST_INDEX((__hdr__)) + le16_to_cpu((__hdr__)->eh_max) - 1)
 

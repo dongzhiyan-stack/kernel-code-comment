@@ -943,7 +943,7 @@ static int ext4_ext_insert_index(handle_t *handle, struct inode *inode,
 static int ext4_ext_split(handle_t *handle, struct inode *inode,
 			  unsigned int flags,
 			  struct ext4_ext_path *path,
-			  struct ext4_extent *newext, int at)
+			  struct ext4_extent *newext, int at)//newext是要插入ext4_extent B+树的ext4_extent
 {
 	struct buffer_head *bh = NULL;
 	int depth = ext_depth(inode);
@@ -964,6 +964,9 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 		EXT4_ERROR_INODE(inode, "p_ext > EXT_MAX_EXTENT!");
 		return -EIO;
 	}
+
+    //path[depth].p_ext是ext4 extent B+树叶子节点中，逻辑块地址最接近map->m_lblk这个
+    //起始逻辑块地址的ext4_extent
 	if (path[depth].p_ext != EXT_MAX_EXTENT(path[depth].p_hdr)) {
 		border = path[depth].p_ext[1].ee_block;
 		ext_debug("leaf will be split."
@@ -1267,7 +1270,10 @@ repeat:
 	i = depth = ext_depth(inode);
 
 	/* walk up to the tree and look for free index entry */
-	curp = path + depth;
+	curp = path + depth;//curp首先指向ext4 extent B+树叶子节点
+	//该while是从ext4 extent B+树叶子节点开始，向上一直到索引节点，看索引节点或者
+	//叶子节点的ext4_extent_idx或ext4_extent个数是否大于最大限制eh_max，没有则返回1退出
+	//循环否则索引节点或叶子节点ext4_extent_idx或ext4_extent个数爆满，没有空闲条目entry
 	while (i > 0 && !EXT_HAS_FREE_INDEX(curp)) {
 		i--;
 		curp--;
@@ -1275,6 +1281,7 @@ repeat:
 
 	/* we use already allocated block for index block,
 	 * so subsequent data blocks should be contiguous */
+	//ext4 extent B+树索引节点或者叶子节点 有 空闲条目entry
 	if (EXT_HAS_FREE_INDEX(curp)) {
 		/* if we found index with free entry, then use that
 		 * entry: create all needed subtree and add new leaf */
@@ -1544,6 +1551,12 @@ ext4_ext_next_allocated_block(struct ext4_ext_path *path)
  * ext4_ext_next_leaf_block:
  * returns first allocated block from next leaf or EXT_MAX_BLOCKS
  */
+/**/
+//回到ext4 extent B+树上层的索引节点，找到path[depth].p_idx指向的ext4_extent_idx，
+//这个索引节点结构ext4_extent_idx的起始逻辑块地址最接近传入的逻辑块地址map->m_lblk，
+//接着找到紧挨着这个ext4_extent_idx结构后边的ext4_extent_idx，这个ext4_extent_idx的起始
+//逻辑块地址就可能大于要插入ext4 extent B+树的ext4_extent，该ext4_extent就插入该它下边
+//的叶子节点最后返回新的ext4_extent_idx的起始逻辑块地址。如果找不到返回EXT_MAX_BLOCKS
 static ext4_lblk_t ext4_ext_next_leaf_block(struct ext4_ext_path *path)
 {
 	int depth;
@@ -1551,19 +1564,43 @@ static ext4_lblk_t ext4_ext_next_leaf_block(struct ext4_ext_path *path)
 	BUG_ON(path == NULL);
 	depth = path->p_depth;
 
-	/* zero-tree has no leaf blocks at all */
+  /*执行到这里，说明原来的叶子节点所有ext4_extent逻辑块地址范围太小，要插入ext4 extent B+树
+  的新ext4_extent起始逻辑块地址太大。然后在该函数，要从B+树叶子节点回到上一层的索引
+  节点，找到path[depth].p_idx指向的ext4_extent_idx。这个ext4_extent_idx在
+  ext4_ext_find_extent->ext4_ext_binsearch_idx()中找到并赋值，具体是从ext4 extent B+树
+  从上层到下层，依次在每一层索引节点中查找哪个ext4_extent_idx起始逻辑块地址最接近
+  传入的要查找逻辑块地址block，然后path[depth].p_idx=ext4_extent_idx。这个函数是在
+  要插入ext4 extent B+树的ext4_extent起始逻辑块地址大于原来的叶子节点所有ext4_extent
+  逻辑块地址时，回到B+树索引节点，找到上一层索引节点path[depth].p_idx指向的
+  ext4_extent_idx，原来的叶子节点正是在这个索引节点下。最后返回path[depth].p_idx指向的
+  ext4_extent_idx的后边的ext4_extent_idx。后续就要在这个ext4_extent_idx生根发芽，要插入
+  ext4 extent B+树的ext4_extent就是要插入这个ext4_extent_idx。为什么要这样操作，因为
+  最初 要插入ext4 extent B+树的ext4_extent是要插入path[depth].p_idx指向的索引节点
+  ext4_extent_idx下的叶子节点，但是要插入的ext4_extent的起始逻辑块地址这个叶子节点
+  所有ext4_extent结构的起始逻辑块地址。那肯定要找个起始逻辑块地址更大的索引节点
+  ext4_extent_idx，然后要插入ext4 extent B+树的ext4_extent会尝试插入到这个
+ext4_extent_idx下的叶子节点。于是就找到path[depth].p_idx指向的索引节点ext4_extent_idx后的
+  ext4_extent_idx，这就是本函数最终找到的ext4_extent_idx。ext4 extent B+树索引节点
+  的是一个个ext4_extent_idx从左到右组成的，从左到右，每个ext4_extent_idx的逻辑块
+  起始地址依次增大。这里有个问题，万一新找到的ext4_extent_idx起始逻辑块地址还是太小咋办?
+  */
 	if (depth == 0)//没有叶子节点
+        /* zero-tree has no leaf blocks at all */
 		return EXT_MAX_BLOCKS;
 
 	/* go to index block */
-	depth--;
+	depth--;//depth--就到ext4_extent B+树的索引节点层了
 
 	while (depth >= 0) {
-		if (path[depth].p_idx !=
-				EXT_LAST_INDEX(path[depth].p_hdr))
-			return (ext4_lblk_t)
-				le32_to_cpu(path[depth].p_idx[1].ei_block);
-		depth--;
+        //path[depth].p_idx指向起始逻辑块地址最接近传入的起始逻辑块地址map->m_lblk的
+        //ext4_extent_idx，EXT_LAST_INDEX(path[depth].p_hdr)是ext4 extent B+树索引节点
+        //最后一个ext4_extent_idx。二者不能相等，因为这里是return path[depth].p_idx后边
+        //的ext4_extent_idx即path[depth].p_idx[1].ei_block。path[depth].p_idx如果是索引
+        //节点随后一个ext4_extent_idx，还怎么return它后边的ext4_extent_idx。
+		if (path[depth].p_idx != EXT_LAST_INDEX(path[depth].p_hdr))
+			return (ext4_lblk_t) le32_to_cpu(path[depth].p_idx[1].ei_block);
+        
+		depth--;//减1到上一层的ext4 extent B+树索引节点
 	}
 
 	return EXT_MAX_BLOCKS;
@@ -2012,27 +2049,46 @@ prepend:
 	fex = EXT_LAST_EXTENT(eh);
 	next = EXT_MAX_BLOCKS;//0x8000-1
 
-    //如果要插入的newext
+    //如果要插入的newext起始逻辑块地址大于ext4 extent B+树叶子节点最后一个ext4_extent
+    //结构的，说明超出ext4 extent B+树叶子节点所有ext4_extent结构的逻辑块范围了
 	if (le32_to_cpu(newext->ee_block) > le32_to_cpu(fex->ee_block))
+//回到ext4 extent B+树上层的索引节点，找到path[depth].p_idx指向的ext4_extent_idx，
+//这个索引节点结构ext4_extent_idx的起始逻辑块地址最接近传入的逻辑块地址map->m_lblk，
+//接着找到紧挨着这个ext4_extent_idx结构后边的ext4_extent_idx，这个ext4_extent_idx的起始
+//逻辑块地址就可能大于要插入ext4 extent B+树的ext4_extent，该ext4_extent就插入该它下边
+//的叶子节点最后返回新的ext4_extent_idx的起始逻辑块地址。如果找不到返回EXT_MAX_BLOCKS
 		next = ext4_ext_next_leaf_block(path);
     
-	if (next != EXT_MAX_BLOCKS) {
+	if (next != EXT_MAX_BLOCKS) {//成立说明找到了合适的ext4_extent_idx
 		ext_debug("next leaf block - %u\n", next);
 		BUG_ON(npath != NULL);
+        //next是ext4 extent B+树新找到的索引节点ext4_extent_idx的起始逻辑块地址，下边是
+        //根据这个逻辑地址，在ext4 extent B+树，从上层到下层，一层层找到起始逻辑块地址
+        //最接近next的索引节点ext4_extent_idx结构和叶子节点ext4_extent结构，保存到npath[]
 		npath = ext4_ext_find_extent(inode, next, NULL);
 		if (IS_ERR(npath))
 			return PTR_ERR(npath);
 		BUG_ON(npath->p_depth != path->p_depth);
+        //按照next这个逻辑块地址找到的新的叶子节点的ext4_extent_header结构
 		eh = npath[depth].p_hdr;
+        //叶子节点的ext4_extent树没有超过eh->eh_max
 		if (le16_to_cpu(eh->eh_entries) < le16_to_cpu(eh->eh_max)) {
 			ext_debug("next leaf isn't full(%d)\n",
 				  le16_to_cpu(eh->eh_entries));
+            //path指向按照next这个逻辑块地址找到的struct ext4_ext_path
 			path = npath;
+            //跳到has_space分支，把newext插入到按照next这个逻辑块地址找到的叶子节点
 			goto has_space;
 		}
 		ext_debug("next leaf has no free space(%d,%d)\n",
 			  le16_to_cpu(eh->eh_entries), le16_to_cpu(eh->eh_max));
 	}
+
+/*走到这里，1:说明前边ext4_ext_next_leaf_block()没有找到合适的ext4 extent B+树索引节点
+ext4_extent_idx，即要插入的newext起始逻辑地址太大了，ext4 extent B+树索引节点的起始逻辑
+块范围太小，newext无法插入。2:是这个ext4 extent B+树是空的。如此就要为ext4 extent B+树
+创建新的叶子节点。这种情况在刚读写文件时经常成立吧，因为此时很多ext4 extent B+树都有
+空的，没有叶子节点*/
 
 	/*
 	 * There is no free space in the found leaf.
