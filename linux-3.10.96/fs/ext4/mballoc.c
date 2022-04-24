@@ -4350,6 +4350,7 @@ static int ext4_mb_discard_preallocations(struct super_block *sb, int needed)
  * it tries to use preallocation first, then falls back
  * to usual allocation
  */
+//分配ar->len个连续的物理块并返回起始物理块号，ext4_ext_map_blocks()中调用
 ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 				struct ext4_allocation_request *ar, int *errp)
 {

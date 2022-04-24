@@ -107,6 +107,7 @@ struct ext4_extent_header {
 	__le16	eh_magic;	/* probably will support different formats */
 	__le16	eh_entries;	/* number of valid entries */
 	__le16	eh_max;		/* capacity of store in entries */
+    //ext4 extent B+树深度，不包含根节点，B+树只有根节点时eh_depth是0
 	__le16	eh_depth;	/* has tree real underlying blocks? */
 	__le32	eh_generation;	/* generation of the tree */
 };
@@ -140,7 +141,8 @@ struct ext4_ext_path {
 	struct ext4_extent_idx		*p_idx;
     //指向ext4 extent B+索引节点和叶子节点的头结点结构体,ext4_ext_find_extent()中赋值
 	struct ext4_extent_header	*p_hdr;
-    //磁盘物理块映射的bh
+    //ext4 extent B+索引节点或者叶子节点的N个ext4_extent_idx或N个ext4_extent结构是保存在物理块的，物理块号就是p_block
+    //p_bh就指向这个物理块映射的buffer_head，通过p_bh就可以访问到ext4 extent B+索引节点或者叶子节点的ext4_extent_idx或ext4_extent结构
 	struct buffer_head		*p_bh;
 };
 

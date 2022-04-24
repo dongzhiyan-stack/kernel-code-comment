@@ -1294,7 +1294,7 @@ struct super_block {
 	struct list_head	s_list;		/* Keep this first */
 	dev_t			s_dev;		/* search index; _not_ kdev_t */
 	unsigned char		s_blocksize_bits;
-	unsigned long		s_blocksize;
+	unsigned long		s_blocksize;//ext4文件系统一个block测试时4K大小
 	loff_t			s_maxbytes;	/* Max file size */
 	struct file_system_type	*s_type;//文件系统类型
 	const struct super_operations	*s_op;

@@ -128,13 +128,13 @@ struct ext4_allocation_request {
 	/* target inode for block we're allocating */
 	struct inode *inode;
 	/* how many blocks we want to allocate */
-	unsigned int len;
+	unsigned int len;//想分配的物理块个数
 	/* logical block in target inode */
-	ext4_lblk_t logical;
+	ext4_lblk_t logical;//起始逻辑块号
 	/* the closest logical allocated block to the left */
-	ext4_lblk_t lleft;
+	ext4_lblk_t lleft;//ext4_ext_search_left()中设置
 	/* the closest logical allocated block to the right */
-	ext4_lblk_t lright;
+	ext4_lblk_t lright;//ext4_ext_search_right()中设置
 	/* phys. target (a hint) */
 	ext4_fsblk_t goal;
 	/* phys. block for the closest logical allocated block to the left */
@@ -170,10 +170,9 @@ struct ext4_allocation_request {
 				 EXT4_MAP_UNINIT | EXT4_MAP_FROM_CLUSTER)
 
 struct ext4_map_blocks {
-	ext4_fsblk_t m_pblk;//磁盘物理块首地址
-	//本次读取的文件起始逻辑块号
-	ext4_lblk_t m_lblk;
-	unsigned int m_len;//映射的block个数
+	ext4_fsblk_t m_pblk;//逻辑块号映射的起始物理块号
+	ext4_lblk_t m_lblk;//本次读取的文件起始逻辑块号
+	unsigned int m_len;//映射的物理块个数
 	unsigned int m_flags;
 };
 
