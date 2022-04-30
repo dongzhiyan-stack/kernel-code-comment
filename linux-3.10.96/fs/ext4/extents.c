@@ -52,8 +52,8 @@
 //zeroout¿´×ÅÒ»°ãÓÃ²»µ½£¬ÏñÊÇÈç¹û°Ñext4_extentÒòÄÚ´æ²»×ã·Ö¸îÊ§°Üºó»Ö¸´Ö®ÓÃ
 #define EXT4_EXT_MAY_ZEROOUT	0x1  /* safe to zeroout if split fails \
 					due to ENOSPC */
-#define EXT4_EXT_MARK_UNINIT1	0x2  /* mark first half uninitialized */
-#define EXT4_EXT_MARK_UNINIT2	0x4  /* mark second half uninitialized */
+#define EXT4_EXT_MARK_UNINIT1	0x2  /* mark first half uninitialized *///±ê¼Ç·Ö¸îºóµÄµÚ1¶ÎÎ´³õÊ¼»¯×´Ì¬
+#define EXT4_EXT_MARK_UNINIT2	0x4  /* mark second half uninitialized *///±ê¼Ç·Ö¸îºóµÄµÚ2¶ÎÎ´³õÊ¼»¯×´Ì¬
 
 #define EXT4_EXT_DATA_VALID1	0x8  /* first half contains valid data */
 #define EXT4_EXT_DATA_VALID2	0x10 /* second half contains valid data */
@@ -175,10 +175,10 @@ int __ext4_ext_dirty(const char *where, unsigned int line, handle_t *handle,
 	}
 	return err;
 }
-//ÕÒµ½map->m_lblkÓ³ÉäµÄÎïÀí¿éµØÖ·²¢·µ»Ø
+//ÕÒµ½map->m_lblk»òÕßex->ee_blockÓ³ÉäµÄÎïÀí¿éµØÖ·²¢·µ»Ø
 static ext4_fsblk_t ext4_ext_find_goal(struct inode *inode,
 			      struct ext4_ext_path *path,
-			      ext4_lblk_t block)//blockÊÇmap->m_lblk
+			      ext4_lblk_t block)//blockÊÇmap->m_lblk»òÕßex->ee_block
 {
 	if (path) {
 		int depth = path->p_depth;
@@ -208,7 +208,7 @@ static ext4_fsblk_t ext4_ext_find_goal(struct inode *inode,
             //exµÄÆğÊ¼Âß¼­¿éµØÖ·
 			ext4_lblk_t ext_block = le32_to_cpu(ex->ee_block);
 
-            //map->m_lblkÓ³ÉäµÄÎïÀí¿éµØÖ·=exµÄÆğÊ¼ÎïÀí¿éµØÖ· + (exµÄÆğÊ¼Âß¼­¿éµØÖ·Óëmap->m_lblkµÄ²îÖµ)
+            //blockÓ³ÉäµÄÎïÀí¿éµØÖ·=exµÄÆğÊ¼ÎïÀí¿éµØÖ· + (exµÄÆğÊ¼Âß¼­¿éµØÖ·ÓëblockµÄ²îÖµ)
 			if (block > ext_block)
 				return ext_pblk + (block - ext_block);
 			else
@@ -237,7 +237,7 @@ ext4_ext_new_meta_block(handle_t *handle, struct inode *inode,
 			struct ext4_extent *ex, int *err, unsigned int flags)
 {
 	ext4_fsblk_t goal, newblock;
-    //ÕÒµ½map->m_lblkÓ³ÉäµÄÎïÀí¿éµØÖ·²¢·µ»Ø¸øgoal£¬ÕâÖ»ÊÇ¸ö²Î¿¼µÄÄ¿±êÎïÀí¿éºÅ
+    //ÕÒµ½ex->ee_blockÓ³ÉäµÄÎïÀí¿éµØÖ·²¢·µ»Ø¸øgoal£¬ÕâÖ»ÊÇ¸ö²Î¿¼µÄÄ¿±êÎïÀí¿éºÅ
 	goal = ext4_ext_find_goal(inode, path, le32_to_cpu(ex->ee_block));
     //ÒÔgoal×÷ÎªÄ¿±êÎïÀí¿éµØÖ·£¬ÕæÕıµÄ´Óext4 ÎÄ¼şÏµÍ³·ÖÅäÒ»¸öÎïÀí¿é£¬ÎïÀí¿éµÄµØÖ·ÊÇnewblock£¬newblockºÍgoal¶¼ÊÇ´ÅÅÌÎïÀí¿éºÅ£¬
     //¶şÕßÓĞÊ±ÏàµÈ£¬ÓĞÊ±²»ÏàµÈ¡£
@@ -623,7 +623,9 @@ ext4_ext_binsearch_idx(struct inode *inode,
 
 
 	ext_debug("binsearch for %u(idx):  ", block);
-
+    /*Èç¹ûË÷Òı½ÚµãÖ»ÓĞÒ»¸öext4_extent_idx½á¹¹£¬ÕâÑùÏÂ±ßwhile²»³ÉÁ¢£¬path->p_idx¾ÍÖ¸ÏòµÚÒ»¸öË÷Òı½Úµã¡£ÌØ±ğ×¢Òâ£¬ext4_ext_binsearch_idx()
+    ÕÒµ½µÄext4_extent_idxµÄÆğÊ¼Âß¼­¿éµØÖ·<=block*/
+    
 	l = EXT_FIRST_INDEX(eh) + 1;//lÖ¸Ïòext4_extent_headerºó±ßµÄext4_extent_idxÊı×éµÄµÚ2¸öext4_extent_idx³ÉÔ±
 	r = EXT_LAST_INDEX(eh);//rÖ¸Ïòext4_extent_headerºó±ßµÄext4_extent_idxÊı×éµÄ×îºóÒ»¸öext4_extent_idx³ÉÔ±
 
@@ -688,6 +690,7 @@ ext4_ext_binsearch(struct inode *inode,
 	struct ext4_extent_header *eh = path->p_hdr;
 	struct ext4_extent *r, *l, *m;
 
+    /*Èç¹ûÒ¶×Ó½áµãÃ»ÓĞÒ»¸öext4_extent½á¹¹£¬Ö±½Óreturn*/
 	if (eh->eh_entries == 0) {
 		/*
 		 * this leaf is empty:
@@ -695,6 +698,8 @@ ext4_ext_binsearch(struct inode *inode,
 		 */
 		return;
 	}
+    /*Èç¹ûÒ¶×Ó½ÚµãÖ»ÓĞÒ»¸öext4_extent½á¹¹£¬ÕâÑùÏÂ±ßwhile²»³ÉÁ¢£¬path->p_idx¾ÍÖ¸ÏòµÚÒ»¸öË÷Òı½Úµã¡£ÌØ±ğ×¢Òâ£¬ext4_ext_binsearch()
+    ÕÒµ½µÄext4_extentµÄÆğÊ¼Âß¼­¿éµØÖ·<=block*/
 
 	ext_debug("binsearch for %u:  ", block);
 
@@ -756,9 +761,14 @@ int ext4_ext_tree_init(handle_t *handle, struct inode *inode)
 	ext4_mark_inode_dirty(handle, inode);
 	return 0;
 }
-/*¸ù¾İext4 extent B+Ê÷µÄ¸ù½ÚµãµÄext4_extent_header£¬ÏÈÕÒµ½Ã¿Ò»²ãË÷Òı½ÚµãÖĞ×î½Ó½ü´«ÈëµÄÆğÊ¼
-Âß¼­¿éµØÖ·blockµÄext4_extent_idx±£´æµ½path[ppos]->p_idx.È»ºóÕÒµ½×îºóÒ»²ãµÄÒ¶×Ó½ÚµãÖĞ×î½Ó½ü
-´«ÈëµÄÆğÊ¼Âß¼­¿éµØÖ·blockµÄext4_extent£¬±£´æµ½path[ppos]->p_ext¡£Õâ¸öext4_extent²Å°üº¬ÁËÂß¼­¿éµØÖ·ºÍÎïÀí¿éµØÖ·µÄÓ³Éä¹ØÏµ¡£*/
+/*¸ù¾İext4 extent B+Ê÷µÄ¸ù½ÚµãµÄext4_extent_header£¬ÏÈÕÒµ½Ã¿Ò»²ãË÷Òı½ÚµãÖĞÆğÊ¼Âß¼­¿éµØÖ·×î½Ó½ü´«ÈëµÄÂß¼­¿éµØÖ·blockµÄext4_extent_idx
+±£´æµ½path[ppos]->p_idx.È»ºóÕÒµ½×îºóÒ»²ãµÄÒ¶×Ó½ÚµãÖĞÆğÊ¼Âß¼­¿éµØÖ·×î½Ó½ü´«ÈëµÄÂß¼­¿éµØÖ·blockµÄext4_extent£¬±£´æµ½path[ppos]->p_ext£¬
+Õâ¸öext4_extent²Å°üº¬ÁËÂß¼­¿éµØÖ·ºÍÎïÀí¿éµØÖ·µÄÓ³Éä¹ØÏµ¡£×¢Òâ£¬ÕÒµ½ÕâĞ©ÆğÊ¼Âß¼­¿éµØÖ·½Ó½üblockµÄext4_extent_idxºÍext4_extentµÄ
+ÆğÊ¼Âß¼­¿éµØÖ·<=block£¬ÔÚblockµÄ×ó±ß£¬±ØĞëÕâÑù¡£½«À´°Ñblock¶ÔÓ¦µÄext4_extent²åÈëext4 extent B+Ê÷Ê±£¬Ò²ÊÇ²åÈëµ½ÕâĞ©ext4_extent_idx
+ºÍext4_extent½á¹¹µÄÓÒ±ß¡£ext4 extent B+Ê÷Ë÷Òı½ÚµãºÍÒ¶×Ó½ÚµãÖĞµÄext4_extent_idxºÍext4_extentµÄÂß¼­¿éµØÖ·´Ó×óµ½ÓÒÒÀ´ÎÔö´ó£¬Ë³ĞòÅÅ²¼¡£
+
+ËµÃ÷¿ÉÄÜ³öÏÖÒ»ÖÖÌØÖÖÇé¿ö£¬¾ÍÊÇÒ¶×Ó½ÚµãÖĞÃ»ÓĞÒ»¸öext4_extent½á¹¹£¬Ôòpath[ppos].p_extÊÇNULL£¬µ«path[ppos].p_hdrÖ¸ÏòÕâ¸öÒ¶×Ó½ÚµãµÄÍ·½áµã
+*/
 struct ext4_ext_path *
 ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
 					struct ext4_ext_path *path)//blockÊÇ´«ÈëµÄÆğÊ¼Âß¼­¿éµØÖ·
@@ -811,8 +821,17 @@ ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
 		path[ppos].p_depth = i;//B+Ê÷²ãÊı
 		path[ppos].p_ext = NULL;
 
-        //¸ù¾İÎïÀí¿éµØÖ·path[ppos].p_blockµÃµ½Æä´ú±íµÄ´ÅÅÌÎïÀí¿éÓ³ÉäµÄbh¡£ÕâÀïÓĞ¸öÒş²ØÖØµã£¬ext4 extent B+Ê÷Ã¿Ò»¸öË÷Òı½Úµã
-        //ºÍÒ¶×Ó½ÚµãµÄext4_extent_idx¡¢ext4_extentµÈÊı¾İ¶¼ÊÇ±£´æÔÚ´ÅÅÌÀïµÄ£¬Õ¼¾İ4K´óĞ¡£¬path[ppos].p_blockÊÇËûÃÇÔÚ´ÅÅÌµÄÎïÀí¿éºÅ
+        /*¸ù¾İÎïÀí¿éµØÖ·path[ppos].p_blockµÃµ½Æä´ú±íµÄ´ÅÅÌÎïÀí¿éÓ³ÉäµÄbh¡£ÕâÀïÓĞ¸öÒş²ØÖØµã£¬ext4 extent B+Ê÷Ã¿Ò»¸öË÷Òı½Úµã
+        ºÍÒ¶×Ó½ÚµãµÄext4_extent_header¡¢ext4_extent_idx¡¢ext4_extentÊı¾İ±¾ÖÊ¶¼ÊÇ±£´æÔÚ´ÅÅÌÀïµÄ£¬Õ¼Ò»¸öÎïÀí¿é£¬4K´óĞ¡¡£
+        path[ppos].p_blockÀ´×Ôext4_idx_pblock(path[ppos].p_idx)£¬ext4_idx_pblock(path[ppos].p_idx)´ú±íÉ¶?path[ppos].p_idxÊÇÕÒµ½µÄ
+        Âß¼­¿éµØÖ·×î½Ó½ü´«ÈëµÄÆğÊ¼Âß¼­¿éµØÖ·blockµÄext4_extent_idx½á¹¹£¬ext4_idx_pblock(path[ppos].p_idx)ÊÇÕâ¸ö½á¹¹±£´æµÄÎïÀí¿éºÅ£¬
+        Õâ¸öÎïÀí¿é±£´æµÄ¸ÃË÷Òı½ÚµãÏÂÒ»²ãË÷Òı½Úµã4KÊı¾İ(ext4_extent_header+N¸öext4_extent_idx½á¹¹)»òÕßÒ¶×Ó½ÚµãµÄ4KÊı¾İ
+        (ext4_extent_header+N¸öext4_extent½á¹¹)¡£bh = sb_getblk(inode->i_sb, path[ppos].p_block)ÊÇÓ³ÉäÕâ¸öÎïÀí¿éµÄ4KÊı¾İµ½bh¡£
+        
+        ext4 extent B+Ê÷²ã²ãË÷Òı½ÚµãºÍÒ¶×Ó½ÚµãµÄ4KÊı¾İ¶¼ÊÇ±£´æÔÚÄ³¸öÎïÀí¿é(root½Úµã³ıÍâ)£¬²ã²ãË÷Òı½ÚµãºÍÒ¶×Ó½ÚµãÊÇÔõÃ´½¨Á¢ÁªÏµµÄÄØ?
+        ¾ÍÊÇÉÏ²ãË÷Òı½Úµãext4_extent_idx½á¹¹µÄÎïÀí¿é³ÉÔ±¼ÇÂ¼±£´æÏÂ²ãË÷Òı½Úµã»òÕßÒ¶×Ó½Úµã4KµÄÎïÀí¿éºÅ£¬µ±Ç°ÕâĞ©²ã²ãË÷Òı½ÚµãºÍÒ¶×Ó½Úµã
+        ¿Ï¶¨ÒªÓĞ¹ØÏµµÄ£¬ÆğÊ¼Âß¼­¿éµØÖ·Ò»Ò»¶ÔÓ¦£¬²Å»á½¨Á¢ÉÏÏÂÁªÏµ¡£Õâ¸öÊÇÖØµã¡£
+        */
 		bh = sb_getblk(inode->i_sb, path[ppos].p_block);
 		if (unlikely(!bh)) {
 			ret = -ENOMEM;
@@ -827,7 +846,9 @@ ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
 				goto err;
 			}
 		}
+        //ehÖ¸Ïòµ±Ç°Ë÷Òı½Úµã¶ÔÓ¦µÄÏÂ²ãË÷Òı½Úµã»òÕßÒ¶×Ó½ÚµãµÄÍ·½áµã
 		eh = ext_block_hdr(bh);
+        //Ë÷Òı½Úµã²ãÊı¼Ó1
 		ppos++;
 		if (unlikely(ppos > depth)) {
 			put_bh(bh);
@@ -836,7 +857,10 @@ ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
 			ret = -EIO;
 			goto err;
 		}
+        /*Òş²ØÖªÊ¶µã£¬´ËÊ±ppos++ÁË£¬ppos´ú±íÏÂÒ»²ãË÷Òı½Úµã»òÕßÒ¶×Ó½ÚµãÁË*/
+        //path[ppos].p_bhÖ¸ÏòpposÕâÒ»²ã±£´æË÷Òı½Úµã»òÕßÒ¶×Ó½Úµã 4KÊı¾İµÄÎïÀí¿éÓ³ÉäµÄbh
 		path[ppos].p_bh = bh;
+        //path[ppos].p_bhÖ¸ÏòpposÕâÒ»²ãË÷Òı½Úµã»òÕßÒ¶×Ó½ÚµãµÄÍ·½áµã
 		path[ppos].p_hdr = eh;
 		i--;
 
@@ -850,8 +874,8 @@ ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
 	path[ppos].p_idx = NULL;
 
 	/* find extent */
-  //ÀûÓÃ¶ş·Ö·¨ÔÚext4 extent B+Ê÷path[ppos]->p_hdr[]ºó±ßµÄext4_extent[]Êı×éÖĞ£¬ÕÒµ½ÆğÊ¼Âß¼­¿éµØÖ·
-  //×î½Ó½ü´«ÈëµÄÆğÊ¼Âß¼­¿éµØÖ·blockµÄext4_extent¡£path[ppos]->p_extÖ¸ÏòÕâ¸öext4_extent
+  //ÀûÓÃ¶ş·Ö·¨ÔÚext4 extent B+Ê÷path[ppos]->p_hdr[]ºó±ßµÄext4_extent[]Êı×éÖĞ£¬ÕÒµ½ÆğÊ¼Âß¼­¿éµØÖ·×î½Ó½ü´«ÈëµÄÆğÊ¼Âß¼­¿éµØÖ·block
+  //µÄext4_extent£¬Áîpath[ppos]->p_extÖ¸ÏòÕâ¸öext4_extent¡£Èç¹ûÒ¶×Ó½áµãÃ»ÓĞÒ»¸öext4_extent½á¹¹£¬Ôòpath[ppos]->p_ext±£³ÖNULL
 	ext4_ext_binsearch(inode, path + ppos, block);
 	/* if not an empty leaf */
 	if (path[ppos].p_ext)//ÎïÀí¿éµØÖ·
@@ -961,7 +985,10 @@ static int ext4_ext_insert_index(handle_t *handle, struct inode *inode,
  *   into the newly allocated blocks
  * - initializes subtree
  */
- /*
+
+
+
+/*
 1:Ê×ÏÈÈ·¶¨ext4 extent B+Ê÷µÄ·Ö¸îµãÂß¼­µØÖ·border¡£Èç¹ûpath[depth].p_ext²»ÊÇext4_extent B+Ê÷Ò¶×Ó½Úµã½Úµã
 ×îºóÒ»¸öext4 extent½á¹¹£¬Ôò·Ö¸îµãÂß¼­µØÖ·borderÊÇpath[depth].p_extºó±ßµÄext4_extentÆğÊ¼Âß¼­¿éµØÖ·£¬¼´
 border=path[depth].p_ext[1].ee_block¡£·ñÔòborderÊÇĞÂ²åÈëext4 extent B+Ê÷µÄext4_extentµÄÆğÊ¼Âß¼­¿éµØÖ·£¬¼´newext->ee_block
@@ -985,6 +1012,49 @@ atÄÇÒ»²ãĞÂ·ÖÅäµÄË÷Òı½ÚµãµÄÎïÀí¿éºÅºÍÆğÊ¼Âß¼­¿éµØÖ·borderÊÇ±£´æµ½ext4_extent B+Ê÷
 µÄËùÓĞext4_extent_idx½á¹¹ ºÍ path[depth].p_extÖ¸ÏòµÄext4_extentºóµÄËùÓĞext4_extent½á¹¹¶¼¶Ô½ÓÒÆ¶¯µ½ÉÏ±ß
 Õë¶Ôext4_extent B+Ê÷at~denthĞÂ·ÖÅäË÷Òı½ÚµãºÍÒ¶×Ó½ÚµãÎïÀí¿éºÅÓ³ÉäbhÄÚ´æ¡£ÕâÊÇ¶ÔÔ­ÓĞµÄext4 extent½øĞĞ·ÖÅäµÄÖØµã¡£
 */
+
+//ext4_ext_map_blocks()->ext4_ext_handle_uninitialized_extents()/ext4_ext_handle_unwritten_extents()->ext4_ext_convert_to_initialized()
+//->ext4_split_extent()->ext4_split_extent_at()->ext4_ext_insert_extent()->ext4_ext_create_new_leaf()->ext4_ext_split()
+/*
+ÉÏ±ßµÄ½âÊÍÃ»ÓĞÚ¹ÊÍµ½±¾ÖÊ¡£Ö±»÷Áé»ê£¬ÎªÊ²Ã´»áÖ´ĞĞµ½ext4_ext_insert_extent()->ext4_ext_create_new_leaf()->ext4_ext_split()?ÓĞÊ²Ã´ÒâÒå?
+Ê×ÏÈ£¬ext4_split_extent_at()º¯ÊıÖĞ£¬°Ñpath[depth].p_extÖ¸ÏòµÄext4_extent½á¹¹(¼´ex)µÄÂß¼­¿é·¶Î§·Ö¸î³ÉÁ½¶Î£¬Á½¸öext4_extent½á¹¹¡£Ç°±ß
+µÄext4_extent½á¹¹»¹ÊÇex£¬Ö»ÊÇÂß¼­¿é·¶Î§¼õÉÙÁË¡£¶øºó°ë¶Îext4_extent½á¹¹¼´newext¾ÍÒª²åÈë²åÈëµ½µ½ext4 extent B+Ê÷¡£ext4_ext_insert_extent()
+º¯ÊıÖĞ£¬Èç¹û´ËÊ±exËùÔÚÒ¶×Ó½ÚµãµÄext4_extent½á¹¹±¬ÂúÁË£¬¼´if (le16_to_cpu(eh->eh_entries) < le16_to_cpu(eh->eh_max))²»³ÉÁ¢£¬µ«ÊÇ
+if (le32_to_cpu(newext->ee_block) > le32_to_cpu(fex->ee_block))³ÉÁ¢£¬¼´newextµÄÆğÊ¼Âß¼­¿éµØÖ·Ğ¡ÓÚexËùÔÚÒ¶×Ó½ÚµãµÄ×îºóÒ»¸öext4_extent
+½á¹¹µÄÆğÊ¼Âß¼­¿éµØÖ·£¬ÔòÖ´ĞĞnext = ext4_ext_next_leaf_block(path)µÈ´úÂë£¬»Øµ½ÉÏ²ãË÷Òı½Úµã£¬ÕÒµ½ÆğÊ¼Âß¼­¿éµØÖ·¸ü´óµÄË÷Òı½ÚµãºÍÒ¶×Ó½Úµã£¬
+Èç¹ûĞÂµÄÒ¶×Ó½ÚµãµÄext4_extent½á¹¹»¹ÊÇ±¬Âú£¬ÄÇ¾ÍÒªÖ´ĞĞext4_ext_create_new_leaf()Ôö´óext4_extent B+Ê÷²ãÊıÁË¡£
+
+À´µ½ext4_ext_create_new_leaf()º¯Êı£¬´Ó×îµ×²ãµÄË÷Òı½Úµã¿ªÊ¼ÏòÉÏËÑË÷£¬ÕÒµ½ÓĞ¿ÕÏĞentryµÄË÷Òı½Úµã¡£Èç¹ûÕÒµ½ÔòÖ´ĞĞext4_ext_split()¡£
+Èç¹ûÕÒ²»µ½ÔòÖ´ĞĞext4_ext_grow_indepth()ÔÚext4_extent B+Ê÷root½ÚµãÔö¼ÓÒ»²ãË÷Òı½Úµã£¬È»ºóÒ²Ö´ĞĞext4_ext_split()¡£
+
+µ±Ö´ĞĞµ½ext4_ext_split()£¬atÒ»²ãµÄext4_extent B+Ê÷ÓĞ¿ÕÏĞentry£¬ÔòÒÔ´Óat²ã¿ªÊ¼´´½¨ĞÂµÄË÷Òı½ÚµãºÍÒ¶×Ó½Úµã£¬½¨Á¢ÕâĞ©ĞÂµÄË÷Òı½ÚµãºÍÒ¶×Ó½Úµã
+±Ë´ËµÄÎïÀí¿éºÅÁªÏµ¡£ÎÒÃÇ¼ÙÉèext4_ext_split()µÄif (path[depth].p_ext != EXT_MAX_EXTENT(path[depth].p_hdr))³ÉÁ¢£¬ÔòÕâÑùÖ´ĞĞ:
+
+ÏÂ±ßÊÇ°ÑÏòĞÂ·ÖÅäµÄÒ¶×Ó½Úµã¸´ÖÆm¸öext4_extent½á¹¹Ê±£¬¸´ÖÆµÄµÚÒ»¸öext4_extent½á¹¹²»ÊÇpath[depth].p_ext£¬¶øÊÇ
+Ëüºó±ßµÄ path[depth].p_ext[1]Õâ¸öext4_extent½á¹¹¡£²¢ÇÒ£¬ÏÂ±ßĞÂ´´½¨µÄË÷Òı½ÚµãµÄµÚÒ»¸öext4_extent_idx½á¹¹µÄÆğÊ¼Âß¼­Æ÷¿éµØÖ·
+¶¼ÊÇborder£¬¼´path[depth].p_ext[1]µÄÂß¼­¿éµØÖ·£¬Ò²ÊÇpath[depth].p_ext[1].ee_block¡£È»ºóÏòĞÂ´«´´½¨µÄË÷Òı½ÚµãµÄµÚ2¸ö
+ext4_extent_idx½á¹¹´¦¼°Ö®ºó¸´ÖÆm¸öext4_extent_idx½á¹¹¡£ĞÂ´«´´½¨µÄË÷Òı½ÚµãµÄµÚÒ»¸öext4_extent_idxµÄÆğÊ¼Âß¼­¿éµØÖ·ÊÇborder£¬
+µ¥¶ÀÊ¹ÓÃ£¬×÷Îª·Ö¸îµãµÄext4_extent_idx½á¹¹¡£Èç´Ë£¬ºóĞøÖ´ĞĞext4_ext_find_extent(newext->ee_block)ÔÚÀÏµÄext4_extent B+Ê÷ÕÒµ½µÄ
+path[depth].p_extÖ¸ÏòµÄext4_extent»¹ÊÇÀÏµÄ£¬µ«ÊÇpath[depth].p_extºó±ßµÄm¸öext4_extent½á¹¹ÒÆ¶¯µ½ÁËĞÂ·ÖÅäµÄÒ¶×Ó½Úµã£¬
+path[depth].p_extËùÔÚÒ¶×Ó½Úµã¾ÍÓĞ¿Õ¼äÁË£¬newext¾Í²åÈëµ½path[depth].p_extÖ¸ÏòµÄext4_extentÒ¶×Ó½Úµãºó±ß¡£Õâ¶Î´úÂëÔÚext4_ext_insert_extent()µÄ
+has_space µÄif (!nearex)........} else{......}µÄelse·ÖÖ§
+
+Èç¹ûext4_ext_split()µÄif (path[depth].p_ext != EXT_MAX_EXTENT(path[depth].p_hdr))²»³ÉÁ¢£¬ÔòÕâÑùÖ´ĞĞ:
+²»»áÏòĞÂ·ÖÅäµÄÒ¶×Ó½Úµã¸´ÖÆext4_extent½á¹¹Ê±£¬mÊÇ0£¬ÒòÎªpath[depth].p_ext¾ÍÊÇÒ¶×Ó½Úµã×îºóÒ»¸öext4_extent
+½á¹¹£¬ÏÂ±ßµÄm = EXT_MAX_EXTENT(path[depth].p_hdr) - path[depth].p_ext++=0¡£²¢ÇÒ£¬ÏÂ±ßĞÂ´´½¨µÄË÷Òı½ÚµãµÄµÚÒ»¸öext4_extent_idx½á¹¹
+µÄÆğÊ¼Âß¼­Æ÷¿éµØÖ·¶¼ÊÇnewext->ee_block¡£ÕâÑùºóĞøÖ´ĞĞext4_ext_find_extent()ÔÚext4_extent B+Ê÷¾ÍÄÜÕÒµ½ÆğÊ¼Âß¼­¿éµØÖ·ÊÇ
+newext->ee_blockµÄ²ã²ãË÷Òı½ÚµãÁË£¬ÍêÃÀÆ¥Åä¡£ÄÇÒ¶×Ó½ÚµãÄØ?Õâ¸ö·ÖÖ§Ã»ÓĞÏòĞÂµÄÒ¶×Ó½Úµã¸´ÖÆext4_extent½á¹¹£¬¿ÕµÄ£¬
+ext4_ext_find_extent()Ö´ĞĞºó£¬path[ppos].depthÖ¸ÏòĞÂµÄÒ¶×Ó½ÚµãµÄÍ·½áµã£¬´ËÊ±Ö±½ÓÁî¸ÃÒ¶×Ó½ÚµãµÄµÚÒ»¸öext4_extent½á¹¹µÄ
+Âß¼­¿éµØÖ·ÊÇnewext->ee_block£¬ÍêÃÀ!Õâ¶Î´úÂëÔÚext4_ext_insert_extent()µÄhas_space µÄif (!nearex)·ÖÖ§¡£
+
+Òò´Ë£¬ÎÒÃÇ¿´µ½ext4_ext_split()×îºËĞÄµÄ×÷ÓÃÊÇ:atÒ»²ãµÄext4_extent B+Ê÷ÓĞ¿ÕÏĞentry£¬ÔòÒÔ´Óat²ã¿ªÊ¼´´½¨ĞÂµÄË÷Òı½ÚµãºÍÒ¶×Ó½Úµã£¬
+½¨Á¢ÕâĞ©ĞÂµÄË÷Òı½ÚµãºÍÒ¶×Ó½Úµã±Ë´ËµÄÎïÀí¿éºÅÁªÏµ¡£È»ºó°Ñpath[depth].p_extºó±ßµÄext4_extent½á¹¹ÒÆ¶¯µ½ĞÂµÄÒ¶×Ó½Úµã£¬°Ñ
+path[at~depth-1].p_idxÕâĞ©Ë÷Òı½Úµãºó±ßµÄext4_extent_idx½á¹¹ÒÀ´ÎÒÆ¶¯µ½ĞÂ´´½¨µÄË÷Òı½Úµã¡£ÕâÑùÒªÃ´ÀÏµÄpath[depth].p_extËùÔÚÒ¶×Ó½Úµã
+ÓĞÁË¿ÕÏĞµÄext4_extent entry£¬°Ñnewex²åÈëµ½ÀÏµÄpath[depth].p_extËùÔÚÒ¶×Ó½ÚµãÄ³´¦ext4_extent½á¹¹³ö¼´¿É¡£»òÕßĞÂ´´½¨µÄat~denthµÄË÷Òı½Úµã
+ºÍÒ¶×Ó½Úµã£¬ÓĞ´óÁ¿¿ÕÏĞµÄentry£¬ÕâĞ©Ë÷Òı½ÚµãµÄÆğÊ¼Âß¼­¿éµØÖ·»¹ÊÇnewext->ee_block£¬ÔòÖ±½Ó°Ñnewext²åÈëµ½ĞÂ´´½¨µÄÒ¶×Ó½ÚµãµÚÒ»¸ö
+ext4_extent½á¹¹¼´¿É¡£
+*/
+
 static int ext4_ext_split(handle_t *handle, struct inode *inode,
 			  unsigned int flags,
 			  struct ext4_ext_path *path,
@@ -1014,12 +1084,26 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
     //path[depth].p_extÊÇext4 extent B+Ê÷Ò¶×Ó½ÚµãÖĞ£¬Âß¼­¿éµØÖ·×î½Ó½ümap->m_lblkÕâ¸öÆğÊ¼Âß¼­¿éµØÖ·µÄext4_extent
 	if (path[depth].p_ext != EXT_MAX_EXTENT(path[depth].p_hdr)) {
         //path[depth].p_ext²»ÊÇÒ¶×Ó½Úµã×îºóÒ»¸öext4_extent½á¹¹£¬ÄÇÒÔËüºó±ßµÄext4_extent¼´µÄÆğÊ¼Âß¼­¿éµØÖ·×÷Îª·Ö¸îµã£¬¼´border
+        /*×ßµ½Õâ¸ö·ÖÖ§£¬ÏÂ±ßÊÇ°ÑÏòĞÂ·ÖÅäµÄÒ¶×Ó½Úµã¸´ÖÆm¸öext4_extent½á¹¹Ê±£¬¸´ÖÆµÄµÚÒ»¸öext4_extent½á¹¹²»ÊÇpath[depth].p_ext£¬¶øÊÇ
+        Ëüºó±ßµÄ path[depth].p_ext[1]Õâ¸öext4_extent½á¹¹¡£²¢ÇÒ£¬ÏÂ±ßĞÂ´´½¨µÄË÷Òı½ÚµãµÄµÚÒ»¸öext4_extent_idx½á¹¹µÄÆğÊ¼Âß¼­Æ÷¿éµØÖ·
+        ¶¼ÊÇborder£¬¼´path[depth].p_ext[1]µÄÂß¼­¿éµØÖ·£¬Ò²ÊÇpath[depth].p_ext[1].ee_block¡£È»ºóÏòĞÂ´«´´½¨µÄË÷Òı½ÚµãµÄµÚ2¸ö
+        ext4_extent_idx½á¹¹´¦¼°Ö®ºó¸´ÖÆm¸öext4_extent_idx½á¹¹¡£ĞÂ´«´´½¨µÄË÷Òı½ÚµãµÄµÚÒ»¸öext4_extent_idxµÄÆğÊ¼Âß¼­¿éµØÖ·ÊÇborder£¬
+        µ¥¶ÀÊ¹ÓÃ£¬×÷Îª·Ö¸îµãµÄext4_extent_idx½á¹¹¡£Èç´Ë£¬ºóĞøÖ´ĞĞext4_ext_find_extent(newext->ee_block)ÔÚÀÏµÄext4_extent B+Ê÷ÕÒµ½µÄ
+        path[depth].p_extÖ¸ÏòµÄext4_extent»¹ÊÇÀÏµÄ£¬µ«ÊÇpath[depth].p_extºó±ßµÄm¸öext4_extent½á¹¹ÒÆ¶¯µ½ÁËĞÂ·ÖÅäµÄÒ¶×Ó½Úµã£¬
+        path[depth].p_extËùÔÚÒ¶×Ó½Úµã¾ÍÓĞ¿Õ¼äÁË£¬newext¾Í²åÈëµ½path[depth].p_extÖ¸ÏòµÄext4_extentÒ¶×Ó½Úµãºó±ß¡£Õâ¶Î´úÂëÔÚ
+        ext4_ext_insert_extent()µÄhas_space µÄif (!nearex)........} else{......}µÄelse·ÖÖ§*/
 		border = path[depth].p_ext[1].ee_block;
 		ext_debug("leaf will be split."
 				" next leaf starts at %d\n",
 				  le32_to_cpu(border));
 	} else {
 	    //ÕâÀïËµÃ÷path[depth].p_extÖ¸ÏòµÄÊÇÒ¶×Ó½Úµã×îºóÒ»¸öext4_extent½á¹¹
+	   /*×ßµ½Õâ¸ö·ÖÖ§£¬ÏÂ±ß²»»áÏòĞÂ·ÖÅäµÄÒ¶×Ó½Úµã¸´ÖÆext4_extent½á¹¹Ê±£¬mÊÇ0£¬ÒòÎªpath[depth].p_ext¾ÍÊÇÒ¶×Ó½Úµã×îºóÒ»¸öext4_extent
+	   ½á¹¹£¬ÏÂ±ßµÄm = EXT_MAX_EXTENT(path[depth].p_hdr) - path[depth].p_ext++=0¡£²¢ÇÒ£¬ÏÂ±ßĞÂ´´½¨µÄË÷Òı½ÚµãµÄµÚÒ»¸öext4_extent_idx½á¹¹
+	   µÄÆğÊ¼Âß¼­Æ÷¿éµØÖ·¶¼ÊÇnewext->ee_block¡£ÕâÑùºóĞøÖ´ĞĞext4_ext_find_extent()ÔÚext4_extent B+Ê÷¾ÍÄÜÕÒµ½ÆğÊ¼Âß¼­¿éµØÖ·ÊÇ
+	   newext->ee_blockµÄ²ã²ãË÷Òı½ÚµãÁË£¬ÍêÃÀÆ¥Åä¡£ÄÇÒ¶×Ó½ÚµãÄØ?Õâ¸ö·ÖÖ§Ã»ÓĞÏòĞÂµÄÒ¶×Ó½Úµã¸´ÖÆext4_extent½á¹¹£¬¿ÕµÄ£¬
+	   ext4_ext_find_extent()Ö´ĞĞºó£¬path[ppos].depthÖ¸ÏòĞÂµÄÒ¶×Ó½ÚµãµÄÍ·½áµã£¬´ËÊ±Ö±½ÓÁî¸ÃÒ¶×Ó½ÚµãµÄµÚÒ»¸öext4_extent½á¹¹µÄ
+	   Âß¼­¿éµØÖ·ÊÇnewext->ee_block£¬ÍêÃÀ!Õâ¶Î´úÂëÔÚext4_ext_insert_extent()µÄhas_space µÄif (!nearex)·ÖÖ§¡£*/
 		border = newext->ee_block;
 		ext_debug("leaf will be added."
 				" next leaf starts at %d\n",
@@ -1074,7 +1158,7 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 	if (err)
 		goto cleanup;
 
-    //ĞÂ·ÖÅäµÄÒ¶×Ó½Úµã
+    //nehÖ¸ÏòĞÂ·ÖÅäµÄÒ¶×Ó½ÚµãÊ×ÄÚ´æµÄÍ·½áµãext4_extent_header½á¹¹
 	neh = ext_block_hdr(bh);
 	neh->eh_entries = 0;
 	neh->eh_max = cpu_to_le16(ext4_ext_space_block(inode, 0));
@@ -1092,11 +1176,14 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 	}
 	/* start copy from next extent */
     //´Ópath[depth].p_extºó±ßµÄext4_extent½á¹¹µ½Ò¶×Ó½Úµã×îºóÒ»¸öext4_extent½á¹¹Ö®¼ä£¬Ò»¹²ÓĞm¸öext4_extent½á¹¹
+    /*Õâ¸öÓĞ¸öÒş²Øµã£¬ÕâÀïÊÇpath[depth].p_ext++£¬Ö´ĞĞºópath[depth].p_extÒÑ¾­Ö¸ÏòÁËÏÂÒ»¸öext4_extent½á¹¹ÁË£¬ÕâÑùÏÂ±ßmemmove(ex, path[depth].p_ext,....)
+     Ïòex¸´ÖÆµÄm¸öext4_extent½á¹¹£¬²¢²»°üº¬path[depth].p_ext×î³õÖ¸ÏòµÄext4_extent¡£»¹ÓĞÒ»¸öÒş²Øµã£¬Èç¹ûpath[depth].p_ext±¾Éí¾ÍÊÇÀÏµÄ
+     Ò¶×Ó½ÚµãµÄ×îºóÒ»¸öext4_extent½á¹¹£¬ÏÂ±ß¼ÆËã³öµÄmÊÇ0£¬ÄÇ¾Í²»»áÔÙÏòĞÂµÄÒ¶×Ó½Úµã¸³Öµext4_extent½á¹¹ÁË*/
 	m = EXT_MAX_EXTENT(path[depth].p_hdr) - path[depth].p_ext++;
 	ext4_ext_show_move(inode, path, newblock, depth);
 	if (m) {
 		struct ext4_extent *ex;
-        //exĞÂ·ÖÅäµÄext4 extent B+Ê÷Ò¶×Ó½ÚµãµÄµÚÒ»¸öext4_extent½á¹¹ÄÚ´æ
+        //exÖ¸ÏòĞÂ·ÖÅäµÄext4 extent B+Ê÷Ò¶×Ó½ÚµãµÄµÚÒ»¸öext4_extent½á¹¹
 		ex = EXT_FIRST_EXTENT(neh);
         //°Ñpath[depth].p_extÒ¶×Ó½Úµãpath[depth].p_extºóµÄm¸öext4_extent½á¹¹ÒÆ¶¯µ½ĞÂ·ÖÅäµÄÒ¶×Ó½Úµãex¿ªÍ·
 		memmove(ex, path[depth].p_ext, sizeof(struct ext4_extent) * m);
@@ -1166,14 +1253,14 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 		neh->eh_magic = EXT4_EXT_MAGIC;
         //Ò¶×Ó½áµãÄÜÈİÄÉµÄext4_extent_idx½á¹¹¸öÊı£¬ext4_extent B+Ê÷Ò¶×Ó½ÚµãÊı¾İ±£´æÔÚnewblockÕâ¸öÎïÀí¿é£¬4K´óĞ¡
 		neh->eh_max = cpu_to_le16(ext4_ext_space_block_idx(inode, 0));
-        //??????????????????????
+        //Ë÷Òı½ÚµãËù´¦B+Ê÷²ãÊı
 		neh->eh_depth = cpu_to_le16(depth - i);
         //fidxÖ¸ÏònewblockÕâ¸öÎïÀí¿é¶ÔÓ¦µÄË÷Òı½ÚµãµÄµÚÒ»¸öext4_extent_idx½á¹¹
 		fidx = EXT_FIRST_INDEX(neh);
         //ÆğÊ¼Âß¼­¿éµØÖ·ÊÇÉÏ±ßµÄ·Ö¸îµãÂß¼­µãµØÖ·
 		fidx->ei_block = border;
         /*ÖØµã£¬µÚÒ»´Îµ½ÕâÀï£¬oldblock(¼´newblock)ÊÇ±£´æÉÏ±ßĞÂ·ÖÅäµÄÒ¶×Ó½Úµã4KÊı¾İµÄÎïÀí¿éºÅ£¬fidxÖ¸Ïò×îºóÒ»²ãË÷Òı½Úµã
-         µÚÒ»¸öË÷Òı½ÚµãµÄext4_extent_idx½á¹¹£¬ÕâÀïÊÇ°ÑĞÂ·ÖÅäµÄÒ¶×Ó½áµãµÄÎïÀí¿éºÅ±£´æµ½×îºóÒ»²ãË÷Òı½ÚµãµÚÒ»¸öË÷Òı½ÚµãµÄ
+         µÚÒ»¸öext4_extent_idx½á¹¹£¬ÕâÀïÊÇ°ÑĞÂ·ÖÅäµÄ±£´æÒ¶×Ó½áµãÊı¾İµÄÎïÀí¿éºÅnewblock±£´æµ½×îºóÒ»²ãË÷Òı½ÚµãµÚÒ»¸öË÷Òı½ÚµãµÄ
          ext4_extent_idx½á¹¹ÖĞ¡£ºóĞøµÄÑ­»·£¬¶¼ÊÇÉÏ²ãË÷Òı½ÚµãµÄµÚÒ»¸öext4_extent_idx½á¹¹¼ÇÂ¼ÏÂ²ãË÷Òı½Úµã4KÊı¾İ±£´æµÄÎïÀí¿éºÅ¡£
          Ëµ°×ÁË£¬ext4_ext_split()º¯Êı°ÑÔ­ÓĞµÄext4_extent B+Ê÷at~depth²ãµÄË÷Òı½ÚµãºÍÒ¶×Ó½áµãµÄºó°ë¶ÎÊı¾İÒÆ¶¯µ½ĞÂ´´½¨µÄ
          Ë÷Òı½ÚµãºÍÒ¶×Ó½áµãÖĞ¡£ÕâÀïÊÇÔÚÉÏ²ãË÷Òı½ÚµãÖĞ¼ÇÂ¼ÏÂ²ãË÷Òı½Úµã»òÕßÒ¶×Ó½áµã4KÊı¾İ±£´æµÄÎïÀí¿éºÅ*/
@@ -1193,15 +1280,20 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 		}
 		/* start copy indexes */
        //path[i].p_hdrÕâÒ»²ãË÷Òı½ÚµãÖĞ£¬´Ópath[i].p_idxÖ¸ÏòµÄext4_extent_idx½á¹¹µ½×îºóÒ»¸öext4_extent_idx½á¹¹Ö®¼äext4_extent_idx¸öÊı
+       /*Òş²Øµã£¬path[i].p_idx++£¬Ö´ĞĞºópath[i].p_idxÖ¸ÏòÏÂÒ»¸öext4_extent_idx½á¹¹¡£ÕâÑùÏÂ±ßmemmove(++fidx, path[i].p_idx...)Ïò
+        fidx¸´ÖÆµÄm¸öext4_extent_idx½á¹¹£¬²¢²»°üº¬path[i].p_idx×î³õÖ¸ÏòµÄext4_extent_idx¡£»¹ÓĞÒ»¸öÒş²Øµã£¬Èç¹ûpath[i].p_idxÖ¸ÏòµÄ¾ÍÊÇ
+        ÀÏµÄË÷Òı½ÚµãµÄ×îºóÒ»¸öext4_extent_idx£¬ÔòÏÂ±ß¼ÆËã³öÀ´µÄmÊÇ0£¬ÄÇ¾Í²»»áÏòĞÂµÄË÷Òı½Úµã¸´ÖÆext4_extent_idx½á¹¹ÁË¡£*/
 		m = EXT_MAX_INDEX(path[i].p_hdr) - path[i].p_idx++;
 		ext_debug("cur 0x%p, last 0x%p\n", path[i].p_idx,
 				EXT_MAX_INDEX(path[i].p_hdr));
 		ext4_ext_show_move(inode, path, newblock, i);
 		if (m) {
             //°Ñpath[i].p_idxºó±ßµÄm¸öext4_extent_idx½á¹¹¸³Öµµ½newblockÕâ¸öÎïÀí¿é¶ÔÓ¦µÄË÷Òı½Úµã¿ªÍ·µÄµÚ1¸öext4_extent_idxºó±ß£¬¼´fidxÖ¸ÏòµÄÄÚ´æ
+            /*Òş²Øµã£¬ÕâÀïÊÇ++fid£¬¼´fidxÖ¸ÏòµÄĞÂµÄË÷Òı½ÚµãµÄµÚ2¸öext4_extent_idxÎ»ÖÃ´¦£¬ÕâÊÇÏòĞÂµÄË÷Òı½ÚµãµÚ2¸öext4_extent_idx´¦¼°ºó±ß
+             ¸³Öµm¸öext4_extent_idx½á¹¹*/
 			memmove(++fidx, path[i].p_idx,
 				sizeof(struct ext4_extent_idx) * m);
-            //newblockÕâ¸öÎïÀí¿é¶ÔÓ¦µÄË÷Òı½ÚµãÔö¼ÓÁËm¸öext4_extent_idx½á¹¹
+            //newblockÕâ¸öÎïÀí¿é¶ÔÓ¦µÄĞÂµÄË÷Òı½ÚµãÔö¼ÓÁËm¸öext4_extent_idx½á¹¹
 			le16_add_cpu(&neh->eh_entries, m);
 		}
 		ext4_extent_block_csum_set(inode, neh);
@@ -1233,9 +1325,9 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 
 	/* insert new index */
 /*°ÑĞÂµÄË÷Òı½Úµãext4_extent_idx½á¹¹(ÆğÊ¼Âß¼­¿éµØÖ·border,ÎïÀí¿éºÅnewblock)²åÈëµ½ext4 extent B+Ê÷atÄÇÒ»²ãË÷Òı½Úµã(path + at)->p_idxÖ¸Ïò
-µÄext4_extent_idx½á¹¹Ç°ºó¡£ÔÚÕâÀïÊ±£¬newblockÊÇÉÏ±ßĞÂ·ÖÅäµÄat~depth²ãµÄË÷Òı½ÚµãºÍÒ¶×Ó½áµã£¬×î¿¿ÉÏ£¬Ò²¾ÍÊÇatÄÇÒ»²ãË÷Òı½ÚµãµÄÎïÀí¿éºÅ¡£
-ÉÏ±ßÒÑ¾­°ÑÁîÕâĞ©ĞÂ·ÖÅäµÄË÷Òı½ÚµãºÍÒ¶×Ó½áµã£¬ÉÏ²ã¼ÇÂ¼ÏÂ²ãµÄÎïÀí¿éºÅ£¬ÕâÀïÔÙ°ÑatÄÇÒ»²ãĞÂ·ÖÅäµÄË÷Òı½ÚµãµÄÎïÀí¿éºÅnewlbock¼ÇÂ¼µ½ext4 extent
-B+Ê÷Ô­ÀíµÄatÄÇÒ»²ãµÄ(path + at)->p_idxÖ¸ÏòµÄext4_extent_idx½á¹¹Ç°ºó¡£ext4 extentB+Ê÷Ô­ÀíµÄatÄÇÒ»²ãÓĞ¿ÕÏĞµÄentry£¬¾ÍÊÇÓĞ¿ÕÏĞµÄÎ»ÖÃ´æ·Å
+µÄext4_extent_idx½á¹¹Ç°ºó¡£ÔÚÕâÀïÊ±£¬newblockÊÇÉÏ±ßĞÂ·ÖÅäµÄat~depth²ãµÄË÷Òı½ÚµãºÍÒ¶×Ó½áµãÖĞ£¬×î¿¿ÉÏ£¬Ò²¾ÍÊÇatÄÇÒ»²ãË÷Òı½ÚµãµÄÎïÀí¿éºÅ¡£
+ÉÏ±ßÒÑ¾­°ÑÁîÕâĞ©ĞÂ·ÖÅäµÄË÷Òı½ÚµãºÍÒ¶×Ó½áµã£¬ÉÏ²ã¼ÇÂ¼ÏÂ²ãµÄÎïÀí¿éºÅ¡£ÕâÀïÔÙ°ÑatÄÇÒ»²ãĞÂ·ÖÅäµÄË÷Òı½ÚµãµÄÎïÀí¿éºÅnewlbock¼ÇÂ¼µ½ext4 extent
+B+Ê÷Ô­À´µÄatÄÇÒ»²ãµÄ(path + at)->p_idxÖ¸ÏòµÄext4_extent_idx½á¹¹Ç°ºó¡£ext4 extentB+Ê÷Ô­À´µÄatÄÇÒ»²ãÓĞ¿ÕÏĞµÄentry£¬¾ÍÊÇÓĞ¿ÕÏĞµÄÎ»ÖÃ´æ·Å
 ĞÂµÄË÷Òı½Úµã¡£*/
 	err = ext4_ext_insert_index(handle, inode, path + at,
 				    le32_to_cpu(border), newblock);
@@ -1269,6 +1361,8 @@ cleanup:
  * - initializes new top-level, creating index that points to the
  *   just created block
  */
+//Õë¶Ôex->ee_block·ÖÅäÒ»¸öĞÂµÄÎïÀí¿é£¬×÷ÎªĞÂµÄË÷Òı½Úµã»òÕßÒ¶×Ó½ÚµãÌí¼Óµ½ext4 extent B+Ê÷¸ù½ÚµãÏÂ·½£¬ÕâÑùÏàµ±ÓÚ¸úext4 extent B+Ê÷Ôö¼ÓÁË
+//Ò»²ãĞÂµÄ½Úµã
 static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 				 unsigned int flags,
 				 struct ext4_extent *newext)
@@ -1277,12 +1371,12 @@ static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 	struct buffer_head *bh;
 	ext4_fsblk_t newblock;
 	int err = 0;
-
+    //ÕÒµ½»ò·ÖÅäex->ee_blockÓ³ÉäµÄÎïÀí¿é£¬·µ»ØÎïÀí¿éºÅnewblock
 	newblock = ext4_ext_new_meta_block(handle, inode, NULL,
 		newext, &err, flags);
 	if (newblock == 0)
 		return err;
-
+    //newblockÎïÀí¿éÓ³ÉäµÄbh
 	bh = sb_getblk(inode->i_sb, newblock);
 	if (unlikely(!bh))
 		return -ENOMEM;
@@ -1293,18 +1387,33 @@ static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 		unlock_buffer(bh);
 		goto out;
 	}
+    /*
+    ÉÏ±ßÕë¶Ôex->ee_block·ÖÅäÒ»¸öĞÂµÄÎïÀí¿é£¬ÎïÀí¿éºÅÊÇnewblock£¬4K´óĞ¡¡£ÕâÕâ¸önewblockµÄÎïÀí¿éÏÂ±ßÕıÊÇ×÷ÎªĞÂµÄÒ¶×Ó½áµã»ò
+    Ë÷Òı½ÚµãÌí¼Óµ½ext4 extent B+Ê÷ÏÂ·½£¬ÊÇÊ÷µÄµÚ2²ã¡£
+     
+    ÏÂ±ßÓĞÁ½¸öÖØÒª²Ù×÷£¬°Ñext4 extent B+Ê÷¸ù½ÚµãµÄ¸´ÖÆµ½newblock¶ÔÓ¦µÄbhÄÚ´æ£¬newblock½«À´×÷ÎªĞÂµÄÒ¶×Ó½áµã»òÕßË÷Òı½Úµã£¬
+     ¾Í·ÅÔÚ¸ù½ÚµãÏÂ·½¡£neh = ext_block_hdr(bh)µ½neh->eh_magic = EXT4_EXT_MAGIC¾ÍÊÇ¶ÔÕâ¸öĞÂµÄ½Úµã¸³Öµ¡£ÏÂ±ßµÄneh = ext_inode_hdr(inode)
+     µ½le16_add_cpu(&neh->eh_depth, 1)ÊÇ¸üĞÂext4 extent B+¸ù½ÚµãµÄÊı¾İ¡£ÒòÎª´ËÊ±newblock×÷ÎªĞÂµÄÒ¶×Ó½áµã»òÕßË÷Òı½ÚµãÌí¼Óµ½ÁË
+     ¸ù½ÚµãÏÂ±ß£¬ext4_idx_store_pblock(EXT_FIRST_INDEX(neh), newblock)¾ÍÊÇ¸ù½ÚµãµÄµÚÒ»¸öext4_extent_idx½Úµã¼ÇÂ¼newblockÕâ¸ö
+     ĞÂµÄÒ¶×Ó½áµã»òÕßË÷Òı½ÚµãµÄÎïÀí¿éºÅ¡£
 
+     ÓĞÒ»¸öÒş²ØµãÊÇ£¬´ËÊ±ext4 extent B+Ê÷¸ù½ÚµãÖ»ÓĞµÚÒ»¸öext4_extent_idx½á¹¹ÊÇÓĞĞ§µÄ£¬¸Ã½á¹¹µÄÎïÀí¿éºÅ³ÉÔ±±£´æµÄÕıÊÇnewblockµÄÎïÀí
+     ¿éºÅ*/
+    
 	/* move top-level index/leaf into new block */
+    //°Ñext4 extent B+Ê÷µÄ¸ù½Úµã¸´ÖÆµ½bh->b_data¡£ÏÂ±ß°ÑÕâ¸öbh->b_dataÖ¸ÏòµÄÄÚ´æµÄÊı¾İ½«·Åµ½ext4 extent B+Ê÷ÏÂ±ß£¬
+    //×÷Îªext4 extent B+Ê÷ÏÂ±ßµÄË÷Òı½Úµã»òÕßÒ¶×Ó½áµã
 	memmove(bh->b_data, EXT4_I(inode)->i_data,
 		sizeof(EXT4_I(inode)->i_data));
 
 	/* set size of new block */
+    //nehÖ¸ÏòbhÊ×µØÖ·£¬ÕâĞ©ÄÚ´æµÄÊı¾İÊÇÇ°±ßÏòbh->b_data¸´ÖÆµÄext4 extent B+Ê÷µÄ¸ù½ÚµãÊı¾İ
 	neh = ext_block_hdr(bh);
 	/* old root could have indexes or leaves
 	 * so calculate e_max right way */
-	if (ext_depth(inode))
+	if (ext_depth(inode))//Èç¹ûext4 extent B+Ê÷ÓĞË÷Òı½Úµã£¬nehÖ¸ÏòµÄÄÚ´æ×÷ÎªË÷Òı½Úµã
 		neh->eh_max = cpu_to_le16(ext4_ext_space_block_idx(inode, 0));
-	else
+	else//Èç¹ûext4 extent B+Ê÷Ã»ÓĞË÷Òı½Úµã£¬Ö»ÓĞ¸ù½Úµã£¬nehÖ¸ÏòµÄÄÚ´æ×÷ÎªÒ¶×Ó½áµã
 		neh->eh_max = cpu_to_le16(ext4_ext_space_block(inode, 0));
 	neh->eh_magic = EXT4_EXT_MAGIC;
 	ext4_extent_block_csum_set(inode, neh);
@@ -1316,12 +1425,22 @@ static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 		goto out;
 
 	/* Update top-level index: num,max,pointer */
+    //ÏÖÔÚnehÓÖÖ¸Ïòext4 extent B+¸ù½Úµã
 	neh = ext_inode_hdr(inode);
+    //¸ù½ÚµãÏÖÔÚÖ»ÓĞÒ»¸öÒ¶×Ó½Úµã»òÕßË÷Òı½Úµã£¬¼´ÎïÀí¿éºÅÊÇnewblockµÄÄÇ¸öÒ¶×Ó½áµã»òË÷Òı½Úµã
 	neh->eh_entries = cpu_to_le16(1);
+    //newblockÕâ¸öÎïÀí¿éºÅ¼ÇÂ¼µ½¸ù½ÚµãµÄµÚÒ»¸öext4_extent_idx½á¹¹Àï£¬ÕâÑù¾Í½¨Á¢ÁËext4 extent B+¸ù½Úµã¸úĞÂÌí¼ÓµÄÎïÀí¿éºÅÊÇnewblock
+    //µÄÒ¶×Ó½áµã»òË÷Òı½ÚµãµÄÁªÏµ
 	ext4_idx_store_pblock(EXT_FIRST_INDEX(neh), newblock);
+    //Èç¹ûneh->eh_depthÊÇ0£¬ËµÃ÷Ö®Ç°ext4 extent B+Ê÷Éî¶ÈÊÇ0£¬¼´Ö»ÓĞ¸ù½Úµã
 	if (neh->eh_depth == 0) {
 		/* Root extent block becomes index block */
+        //ÒÔÇ°B+Ê÷Ö»ÓĞ¸ù½Úµã£¬neh->eh_max°´ÕÕ4k/ext4_extent½á¹¹´óĞ¡¼ÆËã£¬ÏÖÔÚB+Ê÷¸ù½ÚµãÏÂÌí¼ÓÁËnewblockÕâ¸öÒ¶×Ó»òË÷Òı½Úµã
+        //¸ù½ÚµãÆäÊµ³ÉÁË¸ùË÷Òı½Úµã£¬neh->eh_maxÒª°´ÕÕ4k/ext4_extent_idx½á¹¹´óĞ¡¼ÆËã
 		neh->eh_max = cpu_to_le16(ext4_ext_space_root_idx(inode, 0));
+        //ÒÔÇ°B+Ê÷Ö»ÓĞ¸ù½Úµã£¬Ã»ÓĞË÷Òı½Úµã£¬¸ù½Úµã¶¼ÊÇext4_extent½á¹¹£¬ÏÖÔÚB+Ê÷¸ù½ÚµãÏÂÌí¼ÓÁËnewblockÕâ¸öÒ¶×Ó»òË÷Òı½Úµã£¬
+        //¸ù½ÚµãÆäÊµ³ÉÁË¸ùË÷Òı½Úµã£¬Òò´ËÔ­À´µÚÒ»¸öext4_extent½á¹¹Òª»»³Éext4_extent_idx½á¹¹£¬ÏÂ±ß¸³Öµ¾ÍÊÇ°Ñext4_extentµÄÂß¼­¿éÊ×µØÖ·
+        //¸³Öµ¸øext4_extent_idxµÄÂß¼­¿éÊ×µØÖ·
 		EXT_FIRST_INDEX(neh)->ei_block =
 			EXT_FIRST_EXTENT(neh)->ee_block;
 	}
@@ -1329,7 +1448,7 @@ static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 		  le16_to_cpu(neh->eh_entries), le16_to_cpu(neh->eh_max),
 		  le32_to_cpu(EXT_FIRST_INDEX(neh)->ei_block),
 		  ext4_idx_pblock(EXT_FIRST_INDEX(neh)));
-
+    //ext4 extent B+Ê÷Ôö¼ÓÁËÒ»²ãË÷Òı½Úµã»òÒ¶×Ó½áµã£¬¼´ÎïÀí¿éºÅÊÇnewblockµÄÄÇ¸ö
 	le16_add_cpu(&neh->eh_depth, 1);
 	ext4_mark_inode_dirty(handle, inode);
 out:
@@ -1370,6 +1489,7 @@ repeat:
 	//ext4 extent B+Ê÷Ë÷Òı½Úµã»òÕßÒ¶×Ó½Úµã ÓĞ ¿ÕÏĞÌõÄ¿entry,´ËÊ±µÄi±íÊ¾ext4 extent B+Ê÷ÓĞ¿ÕÏĞentryµÄÄÇÒ»²ãË÷Òı½Úµã»òÒ¶×Ó½áµã
 	//newextÊÇÒª²åÈëext4_extent B+Ê÷µÄext4_extent£¬²åÈëext4_extent B+Ê÷µÄµÚi²ã
 	if (EXT_HAS_FREE_INDEX(curp)) {
+        /***/
 		/* if we found index with free entry, then use that
 		 * entry: create all needed subtree and add new leaf */
 		err = ext4_ext_split(handle, inode, flags, path, newext, i);
@@ -1378,13 +1498,18 @@ repeat:
 
 		/* refill path */
 		ext4_ext_drop_refs(path);
+        //¶Ôext4_extent B+Ê÷×öÁË·Ö¸î£¬ÕâÀïÖØĞÂÔÚÀï±ß²éÕÒÆğÊ¼Âß¼­¿éµØÖ·½Ó½ünewext->ee_blockµÄË÷Òı½ÚµãºÍÒ¶×Ó½áµã
 		path = ext4_ext_find_extent(inode,
 				    (ext4_lblk_t)le32_to_cpu(newext->ee_block),
 				    path);
 		if (IS_ERR(path))
 			err = PTR_ERR(path);
 	} else {
-	//ext4 extent B+Ê÷Ë÷Òı½Úµã»òÒ¶×Ó½Úµãext4_extent_idx»òext4_extent¸öÊı±¬Âú£¬Ã»ÓĞ¿ÕÏĞÌõÄ¿entry
+	/*µ½Õâ¸ö·ÖÖ§£¬ext4 extent B+Ê÷Ë÷Òı½ÚµãµÄext4_extent_idxºÍÒ¶×Ó½ÚµãµÄext4_extent¸öÊıÈ«±¬Âú£¬¶¼Ã»ÓĞ¿ÕÏĞÌõÄ¿entry£¬
+	  ¾ÍÊÇËµext4 extent B+Ê÷È«±¬ÂúÁË£¬Ö»ÄÜÔö¼ÓÖ´ĞĞext4_ext_grow_indepth()Ôö¼Óext4 extent B+Ê÷Éî¶ÈÁË¡£Àí½âÕâµã·Ç³£¹Ø¼ü*/
+
+        //Õë¶Ônewext->ee_block·ÖÅäÒ»¸öĞÂµÄÎïÀí¿é£¬×÷ÎªĞÂµÄË÷Òı½Úµã»òÕßÒ¶×Ó½ÚµãÌí¼Óµ½ext4 extent B+Ê÷¸ù½ÚµãÏÂ·½£¬ÕâÑùÏàµ±ÓÚ
+        //¸úext4 extent B+Ê÷Ôö¼ÓÁËÒ»²ãĞÂµÄ½Úµã
 		/* tree is full, time to grow in depth */
 		err = ext4_ext_grow_indepth(handle, inode, flags, newext);
 		if (err)
@@ -1392,6 +1517,12 @@ repeat:
 
 		/* refill path */
 		ext4_ext_drop_refs(path);
+        //µ½ÕâÀï£¬ext4 extent B+Ê÷¸ù½ÚµãÏÂ·½Ôö¼ÓÁËÒ»²ãĞÂµÄË÷Òı»òÕßÒ¶×Ó½Úµã£¬ÔÙÖØĞÂÔÚext4 extent B+Ê÷find_extent¡£×¢Òâ£¬ext4 extent B+Ê÷
+        //´ËÊ±½ö½öÊÇÔö¼ÓÁËÒ»²ãË÷Òı½Úµã»òÕßÒ¶×Ó½Úµã£¬½ö½öÊÇÊ÷Éî²ãÔö¼ÓÒ»²ã£¬ÆäËû²¢Ã»ÓĞ±ä»¯¡£Ë÷Òıext4_ext_find_extent()ÊÇ¿Ï¶¨ÄÜÕÒµ½
+        //ÆğÊ¼Âß¼­¿éµØÖ·½Ó½ünewext->ee_blockµÄ²ã²ãË÷Òı½Úµã»òÕßÒ¶×Ó½ÚµãµÄext4_extent_idx»òext4_extent½á¹¹¡£²¢ÇÒ£¬´ËÊ±ÖÁÉÙB+Ê÷¸ù½Úµã
+        //ÏÂ·½ĞÂÔö¼ÓµÄ½ÚµãÓĞ¿ÕÏĞentry¡£Èç¹û´ËÊ±ext4 extent B+Ê÷Ò¶×Ó½ÚµãÓĞ¿ÕÏĞentry£¬Ôò´Óext4_ext_create_new_leaf()·µ»Øºó¿ÉÖ±½Ó°Ñ
+        //newext²åÈëÒ¶×Ó½Úµã¡£Èç¹ûÒ¶×Ó½Úµãentry±¬Âú£¬¼´ÏÂ±ßµÄif (path[depth].p_hdr->eh_entries == path[depth].p_hdr->eh_max)³ÉÁ¢£¬
+        //ÄÇ¾Ígoto repeat·ÖÖ§£¬Ö´ĞĞext4_ext_split()·Ö¸îext4_extent B+Ê÷£¬´´½¨ĞÂµÄÒ¶×Ó½áµã»òÕßË÷Òı½Úµã£¬Ê¹µÃnewextÄÜ²åÈë½øÈ¥¡£
 		path = ext4_ext_find_extent(inode,
 				   (ext4_lblk_t)le32_to_cpu(newext->ee_block),
 				    path);
@@ -1405,6 +1536,9 @@ repeat:
 		 * in all other cases we have to split the grown tree
 		 */
 		depth = ext_depth(inode);
+        //path[depth].p_hdrÖ¸ÏòµÄÒ¶×Ó½áµã±£´æext4_extent½á¹¹´ïµ½eh_max£¬Ôògoto repeatÑ°ÕÒÓĞ¿ÕÏĞentryµÄË÷Òı½Úµã£¬È»ºó·Ö¸î
+        //ext4 extent B+Ê÷¡£Õâif´ó¸ÅÂÊÊÇ³ÉÁ¢µÄ£¬ÒòÎªÖ®ËùÒÔÖ´ĞĞµ½ext4_ext_create_new_leaf()£¬¾ÍÊÇÒòÎªºÜ¶àÒ¶×Ó½áµãµÄext4_extent½á¹¹±¬ÂúÁË
+        //¶øÉÏ±ßext4_ext_find_extent()Ö»ÊÇÔÚext4 extent B+Ê÷root½ÚµãÏÂ±ßÔö¼ÓÁËÒ»²ãË÷Òı½Úµã(»òÕßÒ¶×Ó½Úµã)
 		if (path[depth].p_hdr->eh_entries == path[depth].p_hdr->eh_max) {
 			/* now we need to split */
 			goto repeat;
@@ -1800,7 +1934,7 @@ ext4_can_extents_be_merged(struct inode *inode, struct ext4_extent *ex1,
 	 * the extent that was written properly split out and conversion to
 	 * initialized is trivial.
 	 */
-	//²ÎÓëºÏ²¢µÄext4_extent±ØĞëÊÇinitialized×´Ì¬
+	//²ÎÓëºÏ²¢µÄÁ½¸öext4_extent±ØĞëÊÇinitialized×´Ì¬£¬·ñÔòÎŞ·¨ºÏ²¢
 	if (ext4_ext_is_uninitialized(ex1) || ext4_ext_is_uninitialized(ex2))
 		return 0;
 
@@ -1895,14 +2029,19 @@ static int ext4_ext_try_to_merge_right(struct inode *inode,
  * This function does a very simple check to see if we can collapse
  * an extent tree with a single extent tree leaf block into the inode.
  */
+//Èç¹ûext4_extent B+Ê÷Éî¶ÈÊÇ1£¬²¢ÇÒÒ¶×Ó½áµãÓĞºÜÉÙµÄext4_extent½á¹¹£¬Ôò°ÑÒ¶×Ó½áµãµÄext4_extent½á¹¹¸´ÖÆµ½root½Úµã£¬
+//²¢°ÑÔ­À´±£´æÒ¶×Ó½Úµãext4_extent½á¹¹µÈÊı¾İµÄÎïÀí¿éÊÍ·Å»áext4ÎÄ¼şÏµÍ³£¬½ÚÊ¡¿Õ¼ä
 static void ext4_ext_try_to_merge_up(handle_t *handle,
 				     struct inode *inode,
 				     struct ext4_ext_path *path)
 {
 	size_t s;
+    //¼ÆËãext4_extent B+µÄroot½ÚµãÄÜÈİÄÉ¶àÉÙ¸öext4_extent½á¹¹¸ømax_root
 	unsigned max_root = ext4_ext_space_root(inode, 0);
 	ext4_fsblk_t blk;
 
+    //ext4_extent B+Ê÷Éî¶È±ØĞëÊÇ1£¬¼´rootË÷Òı½Úµã+Ò¶×Ó½áµã¡£²¢ÇÒ£¬root½ÚµãµÄentryÊı±ØĞëÊÇ1£¬¼´Ö»ÄÜÓĞÒ»¸öÒ¶×Ó½áµã¡£²¢ÇÒÒ¶×Ó½áµã
+    //µÄext4_extentÊı²»ÄÜ´óÓÚmax_root¸ö¡£ÒÔÉÏÌõ¼şÓĞÒ»¸ö²»³ÉÁ¢£¬Ö±½Óreturn¡£
 	if ((path[0].p_depth != 1) ||
 	    (le16_to_cpu(path[0].p_hdr->eh_entries) != 1) ||
 	    (le16_to_cpu(path[1].p_hdr->eh_entries) > max_root))
@@ -1919,17 +2058,25 @@ static void ext4_ext_try_to_merge_up(handle_t *handle,
 	/*
 	 * Copy the extent data up to the inode
 	 */
+	//root½ÚµãË÷Òı½Úµã±£´æµÄÎïÀí¿éºÅ£¬Õâ4K´óĞ¡ÎïÀí¿é±£´æÁËÒ¶×Ó½áµãµÄext4_extentµÈÊı¾İ
 	blk = ext4_idx_pblock(path[0].p_idx);
+    //Ò¶×Ó½ÚµãµÄext4_extent½á¹¹¸öÊı¶ÔÓ¦µÄ×Ö½Ú¿Õ¼ä¸øs
 	s = le16_to_cpu(path[1].p_hdr->eh_entries) *
 		sizeof(struct ext4_extent_idx);
-	s += sizeof(struct ext4_extent_header);
+	s += sizeof(struct ext4_extent_header);//ÔÙ¼ÓÉÏÒ¶×Ó½áµãµÄÍ·½áµã×Ö½Ú¿Õ¼ä
 
+    //ÏÂ±ßÕâÊÇ°ÑÒ¶×Ó½ÚµãµÄext4_extent½á¹¹µÈÊı¾İ¸´ÖÆµ½root ½ÚµãÄÚ´æ
 	memcpy(path[0].p_hdr, path[1].p_hdr, s);
-	path[0].p_depth = 0;
+	path[0].p_depth = 0;//ext4_extent B+Ê÷root½ÚµãÉî¶ÈÇå0
+	//EXT_FIRST_EXTENT(path[0].p_hdr)ÊÇroot½ÚµãµÚÒ»¸öext4_extent½á¹¹µÄÄÚ´æµØÖ·£¬(path[1].p_ext - EXT_FIRST_EXTENT(path[1].p_hdr))
+	//ÊÇ¼ÆËãÔ­À´Ò¶×Ó½ÚµãÖĞ£¬path[1].p_extÖ¸ÏòµÄext4_extent½á¹¹ÄÚ´æµØÖ·ÓëµÚÒ»¸öext4_extent½á¹¹ÄÚ´æµØÖ·Ö®Ç°µÄ²îÖµ£¬
+	//EXT_FIRST_EXTENT(path[0].p_hdr)¼ÓÉÏÕâ¸ö²îÖµ£¬¾ÍÊÇpath[0].p_extÖ¸ÏòµÄext4_extentµÄÄÚ´æµØÖ·
 	path[0].p_ext = EXT_FIRST_EXTENT(path[0].p_hdr) +
 		(path[1].p_ext - EXT_FIRST_EXTENT(path[1].p_hdr));
+    //root½ÚµãÕâ¸öĞÂµÄÒ¶×Ó½áµãµÄ×î´óÄÜ±£´æµÄext4_extent½á¹¹¸öÊı
 	path[0].p_hdr->eh_max = cpu_to_le16(max_root);
 
+    //°ÑÔ­À´±£´æÒ¶×Ó½ÚµãµÄext4_extentµÈÊı¾İµÄÎïÀí¿éÊÍ·Å»áext4ÎÄ¼şÏµÍ³
 	brelse(path[1].p_bh);
 	ext4_free_blocks(handle, inode, NULL, blk, 1,
 			 EXT4_FREE_BLOCKS_METADATA | EXT4_FREE_BLOCKS_FORGET |
@@ -1940,7 +2087,8 @@ static void ext4_ext_try_to_merge_up(handle_t *handle,
  * This function tries to merge the @ex extent to neighbours in the tree.
  * return 1 if merge left else 0.
  */
-//³¢ÊÔ°ÑexÇ°ºóµÄext4_extent½á¹¹µÄÂß¼­¿éºÍÎïÀí¿éµØÖ·ºÏ²¢µ½ex
+//³¢ÊÔ°ÑexºóµÄext4_extent½á¹¹µÄÂß¼­¿éºÍÎïÀí¿éµØÖ·ºÏ²¢µ½ex¡£±øÆ÷£¬Èç¹ûext4_extent B+Ê÷Éî¶ÈÊÇ1£¬²¢ÇÒÒ¶×Ó½áµãÓĞºÜÉÙµÄext4_extent½á¹¹£¬
+//Ôò³¢ÊÔ°ÑÒ¶×Ó½áµãµÄext4_extent½á¹¹ÒÆ¶¯µ½root½Úµã
 static void ext4_ext_try_to_merge(handle_t *handle,
 				  struct inode *inode,
 				  struct ext4_ext_path *path,
@@ -1960,7 +2108,9 @@ static void ext4_ext_try_to_merge(handle_t *handle,
 	if (!merge_done)
         //ÉÏ±ßÃ»ÓĞ·¢Éúext4_extentºÏ²¢£¬ÕâÀïÔò³¢ÊÔ°Ñexºó±ßµÄex+1¡¢ex+2 ....ÕâĞ©ext4_extentÑ­»·ºÏ²¢µ½ex
 		(void) ext4_ext_try_to_merge_right(inode, path, ex);
-
+    
+    //Èç¹ûext4_extent B+Ê÷Éî¶ÈÊÇ1£¬²¢ÇÒÒ¶×Ó½áµãÓĞºÜÉÙµÄext4_extent½á¹¹£¬Ôò°ÑÒ¶×Ó½áµãµÄext4_extent½á¹¹ÒÆ¶¯µ½root½Úµã£¬
+    //²¢°ÑÔ­À´±£´æÒ¶×Ó½Úµãext4_extent½á¹¹µÈÊı¾İµÄÎïÀí¿éÊÍ·Å»áext4ÎÄ¼şÏµÍ³£¬½ÚÊ¡¿Õ¼ä
 	ext4_ext_try_to_merge_up(handle, inode, path);
 }
 
@@ -2021,6 +2171,14 @@ out:
  * inserts requested extent as new one into the tree,
  * creating new leaf in the no-space case.
  */
+//ext4_ext_map_blocks()->ext4_ext_handle_uninitialized_extents()/ext4_ext_handle_unwritten_extents()->
+//ext4_ext_convert_to_initialized()->ext4_split_extent()->ext4_split_extent_at()->ext4_ext_insert_extent()
+
+/*Ê²Ã´Êµ¼Ê»áÖ´ĞĞext4_ext_insert_extent()º¯Êı?Á½ÖÖÇé¿ö£¬Çé¿ö1:ext4_ext_map_blocks()ÎªmapÔÚext4 extent B+Ê÷ÕÒ²»µ½Âß¼­¿éµØÖ·½Ó½üµÄ
+ext4_extent½á¹¹£¬ÔòÎªmap·ÖÅäÒ»¸öĞÂµÄext4_extent½á¹¹£¬È»ºóÖ´ĞĞext4_ext_insert_extent()°ÑÕâ¸öĞÂµÄext4_extent½á¹¹²åÈëext4 extent B+Ê÷¡£
+Çé¿ö2:ÔÚext4_split_extent_at()ÖĞ£¬°Ñpath[depth].p_extÖ¸ÏòµÄext4_extent½á¹¹(¼´ex)µÄÂß¼­¿é·¶Î§·Ö¸î³ÉÁ½¶Î£¬°Ñºó°ë¶ÎÂß¼­¿é·¶Î§¶ÔÓ¦µÄ
+ext4_extent½á¹¹Ö´ĞĞext4_ext_insert_extent()²åÈëext4 extent B+Ê÷¡£
+*/
 int ext4_ext_insert_extent(handle_t *handle, struct inode *inode,
 				struct ext4_ext_path *path,
 				struct ext4_extent *newext, int flag)//newextÊÇÒª²åÈëextent B+ÊıµÄext4_extent
@@ -2047,8 +2205,12 @@ int ext4_ext_insert_extent(handle_t *handle, struct inode *inode,
 		return -EIO;
 	}
 
+    /*ÏÂ±ßÕâ¸öif (ex && !(flag & EXT4_GET_BLOCKS_PRE_IO))ÅĞ¶Ï£¬ÊÇÅĞ¶Ïnewex¸úex¡¢exÇ°±ßµÄext4_extent½á¹¹¡¢exºó±ßµÄext4_extent½á¹¹
+     Âß¼­¿éµØÖ··¶Î§ÊÇ·ñ½ô°¤×Å£¬ÊÇµÄ»°²ÅÄÜ½«¶şÕßºÏ²¢¡£µ«!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+     ÄÜºÏ²¢»¹Òª·ûºÏÒ»¸ö¿Á¿ÌÌõ¼ş:²ÎÓëºÏ²¢µÄÁ½¸öext4_extent±ØĞëÊÇinitialized×´Ì¬£¬·ñÔòÎŞ·¨ºÏ²¢*/
+    
 	/* try to insert block into found extent and return */
-	if (ex && !(flag & EXT4_GET_BLOCKS_PRE_IO)) {
+	if (ex && !(flag & EXT4_GET_BLOCKS_PRE_IO)) {//if³ÉÁ¢
 
 		/*
 		 * Try to see whether we should rather test the extent on
@@ -2057,22 +2219,24 @@ int ext4_ext_insert_extent(handle_t *handle, struct inode *inode,
 		 * left, or on the right from the searched position. This
 		 * will make merging more effective.
 		 */
-		//newextÔÚÒª²åÈëµÄexÂß¼­µØÖ·ºó±ß
+		//newextÔÚÒª²åÈëµÄexÂß¼­µØÖ··¶Î§ºó±ß£¬ÕâÑùnewexÎŞ·¨²åÈëex£¬Ö»ÄÜÏë°ì·¨²åÈëµ½exºó±ßµÄÄÇ¸öext4_extent½á¹¹
 		if (ex < EXT_LAST_EXTENT(eh) &&
 		    (le32_to_cpu(ex->ee_block) +
 		    ext4_ext_get_actual_len(ex) <
 		    le32_to_cpu(newext->ee_block))) {
 			ex += 1;//ex++  Ö¸Ïòºó±ßµÄext4_extent½á¹¹
 			goto prepend;
-        //newextÔÚÒª²åÈëµÄexÂß¼­µØÖ·Ç°±ß
+        //newextÔÚÒª²åÈëµÄexÂß¼­µØÖ··¶Î§Ç°±ß£¬ÕâÑùnewexÎŞ·¨²åÈëex£¬Ö»ÄÜÏë°ì·¨²åÈëµ½exÇ°±ßµÄÄÇ¸öext4_extent½á¹¹
 		} else if ((ex > EXT_FIRST_EXTENT(eh)) &&
 			   (le32_to_cpu(newext->ee_block) +
 			   ext4_ext_get_actual_len(newext) <
 			   le32_to_cpu(ex->ee_block)))
-			ex -= 1;//ex--  Ö¸ÏòÇ°±ßµÄext4_extent½á¹¹£¬ÎªÉ¶?????????
+			ex -= 1;
 
+        //µ½ÕâÀï£¬ÓĞ¿ÉÄÜÉÏ±ßµÄÁ½¸öif¶¼²»³ÉÁ¢£¬ex += 1 ºÍ ex -= 1¶¼Ã»Ö´ĞĞ£¬ex»¹ÊÇpath[depth].p_extÄÇ¸öext4_extent½á¹¹
 		/* Try to append newex to the ex */
         //²âÊÔexºÍËüºó±ßµÄnewextÕâÁ½¸öext4_extentµÄÂß¼­¿éºÍÎïÀí¿éµØÖ·ÊÇ·ñ½ô°¤×Å£¬ÊÇÔòºÏ²¢¶şÕßÂß¼­¿éµØÖ·²¢·µ»Ø1
+        /*²ÎÓëºÏ²¢µÄÁ½¸öext4_extent±ØĞëÊÇinitialized×´Ì¬£¬·ñÔòÎŞ·¨ºÏ²¢*/
 		if (ext4_can_extents_be_merged(inode, ex, newext)) {
 			ext_debug("append [%d]%d block to %u:[%d]%d"
 				  "(from %llu)\n",
@@ -2111,6 +2275,7 @@ int ext4_ext_insert_extent(handle_t *handle, struct inode *inode,
 prepend:
 		/* Try to prepend newex to the ex */
         //²âÊÔnewextºÍËüºó±ßµÄexÕâÁ½¸öext4_extentµÄÂß¼­¿éºÍÎïÀí¿éµØÖ·ÊÇ·ñ½ô°¤×Å£¬ÊÇÔòºÏ²¢¶şÕßÂß¼­¿éµØÖ·²¢·µ»Ø1
+        /*²ÎÓëºÏ²¢µÄÁ½¸öext4_extent±ØĞëÊÇinitialized×´Ì¬£¬·ñÔòÎŞ·¨ºÏ²¢*/
 		if (ext4_can_extents_be_merged(inode, newext, ex)) {
 			ext_debug("prepend %u[%d]%d block to %u:[%d]%d"
 				  "(from %llu)\n",
@@ -2160,7 +2325,7 @@ prepend:
 	if (le16_to_cpu(eh->eh_entries) < le16_to_cpu(eh->eh_max))
 		goto has_space;
 
-    /*µ½ÕâÀïËµÃ÷ext4_extent B+Ò¶×Ó½Úµã¿Õ¼ä²»¹»£¬ĞèÒªÀ©Èİ*/
+    /*µ½ÕâÀïËµÃ÷ext4_extent B+Ò¶×Ó½Úµã¿Õ¼ä²»¹»ÁË£¬ĞèÒªÀ©Èİ*/
     
 	/* probably next leaf has space for us? */
     //ext4 extent B+Ê÷Ò¶×Ó½Úµã×îºóÒ»¸öext4_extent½á¹¹
@@ -2170,7 +2335,7 @@ prepend:
     //Èç¹ûÒª²åÈëµÄnewextÆğÊ¼Âß¼­¿éµØÖ·´óÓÚext4 extent B+Ê÷Ò¶×Ó½Úµã×îºóÒ»¸öext4_extent
     //½á¹¹µÄ£¬ËµÃ÷³¬³öext4 extent B+Ê÷Ò¶×Ó½ÚµãËùÓĞext4_extent½á¹¹µÄÂß¼­¿é·¶Î§ÁË
 	if (le32_to_cpu(newext->ee_block) > le32_to_cpu(fex->ee_block))
-//»Øµ½ext4 extent B+Ê÷ÉÏ²ãµÄË÷Òı½Úµã£¬ÕÒµ½path[depth].p_idxÖ¸ÏòµÄext4_extent_idx£¬
+//»Øµ½ext4 extent B+Ê÷Ò¶×Ó½ÚµãÉÏ²ãµÄË÷Òı½Úµã£¬ÕÒµ½path[depth].p_idxÖ¸ÏòµÄext4_extent_idx£¬
 //Õâ¸öË÷Òı½Úµã½á¹¹ext4_extent_idxµÄÆğÊ¼Âß¼­¿éµØÖ·×î½Ó½ü´«ÈëµÄÂß¼­¿éµØÖ·map->m_lblk£¬
 //½Ó×ÅÕÒµ½½ô°¤×ÅÕâ¸öext4_extent_idx½á¹¹ºó±ßµÄext4_extent_idx£¬Õâ¸öext4_extent_idxµÄÆğÊ¼
 //Âß¼­¿éµØÖ·¾Í¿ÉÄÜ´óÓÚ±¾´ÎÒª²åÈëext4 extent B+Ê÷µÄext4_extent£¬¼´newext¡£¸Ãext4_extent¾Í²åÈëĞÂÕÒµ½µÄË÷Òı½Úµãext4_extent_idxµÄÏÂ±ß
@@ -2204,8 +2369,10 @@ prepend:
 
 /*×ßµ½ÕâÀï£¬1:ËµÃ÷Ç°±ßext4_ext_next_leaf_block()Ã»ÓĞÕÒµ½ºÏÊÊµÄext4 extent B+Ê÷Ë÷Òı½Úµã
 ext4_extent_idx£¬¼´Òª²åÈëµÄnewextÆğÊ¼Âß¼­µØÖ·Ì«´óÁË£¬ext4 extent B+Ê÷Ë÷Òı½ÚµãµÄÆğÊ¼Âß¼­
-¿é·¶Î§Ì«Ğ¡£¬newextÎŞ·¨²åÈë¡£2:ÊÇÕâ¸öext4 extent B+Ê÷ÊÇ¿ÕµÄ¡£Èç´Ë¾ÍÒªÎªext4 extent B+Ê÷
-´´½¨ĞÂµÄÒ¶×Ó½Úµã¡£ÕâÖÖÇé¿öÔÚ¸Õ¶ÁĞ´ÎÄ¼şÊ±¾­³£³ÉÁ¢°É£¬ÒòÎª´ËÊ±ºÜ¶àext4 extent B+Ê÷¶¼ÊÇ¿ÕµÄ£¬Ã»ÓĞÒ¶×Ó½Úµã*/
+¿é·¶Î§Ì«Ğ¡£¬newextÎŞ·¨²åÈë¡£2:ext4 extent B+Ê÷Ò¶×Ó½áµãµÄext4_extent½á¹¹ÂúÁË£¬Ã»ÓĞ¿Õ¼äÁË£¬ĞèÒªÔö´óÊ÷²ãÊı
+
+»¹ÓĞÒ»ÖÖÇé¿ö¿ÉÄÜÒª¿¼ÂÇ£¬ext4 extent B+Ê÷ÊÇ¿ÕµÄ!ÔÚ¸Õ¶ÁĞ´ÎÄ¼şÊ±£¬B+Ê÷²ãÊıÊÇ0»òÕß1£¬´ËÊ±Ò¶×Ó½áµãext4_extent½á¹¹ºÜÈİÒ×¾ÍÂúÁË£¬
+ĞèÒª°´ÕÕÕâ¸ö³¡¾°·ÖÎöÒ»ÏÂext4_ext_insert_extent()º¯ÊıµÄÖ´ĞĞÁ÷³Ì*/
 
 	/*
 	 * There is no free space in the found leaf.
@@ -2219,6 +2386,7 @@ ext4_extent_idx£¬¼´Òª²åÈëµÄnewextÆğÊ¼Âß¼­µØÖ·Ì«´óÁË£¬ext4 extent B+Ê÷Ë÷Òı½ÚµãµÄÆ
 	depth = ext_depth(inode);
 	eh = path[depth].p_hdr;
 
+/*µ½ÕâÀï£¬path[depth].p_extËùÔÚÒ¶×Ó½Úµã¿Ï¶¨ÓĞ¿ÕÏĞentry£¬¼´¿ÕÏĞµÄext4_extent½á¹¹£¬Ö±½Ó°Ñnewext²åÈëµ½Ò¶×Ó½ÚµãÄ³¸öext4_extentÎ»ÖÃ´¦*/
 has_space:
     //nearexÖ¸ÏòÆğÊ¼Âß¼­¿éµØÖ·×î½Ó½ümap->m_lblkÕâ¸öÆğÊ¼Âß¼­¿éµØÖ·µÄext4_extent
 	nearex = path[depth].p_ext;
@@ -2295,7 +2463,8 @@ has_space:
 merge:
 	/* try to merge extents */
 	if (!(flag & EXT4_GET_BLOCKS_PRE_IO))
-        //³¢ÊÔ°ÑexÇ°ºóµÄext4_extent½á¹¹µÄÂß¼­¿éºÍÎïÀí¿éµØÖ·ºÏ²¢µ½ex
+      //³¢ÊÔ°ÑexºóµÄext4_extent½á¹¹µÄÂß¼­¿éºÍÎïÀí¿éµØÖ·ºÏ²¢µ½ex¡£±øÆ÷£¬Èç¹ûext4_extent B+Ê÷Éî¶ÈÊÇ1£¬²¢ÇÒÒ¶×Ó½áµãÓĞºÜÉÙµÄext4_extent½á¹¹£¬
+      //Ôò³¢ÊÔ°ÑÒ¶×Ó½áµãµÄext4_extent½á¹¹ÒÆ¶¯µ½root½Úµã
 		ext4_ext_try_to_merge(handle, inode, path, nearex);
 
 
@@ -3287,6 +3456,11 @@ static int ext4_ext_zeroout(struct inode *inode, struct ext4_extent *ex)
  *
  * return 0 on success.
  */
+//ext4_ext_map_blocks()->ext4_ext_handle_uninitialized_extents()/ext4_ext_handle_unwritten_extents()->
+//ext4_ext_convert_to_initialized()->ext4_split_extent()->ext4_split_extent_at()
+
+/*ÒÔsplitÕâ¸öÂß¼­¿éµØÖ·Îª·Ö¸îµã£¬°Ñpath[depth].p_extÖ¸ÏòµÄext4_extent½á¹¹(¼´ex)µÄÂß¼­¿é·¶Î§ee_block~(ee_block+ee_len)·Ö¸î³É
+ee_block~splitºÍsplit~(ee_block+ee_len)£¬È»ºó°Ñºó°ë¶Îsplit~(ee_block+ee_len)¶ÔÓ¦µÄext4_extent½á¹¹Ìí¼Óµ½ext4 extent B+Ê÷*/
 static int ext4_split_extent_at(handle_t *handle,
 			     struct inode *inode,
 			     struct ext4_ext_path *path,
@@ -3340,7 +3514,7 @@ static int ext4_split_extent_at(handle_t *handle,
 		if (split_flag & EXT4_EXT_MARK_UNINIT2)
 			ext4_ext_mark_uninitialized(ex);//ÓĞ"UNINIT2"±ê¼Ç¾ÍÒª±ê¼Çex "uninitialized"
 		else
-			ext4_ext_mark_initialized(ex);
+			ext4_ext_mark_initialized(ex);//±ê¼Çex³õÊ¼»¯
 
 		if (!(flags & EXT4_GET_BLOCKS_PRE_IO))
             //³¢ÊÔ°ÑexÇ°ºóµÄext4_extent½á¹¹µÄÂß¼­¿éºÍÎïÀí¿éµØÖ·ºÏ²¢µ½ex
@@ -3351,15 +3525,16 @@ static int ext4_split_extent_at(handle_t *handle,
 		goto out;
 	}
 
-    /*ÏÂ±ßÕâÊÇ°ÑexµÄÂß¼­¿é·Ö¸î³ÉÁ½²¿·Ö(ee_block~split)ºÍ(split~ee_len)¡£·Ö¸îºó£¬exĞÂµÄ
-    Âß¼­¿é·¶Î§ÊÇ(ee_block~split)£¬ex2µÄÂß¼­¿é·¶Î§ÊÇ(split~ee_len)
+    /*ÏÂ±ßÕâÊÇ°ÑexµÄÂß¼­¿é·Ö¸î³ÉÁ½²¿·Ö(ee_block~split)ºÍ(split~ee_block+ee_len)¡£·Ö¸îºó£¬exĞÂµÄ
+    Âß¼­¿é·¶Î§ÊÇ(ee_block~split)£¬ex2µÄÂß¼­¿é·¶Î§ÊÇ(split~ee_block+ee_len)
     */
 	/* case a */
     //orig_exÏÈ±£´æexÔ­ÓĞÊı¾İ
 	memcpy(&orig_ex, ex, sizeof(orig_ex));
+    /*ÖØµã£¬±ê¼Çex->ee_lenÎªÓ³ÉäµÄblockÊı£¬ÕâÑùex¾ÍÊÇ±»±ê¼Ç³õÊ¼»¯×´Ì¬ÁË£¬ÒòÎªex->ee_lenÖ»Òª²»ÊÇÃ»±»±ê¼ÇEXT_INIT_MAX_LEN£¬¾ÍÊÇ³õÊ¼»¯×´Ì¬*/
 	ex->ee_len = cpu_to_le16(split - ee_block);
 	if (split_flag & EXT4_EXT_MARK_UNINIT1)
-		ext4_ext_mark_uninitialized(ex);
+		ext4_ext_mark_uninitialized(ex);//ÓĞEXT4_EXT_MARK_UNINIT1±ê¼ÇÔÙ°Ñex±ê¼ÇÎ´³õÊ¼»¯
 
 	/*
 	 * path may lead to new leaf, not to original leaf any more
@@ -3376,6 +3551,7 @@ static int ext4_split_extent_at(handle_t *handle,
 	if (split_flag & EXT4_EXT_MARK_UNINIT2)
 		ext4_ext_mark_uninitialized(ex2);
 
+    //°Ñ·Ö¸îµÄºó°ë¶Îex2Ìí¼Óµ½ext4 extent B+Ê÷
 	err = ext4_ext_insert_extent(handle, inode, path, &newex, flags);
 
     //errÊÇENOSPCÒ»°ã²»»á³ÉÁ¢°É
@@ -3444,6 +3620,42 @@ fix_extent_len:
  *   c> Splits in three extents: Somone is splitting in middle of the extent
  *
  */
+//ext4_ext_map_blocks()->ext4_ext_handle_uninitialized_extents()/ext4_ext_handle_unwritten_extents()->ext4_ext_convert_to_initialized()
+//->ext4_split_extent()
+
+/*ex = path[depth].p_ext
+  ÔÚÕâÀï£¬map->m_lblk´óÓÚexµÄÆğÊ¼Âß¼­¿éµØÖ·ee_blockÊÇ¿ÉÒÔ±£Ö¤µÄ¡£¼´mapµÄÆğÊ¼Âß¼­¿éµØÖ·map->m_lblk¿Ï¶¨ÔÚexµÄÂß¼­¿é·¶Î§ÄÚ¡£
+  ÏÖÔÚÖ´ĞĞext4_split_extent()°ÑexµÄÂß¼­¿é·¶Î§ee_block~(ee_block + ee_len)½øĞĞ·Ö¸î£¬·Ö¸îÇé¿öÓĞ¼¸ÖÖ
+1:Èç¹û map->m_lblk +map->m_len Ğ¡ÓÚee_block + ee_len£¬¼´mapµÄ½áÊøÂß¼­¿éµØÖ·Ğ¡ÓÚexµÄ½áÊøÂß¼­¿éµØÖ·¡£Ôò°ÑexµÄÂß¼­¿é·¶Î§·Ö¸î³É3¶Î
+ ee_block~map->m_lblk ºÍ map->m_lblk~(map->m_lblk +map->m_len) ºÍ (map->m_lblk +map->m_len)~(ee_block + ee_len)¡£ÕâÖÖÇé¿ö£¬¾ÍÄÜ
+ ±£Ö¤±¾´ÎÒªÇóÓ³ÉäµÄmap->m_len¸öÂß¼­¿é¶¼ÄÜÍê³ÉÓ³Éä£¬¼´allocated =map->m_len¡£
+
+ ¾ßÌåÏ¸½ÚÊÇ:
+ 1.1:if (map->m_lblk + map->m_len < ee_block + ee_len)³ÉÁ¢£¬split_flag1 |= EXT4_EXT_MARK_UNINIT1|EXT4_EXT_MARK_UNINIT2,È»ºó
+ Ö´ĞĞext4_split_extent_at()ÒÔmap->m_lblk + map->m_lenÕâ¸öÂß¼­¿éµØÖ·Îª·Ö¸îµã£¬°Ñpath[depth].p_extÖ¸ÏòµÄext4_extent½á¹¹(¼´ex)µÄÂß¼­¿é·¶Î§
+ ee_block~(ee_block+ee_len)·Ö¸î³Éee_block~(map->m_lblk + map->m_len)ºÍ(map->m_lblk + map->m_len)~(ee_block+ee_len)ÕâÁ½¸öext4_extent£¬
+ Ç°°ë¶ÎµÄext4_extent»¹ÊÇex£¬Ö»ÊÇÓ³ÉäµÄÂß¼­¿é¸öÊı¼õÉÙÁË(ee_block+ee_len)-(map->m_lblk + map->m_len)£¬ºó°ë¶ÎµÄÊÇ¸öĞÂµÄext4_extent¡£
+ ÒòÎªsplit_flag1 |= EXT4_EXT_MARK_UNINIT1|EXT4_EXT_MARK_UNINIT2£¬Ôò»¹Òª±ê¼ÇÕâÁ½¸öext4_extent½á¹¹"Î´³õÊ¼»¯×´Ì¬"¡£È»ºó°Ñºó°ë¶Î
+ map->m_lblk + map->m_len)~(ee_block+ee_len)¶ÔÓ¦µÄext4_extent½á¹¹Ìí¼Óµ½ext4 extent B+Ê÷¡£
+
+ »Øµ½ext4_split_extent()º¯Êı£¬ext4_ext_find_extent(inode, map->m_lblk, path)ºópath[depth].p_ext´ó¸ÅÂÊ»¹ÊÇÀÏµÄex¡£
+ 1.2 if (map->m_lblk >= ee_block)¿Ï¶¨³ÉÁ¢£¬
+ Àï±ßµÄif (uninitialized)³ÉÁ¢£¬if (uninitialized)Àï±ßµÄsplit_flag1 |= EXT4_EXT_MARK_UNINIT1£¬¿ÉÄÜ»áÈ¥µôEXT4_EXT_MARK_UNINIT2±ê¼Ç¡£
+ ½Ó×Å£¬ÔÙ´ÎÖ´ĞĞext4_split_extent_at(),ÒÔmap->m_lblkÕâ¸öÂß¼­¿éµØÖ·Îª·Ö¸îµã£¬°Ñpath[depth].p_extÖ¸ÏòµÄext4_extent½á¹¹(¼´ex)µÄÂß¼­¿é·¶Î§
+ ee_block~(ee_block+ee_len)·Ö¸î³Éee_block~map->m_lblkºÍmap->m_lblk~(ee_block+ee_len)Á½¸öext4_extent½á¹¹¡£Ç°°ë¶ÎµÄext4_extent½á¹¹»¹ÊÇ
+ ex£¬µ«ÊÇÂß¼­¿éÊı¼õÉÙÁË(ee_block+ee_len)-map->m_lblk¸ö¡£ÒòÎª´ËÊ±split_flag1Ö»ÓĞEXT4_EXT_MARK_UNINIT1±ê¼Ç£¬¿ÉÄÜ»áÈ¥µô
+ EXT4_EXT_MARK_UNINIT2±ê¼Ç£¬ÔòÔÙ¶Ôex¼ÓÉÏ"Î´³õÊ¼»¯×´Ì¬"£¬ºó°ë¶ÎµÄext4_extent¿ÉÄÜ»á±»È¥µô"Î´³õÊ¼»¯×´Ì¬"¡£½Ó×Å£¬°Ñºó°ë¶ÎµÄext4_extent
+ ½á¹¹Ìí¼Óµ½ext4 extent B+Ê÷¡£
+
+ ÕâÀïÓĞ¸öÌØÀı£¬¾ÍÊÇ if (map->m_lblk >= ee_block)ÀïµÄmap->m_lblk == ee_block£¬ÔòÖ´ĞĞext4_split_extent_at()º¯ÊıÊ±£¬²»»áÔÙ·Ö¸îex£¬
+ Àï±ßif (split == ee_block)³ÉÁ¢£¬¿ÉÄÜ»áÖ´ĞĞext4_ext_mark_initialized(ex)±ê¼ÇexÊÇ"³õÊ¼»¯×´Ì¬"£¬ÖÕÓÚ×ªÕıÁË¡£
+ 
+2:Èç¹û map->m_lblk +map->m_len ´óÓÚµÈÓÚee_block + ee_len£¬¼´mapµÄ½áÊøÂß¼­¿éµØÖ·´óÓÚexµÄ½áÊøÂß¼­¿éµØÖ·¡£Ôò°ÑexµÄÂß¼­¿é·¶Î§·Ö¸î³É2¶Î
+ ee_block~map->m_lblk ºÍ map->m_lblk~(ee_block + ee_len)£¬ÕâÖÖÇé¿ö£¬²»ÄÜ±£Ö¤±¾´ÎÒªÇóÓ³ÉäµÄmap->m_len¸öÂß¼­¿é¶¼Íê³ÉÓ³Éä¡£Ö»ÄÜÓ³Éä
+ (ee_block + ee_len) - map->m_lblk¸öÂß¼­¿é£¬¼´allocated =(ee_block + ee_len) - map->m_lblk¡£
+
+ ¾ßÌåÏ¸½Ú²Î¼û1.2
+*/
 static int ext4_split_extent(handle_t *handle,
 			      struct inode *inode,
 			      struct ext4_ext_path *path,
@@ -3463,24 +3675,37 @@ static int ext4_split_extent(handle_t *handle,
 	ex = path[depth].p_ext;
 	ee_block = le32_to_cpu(ex->ee_block);
 	ee_len = ext4_ext_get_actual_len(ex);
+    //exÊÇ·ñÊÇÎ´³õÊ¼»¯×´Ì¬
 	uninitialized = ext4_ext_is_uninitialized(ex);
 
+    //Èç¹ûmapµÄ½áÊøÂß¼­¿éµØÖ·Ğ¡ÓÚexµÄ½áÊøÂß¼­¿éµØÖ·£¬ÔòÖ´ĞĞext4_split_extent_at()°ÑexµÄÂß¼­¿éµØÖ··Ö¸îÎª
+    //ee_block~(map->m_lblk+map->m_len)ºÍ(map->m_lblk+map->m_len)~(ee_block + ee_len)¡£ÏÂ±ßµÄif (map->m_lblk >= ee_block)
+    //Ò²³ÉÁ¢£¬ÔÙ´ÎÖ´ĞĞext4_split_extent_at()°ÑexµÄÂß¼­¿é·¶Î§ee_block~(map->m_lblk+map->m_len)·Ö¸î³Éee_block~map->m_lblk
+    //ºÍm_lblk~(map->m_lblk+map->m_len)Á½¶Î£¬ºó±ßµÄm_lblk~(map->m_lblk+map->m_len)Õâmap->m_len¸öÂß¼­¿é
+    //×îÖÕÍê³ÉÁËmapµÄÂß¼­¿éÓëÎïÀí¿éµÄÓ³Éä¡£
 	if (map->m_lblk + map->m_len < ee_block + ee_len) {
 		split_flag1 = split_flag & EXT4_EXT_MAY_ZEROOUT;
         
 		flags1 = flags | EXT4_GET_BLOCKS_PRE_IO;//flag¼ÓÉÏEXT4_GET_BLOCKS_PRE_IO±ê¼Ç
+		//Èç¹ûexÓĞÎ´³õÊ¼»¯±ê¼Ç£¬Ôòsplit_flag1±»¼ÓÉÏEXT4_EXT_MARK_UNINIT1ºÍEXT4_EXT_MARK_UNINIT2±ê¼Ç¡£EXT4_EXT_MARK_UNINIT1ÊÇ±ê¼Ç
+		//·Ö¸îµÄÇ°°ë¶Îext4_extentÎ´³õÊ¼»¯×´Ì¬,EXT4_EXT_MARK_UNINIT2ÊÇ±ê¼Ç·Ö¸îµÄºó°ë¶Îext4_extentÎ´³õÊ¼»¯×´Ì¬
 		if (uninitialized)
 			split_flag1 |= EXT4_EXT_MARK_UNINIT1 |
 				       EXT4_EXT_MARK_UNINIT2;
         
 		if (split_flag & EXT4_EXT_DATA_VALID2)
 			split_flag1 |= EXT4_EXT_DATA_VALID1;
-        
+        /*ÒÔmap->m_lblk + map->m_lenÕâ¸öÂß¼­¿éµØÖ·Îª·Ö¸îµã£¬°Ñpath[depth].p_extÖ¸ÏòµÄext4_extent½á¹¹(¼´ex)µÄÂß¼­¿é·¶Î§
+        ee_block~(ee_block+ee_len)·Ö¸î³Éee_block~(map->m_lblk + map->m_len)ºÍ(map->m_lblk + map->m_len)~(ee_block+ee_len)£¬
+        È»ºó°Ñºó°ë¶Îmap->m_lblk + map->m_len)~(ee_block+ee_len)¶ÔÓ¦µÄext4_extent½á¹¹Ìí¼Óµ½ext4 extent B+Ê÷*/
 		err = ext4_split_extent_at(handle, inode, path,
 				map->m_lblk + map->m_len, split_flag1, flags1);
 		if (err)
 			goto out;
 	} else {
+	    //µ½ÕâÀï£¬ËµÃ÷mapµÄ½áÊøÂß¼­¿éµØÖ·´óÓÚexµÄ½áÊøÂß¼­¿éµØÖ·£¬Ôòallocated=(ee_len+ee_block)-map->m_lblk£¬¼´mapÖ»ÄÜÓÃµ½exÂß¼­¿é·¶Î§
+	    //ÀïµÄallocated¸öÂß¼­¿é£¬ÏÂ±ßif (map->m_lblk >= ee_block)¿Ï¶¨³ÉÁ¢£¬Ö´ĞĞext4_split_extent_at()°ÑexµÄÂß¼­¿é·¶Î§·Ö¸î³É
+	    //ee_block~map->m_lblk ºÍ map->m_lblk~(ee_block + ee_len)¡£map->m_lblk~(ee_block + ee_len)ÊÇmap±¾ÉíÓ³ÉäµÄÂß¼­¿é£¬Ã»ÓĞ´ïµ½map->len¸ö
 		allocated = ee_len - (map->m_lblk - ee_block);
 	}
 	/*
@@ -3488,21 +3713,31 @@ static int ext4_split_extent(handle_t *handle,
 	 * result in split of original leaf or extent zeroout.
 	 */
 	ext4_ext_drop_refs(path);
+    //ÉÏ±ß¿ÉÄÜ°ÑexµÄÂß¼­¿é·¶Î§·Ö¸îÁË£¬ÕâÀïÖØĞÂÔÙext4 extent B+Ê÷²éÕÒÂß¼­¿éµØÖ··¶Î§½Ó½ümap->m_lblkµÄË÷Òı½ÚµãºÍÒ¶×Ó½áµã
 	path = ext4_ext_find_extent(inode, map->m_lblk, path);
 	if (IS_ERR(path))
 		return PTR_ERR(path);
 	depth = ext_depth(inode);
 	ex = path[depth].p_ext;
+    //exÊÇ·ñÊÇÎ´³õÊ¼»¯×´Ì¬
 	uninitialized = ext4_ext_is_uninitialized(ex);
 	split_flag1 = 0;
-
+    
+    //Èç¹ûmapµÄÆğÊ¼Âß¼­¿éµØÖ·´óÓÚexµÄÆğÊ¼Âß¼­¿éµØÖ·£¬ÒÔmap->m_lblkÎª·Ö¸îµã£¬ÔÙ´Î·Ö¸îĞÂµÄexÂß¼­¿é·¶Î§
 	if (map->m_lblk >= ee_block) {
 		split_flag1 = split_flag & EXT4_EXT_DATA_VALID2;
+
+        //Èç¹ûexÓĞÎ´³õÊ¼»¯±ê¼Ç£¬Ôòsplit_flag1±»¼ÓÉÏEXT4_EXT_MARK_UNINIT1±ê¼Ç£¬EXT4_EXT_MARK_UNINIT1ÊÇ±ê¼Ç·Ö¸îµÄÇ°°ë¶Îext4_extentÎ´³õÊ¼»¯×´Ì¬
 		if (uninitialized) {
 			split_flag1 |= EXT4_EXT_MARK_UNINIT1;
 			split_flag1 |= split_flag & (EXT4_EXT_MAY_ZEROOUT |
 						     EXT4_EXT_MARK_UNINIT2);
 		}
+        /*ÒÔmap->m_lblkÕâ¸öÂß¼­¿éµØÖ·Îª·Ö¸îµã£¬°Ñpath[depth].p_extÖ¸ÏòµÄext4_extent½á¹¹(¼´ex)µÄÂß¼­¿é·¶Î§ee_block~(ee_block+ee_len)·Ö¸î
+        ³Éee_block~map->m_lblkºÍmap->m_lblk~(ee_block+ee_len)£¬È»ºó°Ñºó°ë¶Îmap->m_lblk~(ee_block+ee_len)¶ÔÓ¦µÄext4_extent
+        ½á¹¹Ìí¼Óµ½ext4 extent B+Ê÷¡£×¢Òâ£¬ÉÏ±ßµÄext4_split_extent_at()¶ÔÔ­Ê¼exµÄ½øĞĞÁË·Ö¸î£¬È»ºóext4_ext_find_extent()
+        ÖØĞÂÔÙext4 extent B+Ê÷²éÕÒÂß¼­¿éµØÖ··¶Î§½Ó½ümap->m_lblkµÄË÷Òı½ÚµãºÍÒ¶×Ó½áµã£¬µ½ÕâÀïµÄext4_split_extent_at()£¬path[depth].p_ext
+        Ö¸ÏòµÄext4_extent½á¹¹Âß¼­¿é·¶Î§¿ÉÄÜ±äÁË¡£*/
 		err = ext4_split_extent_at(handle, inode, path,
 				map->m_lblk, split_flag1, flags);
 		if (err)
@@ -3534,6 +3769,9 @@ out:
  *    that are allocated and initialized.
  *    It is guaranteed to be >= map->m_len.
  */
+//ext4_ext_map_blocks()->ext4_ext_handle_uninitialized_extents()/ext4_ext_handle_unwritten_extents()->ext4_ext_convert_to_initialized()
+//Ö´ĞĞµ½ÕâÀï£¬path[depth].p_extÖ¸ÏòµÄext4_extentÊÇÎ´³õÊ¼»¯×´Ì¬¡£×¢Òâ£¬Ö´ĞĞµ½ÕâÀï£¬¿ÉÒÔ±£Ö¤map->m_lblkÔÚpath[depth].p_ext¼´exµÄÂß¼­¿é
+//·¶Î§ÄÚµÄ£¬¼´ee_block <= map->m_lblk <ee_len¡£
 static int ext4_ext_convert_to_initialized(handle_t *handle,
 					   struct inode *inode,
 					   struct ext4_map_blocks *map,
@@ -3565,7 +3803,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 	depth = ext_depth(inode);
     //Ö¸Ïòext4 extent B+Ê÷Ò¶×Ó½ÚµãÍ·²¿
 	eh = path[depth].p_hdr;
-//ext4 extent B+Ê÷Ò¶×Ó½Úµã£¬Ö¸ÏòÆğÊ¼Âß¼­¿éµØÖ·×î½Ó½ümap->m_lblkÕâ¸öÆğÊ¼Âß¼­¿éµØÖ·µÄext4_extent
+    //ext4 extent B+Ê÷Ò¶×Ó½Úµã£¬Ö¸ÏòÆğÊ¼Âß¼­¿éµØÖ·×î½Ó½ümap->m_lblkÕâ¸öÆğÊ¼Âß¼­¿éµØÖ·µÄext4_extent
 	ex = path[depth].p_ext;
     //Ò¶×Ó½Úµãext4_extent½á¹¹´ú±íµÄÆğÊ¼Âß¼­¿éµØÖ·
 	ee_block = le32_to_cpu(ex->ee_block);
@@ -3638,7 +3876,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
         ÒªÇóÓ³ÉäµÄÎïÀí¿éÊımap_lenÒªĞ¡ÓÚexÒÑ¾­Ó³ÉäµÄÎïÀí¿éÊıee_len¡£´ËÊ±£¬abut_exÍÌ²¢ÁËexµÄ
         Âß¼­¿é·¶Î§:°ÑexÖ®Ç°µÄÂß¼­¿é·¶Î§ee_block~ee_block+map_len»®·Ö¸øabut_exÕâ¸ö
         ext4_extent£¬exĞÂµÄÂß¼­¿éµØÖ··¶Î§ÊÇ(ee_block + map_len)~(ee_block + ee_len)ÕâÒ»Ğ¡Æ¬*/
-		if ((!ext4_ext_is_uninitialized(abut_ex)) &&/*C1*///abut_ex->ee_len²»´óÓÚ0x8000
+		if ((!ext4_ext_is_uninitialized(abut_ex)) &&/*C1*///abut_ex±ØĞëÊÇ³õÊ¼»¯×´Ì¬
              //abut_exµÄÂß¼­¿éµØÖ·ºÍÎïÀí¿éµØÖ·ÓëexµÄ½ô°¤×Å
             ((prev_lblk + prev_len) == ee_block) &&	/*C2*/
 			((prev_pblk + prev_len) == ee_pblk) &&		/*C3*/
@@ -3660,11 +3898,11 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 			ex->ee_block = cpu_to_le32(ee_block + map_len);//ÉèÖÃĞÂµÄÂß¼­¿éÊ×µØÖ·
 			ext4_ext_store_pblock(ex, ee_pblk + map_len);//ÉèÖÃĞÂµÄÎïÀí¿éÊ×µØÖ·
 			ex->ee_len = cpu_to_le16(ee_len - map_len);//ÉèÖÃĞÂµÄÓ³ÉäµÄÎïÀí¿é¸öÊı
-            //°ÑexÕâ¸öext4_extentÉèÖÃ"uninitialized"±ê¼Ç
+            /*°ÑexÕâ¸öext4_extentÉèÖÃ"uninitialized"±ê¼Ç£¬ÕâÊÇÖØµã*/
 			ext4_ext_mark_uninitialized(ex); /* Restore the flag */
 
 			/* Extend abut_ex by 'map_len' blocks */
-			abut_ex->ee_len = cpu_to_le16(prev_len + map_len);
+			abut_ex->ee_len = cpu_to_le16(prev_len + map_len);//ee_lenÓ³ÉäµÄÎïÀí¿é¸öÊıÔö¼Ómap_len¸ö
 
 			/* Result: number of initialized blocks past m_lblk */
             //allocatedÊÇabut_exÔö´óµÄÂß¼­¿é¸öÊı
@@ -3706,7 +3944,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
          (ex->ee_block + ee_len - map_len)~(ex->ee_block + ee_len)Õâmap_len¸öÂß¼­¿éºÏ²¢µ½
          abut_ex¡£ºÏ²¢ºóabut_exµÄÂß¼­¿é·¶Î§ÊÇ(ex->ee_block + ee_len - map_len)~
          (next_lblk+next_len),exµÄÂß¼­¿é·¶Î§ËõĞ¡Îªex->ee_block~(ee_len - map_len)*/
-		if ((!ext4_ext_is_uninitialized(abut_ex)) &&/*C1*///abut_ex->ee_len²»´óÓÚ0x8000
+		if ((!ext4_ext_is_uninitialized(abut_ex)) &&/*C1*///abut_ex±ØĞëÊÇ³õÊ¼»¯×´Ì¬
              //abut_exµÄÂß¼­¿éµØÖ·ºÍÎïÀí¿éµØÖ·ÓëexµÄ½ô°¤×Å,abut_exÔÚexºó±ß
             ((map->m_lblk + map_len) == next_lblk) &&/*C2*/
 		    ((ee_pblk + ee_len) == next_pblk) &&		/*C3*/
@@ -3728,7 +3966,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 			ext4_ext_store_pblock(abut_ex, next_pblk - map_len);//ÉèÖÃĞÂµÄÎïÀí¿éÊ×µØÖ·
             //exÓ³ÉäµÄÂß¼­¿é·¶Î§Ö»Ê£ÏÂex->ee_block~(ex->ee_block + ee_len - map_len)
             ex->ee_len = cpu_to_le16(ee_len - map_len);
-            //±ê¼ÇexÎª"uninitialized"×´Ì¬
+            /*±ê¼ÇexÎª"uninitialized"×´Ì¬,ÕâÊÇÖØµã£¬ex»¹ÊÇÎ´³õÊ¼»¯×´Ì¬*/
 			ext4_ext_mark_uninitialized(ex); /* Restore the flag */
 
 			/* Extend abut_ex by 'map_len' blocks */
@@ -3741,7 +3979,17 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 		}
 	}
 
-
+    /*Ö´ĞĞµ½ÕâÀï£¬ÓĞÁ½ÖÖ¿ÉÄÜ¡£±¾´ÎÒªÓ³ÉäµÄÂß¼­¿é·¶Î§map->m_lblk ~ (map->m_lblk+map->m_len)ÔÚex(¼´path[depth].p_extÖ¸ÏòµÄext4_extent)
+    µÄÂß¼­¿é·¶Î§ÄÚ£¬¼´ÔÚee_block~(ee_block + ee_len)·¶Î§ÄÚ¡£²¢ÇÒ£¬map->m_lblk==ee_block~»òÕßmap->m_lblk+map->m_len==ee_block + ee_len£¬
+    ¼´mapµÄÂß¼­¿é·¶Î§ÔÚexµÄÂß¼­¿é·¶Î§×î¿ªÍ·»òÕß×î½áÎ²¡£
+    ×îºó£¬Èç¹ûexÓëËüÇ°ºó»òÕßºó±ßext4_extent(¼´abut_ex)µÄÂß¼­¿éµØÖ·½ô°¤×Å¡£ÒÔÉÏÌõ¼ş¶¼Âú×ãÊ±£¬Ôò°ÑexÂß¼­¿é·¶Î§ÄÚµÄ±¾´ÎÒªÓ³ÉäµÄÂß¼­¿é
+    map->m_len¸öÂß¼­¿éºÏ²¢µ½abut_ex¡£ÒòÎª±¾´ÎÒªÓ³ÉäµÄÂß¼­¿éµÄÆğÊ¼Âß¼­¿éµØÖ·map->m_lblk»òÕß¼ÆÊıÂß¼­¿éµØÖ·map->m_lblk+map->m_lenÓë
+    abut_exµÄ½áÊøÂß¼­¿éµØÖ·»òÆğÊ¼Âß¼­¿éµØÖ·½ô°¤×Å¡£Èç´Ë£¬Ïàµ±ÓÚ°Ñ±¾´ÎÒªÓ³ÉäµÄÂß¼­¿émap->m_lblk ~ (map->m_lblk+map->m_len)´Óex°şÀëµô
+    £¬È«ºÏ²¢µ½abut_ex£¬ºÏ²¢map->m_len¸öÂß¼­¿é¡£ÎªÊ²Ã´ÒªÕâÑù²Ù×÷?ÒòÎªabut_exÊÇ±ê¼ÇÒÑ³õÊ¼»¯×´Ì¬µÄ£¬exÊÇÎª³õÊ¼»¯×´Ì¬£¬¶øÓ³ÉäµÄÂß¼­¿é
+    ·¶Î§map->m_lblk ~ (map->m_lblk+map->m_len)ÓÖÔÚexµÄ×î¿ªÍ·»òÕß×î½áÎ²£¬°ÑËüºÏ²¢µ½abut_ex¾ÍÍê¹¤ÁË£¬ºóĞø¾Í¿ÉÒÔ¸øext4 extent treeÊ¹ÓÃÁË¡£
+    ×îºó£¬exÒÀÈ»±»±ê¼ÇÎ´³õÊ¼»¯×´Ì¬¡£Èç¹ûmapºÏ²¢µ½abut_ex map->m_len¸öÂß¼­¿é£¬Ôòallocated=map->m_len£¬Ö±½Ógoto outÍË³ö¸Ãº¯Êı¡£
+    Èç¹ûÃ»ÓĞ·¢ÉúºÏ²¢£¬Ôòallocated = ee_len - (map->m_lblk - ee_block)=(ee_len+ee_block) - map->m_lblk£¬¼´map->m_lblkµ½ex½áÊøÂß¼­¿é
+    µØÖ·(ee_block + ee_len)Ö®¼äµÄÂß¼­¿éÊı¡£ºóĞøÖ´ĞĞext4_split_extent()¶ÔexµÄÂß¼­¿é·¶Î§½ø³Ì·Ö¸î¡£*/
     if (allocated) {//allocated·Ç0ËµÃ÷abut_exÂß¼­¿é·¶Î§ÍÌ²¢ÁËex map_len¸öÂß¼­¿é
 		/* Mark the block containing both extents as dirty */
         //ext4_extentÓ³ÉäµÄÂß¼­¿é·¶Î§¿ÉÄÜ·¢Éú±ä»¯ÁË£¬±ê¼Ç¶ÔÓ¦µÄÎïÀí¿éÓ³ÉäµÄbh»òÕßÎÄ¼şinodeÔà.
@@ -3753,8 +4001,8 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
         
 		goto out;//ÍË³ö¸Ãº¯Êı
 	} else
-	//Èç¹ûabut_exÃ»ÓĞÍÌ²¢exµÄÂß¼­¿é£¬allocatedÊÇexµÄÂß¼­¿é·¶Î§map->m_lblkµ½ee_lenµÄÂß¼­¿éÊı
-		allocated = ee_len - (map->m_lblk - ee_block);
+	    //Èç¹ûabut_exÃ»ÓĞÍÌ²¢exµÄÂß¼­¿é£¬allocatedÊÇmap->m_lblkµ½ex½áÊøÂß¼­¿éµØÖ·Ö®¼äµÄÂß¼­¿éÊı
+		allocated = ee_len - (map->m_lblk - ee_block);//allocated=(ee_len+ee_block) - map->m_lblk
 
 	WARN_ON(map->m_lblk < ee_block);
 	/*
@@ -3768,7 +4016,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 			(inode->i_sb->s_blocksize_bits - 10);
 
 	/* If extent is less than s_max_zeroout_kb, zeroout directly */
-	if (max_zeroout && (ee_len <= max_zeroout)) {
+	if (max_zeroout && (ee_len <= max_zeroout)) {//²âÊÔÒ»°ã²»³ÉÁ¢
 		err = ext4_ext_zeroout(inode, ex);
 		if (err)
 			goto out;
@@ -3797,7 +4045,7 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 	split_map.m_lblk = map->m_lblk;
 	split_map.m_len = map->m_len;
 
-	if (max_zeroout && (allocated > map->m_len)) {
+	if (max_zeroout && (allocated > map->m_len)) {//²âÊÔÒ»°ã²»³ÉÁ¢
 		if (allocated <= max_zeroout) {
 			/* case 3 */
 			zero_ex.ee_block =
@@ -3828,7 +4076,15 @@ static int ext4_ext_convert_to_initialized(handle_t *handle,
 			allocated = map->m_len;
 		}
 	}
-
+    /*ÔÚÕâÀï£¬map->m_lblk´óÓÚexµÄÆğÊ¼Âß¼­¿éµØÖ·ee_blockÊÇ¿ÉÒÔ±£Ö¤µÄ¡£¼´mapµÄÆğÊ¼Âß¼­¿éµØÖ·map->m_lblk¿Ï¶¨ÔÚexµÄÂß¼­¿é·¶Î§ÄÚ¡£
+      ÏÖÔÚÖ´ĞĞext4_split_extent()°ÑexµÄÂß¼­¿é·¶Î§ee_block~(ee_block + ee_len)½øĞĞ·Ö¸î£¬·Ö¸îÇé¿öÓĞ¼¸ÖÖ
+    1:Èç¹û map->m_lblk +map->m_len Ğ¡ÓÚee_block + ee_len£¬¼´mapµÄ½áÊøÂß¼­¿éµØÖ·Ğ¡ÓÚexµÄ½áÊøÂß¼­¿éµØÖ·¡£Ôò°ÑexµÄÂß¼­¿é·¶Î§·Ö¸î³É3¶Î
+     ee_block~map->m_lblk ºÍ map->m_lblk~(map->m_lblk +map->m_len) ºÍ (map->m_lblk +map->m_len)~(ee_block + ee_len)¡£ÕâÖÖÇé¿ö£¬¾ÍÄÜ
+     ±£Ö¤±¾´ÎÒªÇóÓ³ÉäµÄmap->m_len¸öÂß¼­¿é¶¼ÄÜÍê³ÉÓ³Éä£¬¼´allocated =map->m_len¡£
+    2:Èç¹û map->m_lblk +map->m_len ´óÓÚµÈÓÚee_block + ee_len£¬¼´mapµÄ½áÊøÂß¼­¿éµØÖ·´óÓÚexµÄ½áÊøÂß¼­¿éµØÖ·¡£Ôò°ÑexµÄÂß¼­¿é·¶Î§·Ö¸î³É2¶Î
+     ee_block~map->m_lblk ºÍ map->m_lblk~(ee_block + ee_len)£¬ÕâÖÖÇé¿ö£¬²»ÄÜ±£Ö¤±¾´ÎÒªÇóÓ³ÉäµÄmap->m_len¸öÂß¼­¿é¶¼Íê³ÉÓ³Éä¡£Ö»ÄÜÓ³Éä
+     (ee_block + ee_len) - map->m_lblk¸öÂß¼­¿é£¬¼´allocated =(ee_block + ee_len) - map->m_lblk¡£
+    */
 	allocated = ext4_split_extent(handle, inode, path,
 				      &split_map, split_flag, flags);
 	if (allocated < 0)
@@ -4214,7 +4470,7 @@ ext4_ext_handle_uninitialized_extents(handle_t *handle, struct inode *inode,
 	}
 
 	/* buffered READ or buffered write_begin() lookup */
-    //Õâ¸ö·ÖÖ§¿´×ÅÏñÊÇµÚÒ»´Î¶ÁĞ´ÎÄ¼ş£¬ext4 e
+    //Õâ¸ö·ÖÖ§¿´×ÅÏñÊÇµÚÒ»´Î¶ÁĞ´ÎÄ¼ş£¬ext4
 	if ((flags & EXT4_GET_BLOCKS_CREATE/*0x0001*/) == 0) {
 		/*
 		 * We have blocks reserved already.  We
@@ -4228,6 +4484,7 @@ ext4_ext_handle_uninitialized_extents(handle_t *handle, struct inode *inode,
 	}
 
 	/* buffered write, writepage time, convert*/
+    //Õı³£Ö´ĞĞµ½ÕâÀï
 	ret = ext4_ext_convert_to_initialized(handle, inode, map, path, flags);
 	if (ret >= 0)
 		ext4_update_inode_fsync_trans(handle, inode, 1);
@@ -4478,23 +4735,24 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 		trace_ext4_ext_show_extent(inode, ee_block, ee_start, ee_len);
 
 		/* if found extent covers block, simply return it */
-        //Èç¹ûmap->m_lblkÔÚext4_extent´ú±íµÄÆğÊ¼Âß¼­¿éµØÖ··¶Î§ÄÚ£¬Ææ¹Ö£¬ÎªÊ²Ã´Ö»ÊÇ
-        //map->m_lblk£¬Ã»ÓĞmap->m_lblk+m_lenÄØ?map->m_lblk~map->m_lblk+m_len²ÅÊÇ±¾´ÎÒªÓ³Éä
-        //µÄÂß¼­¿éµØÖ··¶Î§Ñ½
+        //Èç¹ûmap->m_lblkÔÚex´ú±íµÄÆğÊ¼Âß¼­¿éµØÖ··¶Î§ÄÚ£¬Ææ¹Ö£¬ÎªÊ²Ã´Ö»ÊÇmap->m_lblk£¬Ã»ÓĞmap->m_lblk+m_lenÄØ?map->m_lblk~map->m_lblk+
+        //m_len²ÅÊÇ±¾´ÎÒªÓ³ÉäµÄÂß¼­¿éµØÖ··¶Î§Ñ½£¬ÕâµãÔÚºóĞøµÄº¯Êı»áÅĞ¶Ï¡£×¢Òâ£¬²¢²»ÄÜ±£Ö¤map->m_lblk¾ÍÔÚex´ú±íµÄÆğÊ¼Âß¼­¿éµØÖ··¶Î§ÄÚ£¬
+        //ÒòÎªmap->m_lblk»á·Ç³£´ó£¬map->m_lblk > ee_block + ee_len¡£´ËÊ±Ö»ÄÜÔÚÏÂ±ß»ùÓÚmap->m_lblk´´½¨Ò»¸öĞÂµÄext4_extent½á¹¹£¬²åÈëext4_extent B+Ê÷
 		if (in_range(map->m_lblk, ee_block, ee_len)) {
             //newblock : map->m_lblkÕâ¸öÆğÊ¼Âß¼­¿éµØÖ·¶ÔÓ¦µÄÎïÀí¿éµØÖ·
 			newblock = map->m_lblk - ee_block + ee_start;
 			/* number of remaining blocks in the extent */
-   //allocated : map->m_lblkµ½(ext4_extent->ee_block+ext4_extent->ee_len)Õâ¸ö·¶Î§µÄblock¸öÊı
-   //ext4_extent->ee_block+ext4_extent->ee_lenÊÇext4_extent½á¹¹µÄ½áÊøÂß¼­¿éµØÖ·
+            //allocated : map->m_lblkµ½(ext4_extent->ee_block+ext4_extent->ee_len)Õâ¸ö·¶Î§µÄblock¸öÊı
+            //ext4_extent->ee_block+ext4_extent->ee_lenÊÇext4_extent½á¹¹µÄ½áÊøÂß¼­¿éµØÖ·
             allocated = ee_len - (map->m_lblk - ee_block);
 			ext_debug("%u fit into %u:%d -> %llu\n", map->m_lblk,
 				  ee_block, ee_len, newblock);
             
-            //exÒÑ¾­³õÊ¼»¯¹ıÖ±½Ó·µ»Ø£¬·ñÔòÖ´ĞĞÏÂ±ßµÄext4_ext_handle_uninitialized_extents()
+            //exÒÑ¾­³õÊ¼»¯¹ıÖ±½Ógoto out·µ»Ø£¬·ñÔòÖ´ĞĞÏÂ±ßµÄext4_ext_handle_uninitialized_extents()
 			if (!ext4_ext_is_uninitialized(ex))
 				goto out;
-
+            
+            /*×¢Òâ£¬ÕâÀïÓĞ¸öÒş²Øµã£¬exÊÇÎ´³õÊ¼»¯×´Ì¬²Å»áÔÚÕâÀïÖ´ĞĞext4_ext_handle_uninitialized_extents()*/
 			ret = ext4_ext_handle_uninitialized_extents(//¸ß°æ±¾ÄÚºË¸ÄÃû³ÆÎªext4_ext_handle_unwritten_extents()
 				handle, inode, map, path, flags,
 				allocated, newblock);
@@ -4788,7 +5046,9 @@ out:
 		allocated = map->m_len;
 	ext4_ext_show_leaf(inode, path);
 	map->m_flags |= EXT4_MAP_MAPPED;
+    //±¾´ÎÓ³ÉäµÄÆğÊ¼Âß¼­¿éµØÖ·¶ÔÓ¦µÄÆğÊ¼ÎïÀí¿éºÅ
 	map->m_pblk = newblock;
+    //±¾´ÎÍê³ÉÓ³ÉäµÄÎïÀí¿éÊı£¬²¢²»ÄÜ±£Ö¤allocatedµÈÓÚmap->m_len£¬»¹ÓĞ¿ÉÄÜĞ¡ÓÚ
 	map->m_len = allocated;
 out2:
 	if (path) {

@@ -80,7 +80,7 @@
 typedef int ext4_grpblk_t;
 
 /* data type for filesystem-wide blocks number */
-typedef unsigned long long ext4_fsblk_t;//物理块地址
+typedef unsigned long long ext4_fsblk_t;//物理块地址，或者物理块号
 
 /* data type for file logical block number */
 typedef __u32 ext4_lblk_t;//文件逻辑块地址

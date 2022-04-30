@@ -107,7 +107,8 @@ struct ext4_extent_header {
 	__le16	eh_magic;	/* probably will support different formats */
 	__le16	eh_entries;	/* number of valid entries */
 	__le16	eh_max;		/* capacity of store in entries */
-    //ext4 extent B+树深度，不包含根节点，B+树只有根节点时eh_depth是0
+    //当前叶子结点或者索引节点所处ext4 extent B+树层数。B+树的根节点的eh_depth是B+树的真正深度，叶子结点的eh_depth是0，
+    //B+树根节点下方的索引节点的eh_depth是1，其他类推。
 	__le16	eh_depth;	/* has tree real underlying blocks? */
 	__le32	eh_generation;	/* generation of the tree */
 };
@@ -133,8 +134,10 @@ find_ext4_extent_tail(struct ext4_extent_header *eh)
 //根据一个逻辑块地址找到它所属于的ext4 ext4_extent B+树索引节点和叶子节点信息，
 //保存到ext4_ext_path
 struct ext4_ext_path {
-	ext4_fsblk_t			p_block;//ext4_ext_find_extent()中赋值，物理块地址
-	__u16				p_depth;//处于ext4 extent B+树第几层
+	ext4_fsblk_t			p_block;//ext4_ext_find_extent()中赋值，物理块号，或者又称为物理块地址
+	//当前索引节点或者叶子节点处于ext4 extent B+树第几层。ext4 extent B+树没有索引节点或者叶子节点时，层数是0，有一层叶子节点时层数是1
+	//再加一层索引节点时层数是2
+	__u16				p_depth;
 	//ext4_ext_binsearch()中赋值，指向起始逻辑块地址最接近传入的起始逻辑块地址map->m_lblk的ext4_extent
 	struct ext4_extent		*p_ext;
     //ext4_ext_binsearch_idx()中赋值，指向起始逻辑块地址最接近传入的起始逻辑块地址map->m_lblk的ext4_extent_idx
@@ -209,12 +212,12 @@ static inline struct ext4_extent_header *ext_block_hdr(struct buffer_head *bh)
 {
 	return (struct ext4_extent_header *) bh->b_data;
 }
-
+//这是根据EXT4_I(inode)->i_data，得到root 节点ext4_extent_header->eh_depth，计算ext4 extent B+树深度
 static inline unsigned short ext_depth(struct inode *inode)
 {
 	return le16_to_cpu(ext_inode_hdr(inode)->eh_depth);
 }
-
+//ext4_ext_convert_to_initialized()中多处标记ext4_extent的未初始化状态
 static inline void ext4_ext_mark_uninitialized(struct ext4_extent *ext)
 {
 	/* We can not have an uninitialized extent of zero length! */
