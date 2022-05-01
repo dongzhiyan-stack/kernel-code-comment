@@ -89,6 +89,7 @@ struct ext4_extent {
  * It's used at all the levels except the bottom.
  */
 //ext4 extent B+数的索引节点
+/*重点，ext4_extent_idx没有类似ext4_extent结构的成员ee_len，ext4_extent_idx只有起始逻辑块号呀*/
 struct ext4_extent_idx {
     //起始逻辑块地址
 	__le32	ei_block;	/* index covers logical blocks from 'block' */
@@ -232,7 +233,7 @@ static inline int ext4_ext_is_uninitialized(struct ext4_extent *ext)
     //ext->ee_len大于0x8000，说明ext4_extent是没有初始化过的
 	return (le16_to_cpu(ext->ee_len) > EXT_INIT_MAX_LEN);
 }
-
+//ext4_extent结构映射的物理块个数
 static inline int ext4_ext_get_actual_len(struct ext4_extent *ext)
 {
 	return (le16_to_cpu(ext->ee_len) <= EXT_INIT_MAX_LEN ?
