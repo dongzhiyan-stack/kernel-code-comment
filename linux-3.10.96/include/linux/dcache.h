@@ -278,7 +278,7 @@ extern void d_rehash(struct dentry *);
  * This adds the entry to the hash queues and initializes @inode.
  * The entry was actually filled in earlier during d_alloc().
  */
- 
+//建立dentry和inode联系，添加到各自的链表
 static inline void d_add(struct dentry *entry, struct inode *inode)
 {
 	d_instantiate(entry, inode);

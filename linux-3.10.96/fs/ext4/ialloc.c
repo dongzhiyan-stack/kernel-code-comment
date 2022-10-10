@@ -634,6 +634,7 @@ static int find_group_other(struct super_block *sb, struct inode *parent,
  * For other inodes, search forward from the parent directory's block
  * group to find a free inode.
  */
+//找到一个合适的块组，从这个块组分配一个空闲inode
 struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
 			       umode_t mode, const struct qstr *qstr,
 			       __u32 goal, uid_t *owner, int handle_type,
@@ -658,8 +659,10 @@ struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
 		return ERR_PTR(-EPERM);
 
 	sb = dir->i_sb;
+    //块组数
 	ngroups = ext4_get_groups_count(sb);
 	trace_ext4_request_inode(dir, mode);
+    //先分配一个inode结构
 	inode = new_inode(sb);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
@@ -683,22 +686,24 @@ struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
 		inode_init_owner(inode, dir, mode);
 	dquot_initialize(inode);
 
-	if (!goal)
+	if (!goal)//
 		goal = sbi->s_inode_goal;
 
-	if (goal && goal <= le32_to_cpu(sbi->s_es->s_inodes_count)) {
+	if (goal && goal <= le32_to_cpu(sbi->s_es->s_inodes_count)) {//不成立
 		group = (goal - 1) / EXT4_INODES_PER_GROUP(sb);
 		ino = (goal - 1) % EXT4_INODES_PER_GROUP(sb);
 		ret2 = 0;
 		goto got_group;
 	}
 
+    //找到一个合适的块组，尽可能在父目录所在块组，靠近父目录，块组号保存group。
 	if (S_ISDIR(mode))
 		ret2 = find_group_orlov(sb, dir, &group, mode, qstr);
 	else
 		ret2 = find_group_other(sb, dir, &group, mode);
 
 got_group:
+    //保存父目录最近分配inode个块组号
 	EXT4_I(dir)->i_last_alloc_group = group;
 	err = -ENOSPC;
 	if (ret2 == -1)
@@ -711,7 +716,7 @@ got_group:
 	 */
 	for (i = 0; i < ngroups; i++, ino = 0) {
 		err = -EIO;
-
+        //根据块组号group得到块组描述符结构ext4_group_desc赋值于gdp
 		gdp = ext4_get_group_desc(sb, group, &group_desc_bh);
 		if (!gdp)
 			goto out;
@@ -719,6 +724,7 @@ got_group:
 		/*
 		 * Check free inodes count before loading bitmap.
 		 */
+		//当前块组没有空闲的inode，continue查找下一个块组
 		if (ext4_free_inodes_count(sb, gdp) == 0) {
 			if (++group == ngroups)
 				group = 0;
@@ -726,14 +732,17 @@ got_group:
 		}
 
 		brelse(inode_bitmap_bh);
+        //读取group块组的inode table
 		inode_bitmap_bh = ext4_read_inode_bitmap(sb, group);
 		if (!inode_bitmap_bh)
 			goto out;
 
 repeat_in_this_group:
+        //在inode talbe里查找一个空闲的inode 号
 		ino = ext4_find_next_zero_bit((unsigned long *)
 					      inode_bitmap_bh->b_data,
 					      EXT4_INODES_PER_GROUP(sb), ino);
+        //找到的inode号不能太大
 		if (ino >= EXT4_INODES_PER_GROUP(sb))
 			goto next_group;
 		if (group == 0 && (ino+1) < EXT4_FIRST_INO(sb)) {
@@ -758,9 +767,11 @@ repeat_in_this_group:
 			goto out;
 		}
 		ext4_lock_group(sb, group);
+        //块组的inode table的ino 这个inode号出置1，表示这个inode分配走了。设置成功返回0
 		ret2 = ext4_test_and_set_bit(ino, inode_bitmap_bh->b_data);
 		ext4_unlock_group(sb, group);
 		ino++;		/* the inode bitmap is zero-based */
+        //从块组总成功得到一个inode，返回
 		if (!ret2)
 			goto got; /* we grabbed the inode! */
 		if (ino < EXT4_INODES_PER_GROUP(sb))
@@ -852,7 +863,7 @@ got:
 	} else {
 		ext4_lock_group(sb, group);
 	}
-
+    //group这个块组空闲inode数减少一个
 	ext4_free_inodes_set(sb, gdp, ext4_free_inodes_count(sb, gdp) - 1);
 	if (S_ISDIR(mode)) {
 		ext4_used_dirs_set(sb, gdp, ext4_used_dirs_count(sb, gdp) + 1);
@@ -884,13 +895,14 @@ got:
 		flex_group = ext4_flex_group(sbi, group);
 		atomic_dec(&sbi->s_flex_groups[flex_group].free_inodes);
 	}
-
+    //inode的真实编号=块组中的inode号 + group块组号*每个块组的inode数
 	inode->i_ino = ino + group * EXT4_INODES_PER_GROUP(sb);
 	/* This is the optimal IO size (for stat), not the fs block size */
 	inode->i_blocks = 0;
+    //inode更新修改时间
 	inode->i_mtime = inode->i_atime = inode->i_ctime = ei->i_crtime =
 						       ext4_current_time(inode);
-
+    //对struct ext4_inode_info *ei赋值
 	memset(ei->i_data, 0, sizeof(ei->i_data));
 	ei->i_dir_start_lookup = 0;
 	ei->i_disksize = 0;

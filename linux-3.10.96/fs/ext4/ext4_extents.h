@@ -79,7 +79,7 @@ struct ext4_extent {
 	__le32	ee_block;	/* first logical block extent covers */
     //映射的block个数
 	__le16	ee_len;		/* number of blocks covered by extent */
-    //由ee_start_hi和ee_start_lo一起组成物理块地址
+    //由ee_start_hi和ee_start_lo一起计算出起始逻辑块地址映射的起始物理块地址
 	__le16	ee_start_hi;	/* high 16 bits of physical block */
 	__le32	ee_start_lo;	/* low 32 bits of physical block */
 };
@@ -88,12 +88,14 @@ struct ext4_extent {
  * This is index on-disk structure.
  * It's used at all the levels except the bottom.
  */
-//ext4 extent B+数的索引节点
+//ext4 extent B+树的索引节点
 /*重点，ext4_extent_idx没有类似ext4_extent结构的成员ee_len，ext4_extent_idx只有起始逻辑块号呀*/
 struct ext4_extent_idx {
     //起始逻辑块地址
 	__le32	ei_block;	/* index covers logical blocks from 'block' */
-    //由ei_leaf_lo和ei_leaf_hi组成起始逻辑块地址对应的物理块地址
+    //由ei_leaf_lo和ei_leaf_hi一起计算出物理块号，这个物理块保存下层叶子节点或者索引节点4K数据。没错，索引节点ext4_extent_idx结构
+    //的ei_leaf_lo和ei_leaf_hi保存了下层索引节点或者叶子节点的物理块号，索引节点的ext4_extent_idx通过其ei_leaf_lo和ei_leaf_hi成员
+    //指向下层的索引节点或者叶子节点。这点非常重要
 	__le32	ei_leaf_lo;	/* pointer to the physical block of the next *
 				 * level. leaf or next index could be there */
 	__le16	ei_leaf_hi;	/* high 16 bits of physical block */
@@ -109,7 +111,7 @@ struct ext4_extent_header {
 	__le16	eh_entries;	/* number of valid entries */
 	__le16	eh_max;		/* capacity of store in entries */
     //当前叶子结点或者索引节点所处ext4 extent B+树层数。B+树的根节点的eh_depth是B+树的真正深度，叶子结点的eh_depth是0，
-    //B+树根节点下方的索引节点的eh_depth是1，其他类推。
+    //B+树根节点下方的索引节点的eh_depth是1，其他类推。ext4_ext_grow_indepth()中加1。
 	__le16	eh_depth;	/* has tree real underlying blocks? */
 	__le32	eh_generation;	/* generation of the tree */
 };
@@ -135,7 +137,10 @@ find_ext4_extent_tail(struct ext4_extent_header *eh)
 //根据一个逻辑块地址找到它所属于的ext4 ext4_extent B+树索引节点和叶子节点信息，
 //保存到ext4_ext_path
 struct ext4_ext_path {
-	ext4_fsblk_t			p_block;//ext4_ext_find_extent()中赋值，物理块号，或者又称为物理块地址
+    //ext4_ext_find_extent()中赋值，是索引节点时，是由ext4_extent_idx结构的ei_leaf_lo和ei_leaf_hi成员计算出的物理块号，这个物理块保存
+    //了下层叶子节点或者索引节点4K数据。是叶子节点时，是由ext4_extent结构的ee_start_hi和ee_start_lo成员计算出的物理块号，
+    //这个物理块号是ext4_extent的逻辑块地址映射的的起始物理块号
+	ext4_fsblk_t			p_block;
 	//当前索引节点或者叶子节点处于ext4 extent B+树第几层。ext4 extent B+树没有索引节点或者叶子节点时，层数是0，有一层叶子节点时层数是1
 	//再加一层索引节点时层数是2
 	__u16				p_depth;
@@ -191,10 +196,10 @@ struct ext4_ext_path {
 #define EXT_HAS_FREE_INDEX(__path__) \
 	(le16_to_cpu((__path__)->p_hdr->eh_entries) \
 				     < le16_to_cpu((__path__)->p_hdr->eh_max))
-//ext4 extent B+树叶子节点最后一个ext4_extent结构内存地址
+//ext4 extent B+树叶子节点有效的最后一个ext4_extent结构内存地址，注意是有效的，不一定是叶子节点最后一个ext4_extent
 #define EXT_LAST_EXTENT(__hdr__) \
 	(EXT_FIRST_EXTENT((__hdr__)) + le16_to_cpu((__hdr__)->eh_entries) - 1)
-//ext4 extent B+树索引节点最后一个ext4_extent_idx结构内存地址
+//ext4 extent B+树索引节点有效的最后一个ext4_extent_idx结构内存地址，注意是有效的，不一定是索引节点最后一个ext4_extent_idx
 #define EXT_LAST_INDEX(__hdr__) \
 	(EXT_FIRST_INDEX((__hdr__)) + le16_to_cpu((__hdr__)->eh_entries) - 1)
 //ext4 extent B+树最大最靠后的ext4_extent结构，eh_max大于eh_entries

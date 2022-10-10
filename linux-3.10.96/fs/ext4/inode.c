@@ -605,6 +605,7 @@ int ext4_map_blocks(handle_t *handle, struct inode *inode,
 	if (!(flags & EXT4_GET_BLOCKS_NO_LOCK))
 		down_read((&EXT4_I(inode)->i_data_sem));
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
+        //完成文件逻辑块地址与物理块地址的映射
 		retval = ext4_ext_map_blocks(handle, inode, map, flags &
 					     EXT4_GET_BLOCKS_KEEP_SIZE);
 	} else {
@@ -742,6 +743,8 @@ found:
 		    ext4_find_delalloc_range(inode, map->m_lblk,
 					     map->m_lblk + map->m_len - 1))
 			status |= EXTENT_STATUS_DELAYED;
+
+        //把map的起始逻辑块地址、映射的起始物理块地址、映射的物理块个数保存到extent_status，再把extent_status插入ext4_es_tree红黑树
 		ret = ext4_es_insert_extent(inode, map->m_lblk, map->m_len,
 					    map->m_pblk, status);
 		if (ret < 0)

@@ -639,6 +639,7 @@ out:
  *
  * Return 0 on success, error code on failure.
  */
+//把map的起始逻辑块地址、映射的起始物理块地址、映射的物理块个数保存到extent_status，再把extent_status插入ext4_es_tree红黑树
 int ext4_es_insert_extent(struct inode *inode, ext4_lblk_t lblk,
 			  ext4_lblk_t len, ext4_fsblk_t pblk,
 			  unsigned long long status)
@@ -662,9 +663,11 @@ int ext4_es_insert_extent(struct inode *inode, ext4_lblk_t lblk,
 				" cause data loss.\n", lblk, len);
 		WARN_ON(1);
 	}
-
+    //extent_status记录ext4_extent的起始逻辑块地址
 	newes.es_lblk = lblk;
+    //extent_status记录ext4_extent的逻辑块地址映射的物理块个数
 	newes.es_len = len;
+    //extent_status记录ext4_extent的起始逻辑块地址对应的起始物理块地址
 	ext4_es_store_pblock(&newes, pblk);
 	ext4_es_store_status(&newes, status);
 	trace_ext4_es_insert_extent(inode, &newes);
@@ -675,6 +678,7 @@ int ext4_es_insert_extent(struct inode *inode, ext4_lblk_t lblk,
 	err = __es_remove_extent(inode, lblk, end);
 	if (err != 0)
 		goto error;
+    //把extent_status插入ext4_es_tree红黑树
 	err = __es_insert_extent(inode, &newes);
 
 error:

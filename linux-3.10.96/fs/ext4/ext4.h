@@ -817,6 +817,8 @@ do {									       \
  * fourth extended file system inode data in memory
  */
 struct ext4_inode_info {
+    //共15*4=60个字节，一个ext4_extent_header占12字节，一个ext4_extent_idx占12字节，一个ext4_extent占12字节，
+    //i_data可以保存1个ext4_extent_header+4个ext4_extent_idx(或4个ext4_extent)
 	__le32	i_data[15];	/* unconverted */
 	__u32	i_dtime;
 	ext4_fsblk_t	i_file_acl;
@@ -829,7 +831,7 @@ struct ext4_inode_info {
 	 * near to their parent directory's inode.
 	 */
 	ext4_group_t	i_block_group;
-	ext4_lblk_t	i_dir_start_lookup;
+	ext4_lblk_t	i_dir_start_lookup;//ext4_find_entry()中保存父目录数据的一个物理块号
 #if (BITS_PER_LONG < 64)
 	unsigned long	i_state_flags;		/* Dynamic state flags */
 #endif
@@ -894,7 +896,7 @@ struct ext4_inode_info {
 	unsigned int i_es_lru_nr;	/* protected by i_es_lock */
 
 	/* ialloc */
-	ext4_group_t	i_last_alloc_group;
+	ext4_group_t	i_last_alloc_group;//__ext4_new_inode()中赋值
 
 	/* allocation reservation info for delalloc */
 	/* In case of bigalloc, these refer to clusters rather than blocks */
@@ -1601,11 +1603,15 @@ struct ext4_dir_entry {
  * bigger than 255 chars, it's safe to reclaim the extra byte for the
  * file_type field.
  */
+//父目录下的子文件或子目录信息，用ext4_dir_entry_2表示
 struct ext4_dir_entry_2 {
+    ////父目录下的子文件或子目录inode号
 	__le32	inode;			/* Inode number */
+    //ext4_insert_dentry()中赋值
 	__le16	rec_len;		/* Directory entry length */
 	__u8	name_len;		/* Name length */
 	__u8	file_type;
+    //父目录下的子文件或子目录名字
 	char	name[EXT4_NAME_LEN];	/* File name */
 };
 

@@ -1372,15 +1372,17 @@ void d_set_d_op(struct dentry *dentry, const struct dentry_operations *op)
 
 }
 EXPORT_SYMBOL(d_set_d_op);
-
+//dentry->d_inode指向inode,dentry添加到inode->i_dentry hash链表
 static void __d_instantiate(struct dentry *dentry, struct inode *inode)
 {
 	spin_lock(&dentry->d_lock);
 	if (inode) {
 		if (unlikely(IS_AUTOMOUNT(inode)))
 			dentry->d_flags |= DCACHE_NEED_AUTOMOUNT;
+        //dentry添加到inode->i_dentry hash链表
 		hlist_add_head(&dentry->d_u.d_alias, &inode->i_dentry);
 	}
+    //dentry->d_inode指向inode
 	dentry->d_inode = inode;
 	dentry_rcuwalk_barrier(dentry);
 	spin_unlock(&dentry->d_lock);
@@ -1409,6 +1411,7 @@ void d_instantiate(struct dentry *entry, struct inode * inode)
 	BUG_ON(!hlist_unhashed(&entry->d_u.d_alias));
 	if (inode)
 		spin_lock(&inode->i_lock);
+    //dentry->d_inode指向inode,dentry添加到inode->i_dentry hash链表
 	__d_instantiate(entry, inode);
 	if (inode)
 		spin_unlock(&inode->i_lock);
@@ -1629,7 +1632,7 @@ struct dentry *d_splice_alias(struct inode *inode, struct dentry *dentry)
 	if (IS_ERR(inode))
 		return ERR_CAST(inode);
 
-	if (inode && S_ISDIR(inode->i_mode)) {
+	if (inode && S_ISDIR(inode->i_mode)) {//inode是目录
 		spin_lock(&inode->i_lock);
 		new = __d_find_alias(inode, 1);
 		if (new) {
@@ -1645,7 +1648,7 @@ struct dentry *d_splice_alias(struct inode *inode, struct dentry *dentry)
 			security_d_instantiate(dentry, inode);
 			d_rehash(dentry);
 		}
-	} else
+	} else//建立dentry和inode联系，添加到各自的链表
 		d_add(dentry, inode);
 	return new;
 }
