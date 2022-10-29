@@ -130,13 +130,13 @@ struct ext4_allocation_request {
 	/* how many blocks we want to allocate */
 	unsigned int len;//想分配的物理块个数
 	/* logical block in target inode */
-	ext4_lblk_t logical;//起始逻辑块号
+	ext4_lblk_t logical;//ext4_ext_map_blocks()中赋值map->m_lblk，就是起始逻辑块号
 	/* the closest logical allocated block to the left */
 	ext4_lblk_t lleft;//ext4_ext_search_left()中设置
 	/* the closest logical allocated block to the right */
 	ext4_lblk_t lright;//ext4_ext_search_right()中设置
 	/* phys. target (a hint) */
-	ext4_fsblk_t goal;
+	ext4_fsblk_t goal;//起始想分配的物理块号，ext4_ext_map_blocks->ext4_mb_new_blocks()中正是以goal为基准尝试分配物理块
 	/* phys. block for the closest logical allocated block to the left */
 	ext4_fsblk_t pleft;
 	/* phys. block for the closest logical allocated block to the right */
@@ -276,6 +276,7 @@ struct ext4_io_submit {
 /* Translate a block number to a cluster number */
 #define EXT4_B2C(sbi, blk)	((blk) >> (sbi)->s_cluster_bits)
 /* Translate a cluster number to a block number */
+//与空闲block数有关，sbi->s_cluster_bits是0
 #define EXT4_C2B(sbi, cluster)	((cluster) << (sbi)->s_cluster_bits)
 /* Translate # of blks to # of clusters */
 #define EXT4_NUM_B2C(sbi, blks)	(((blks) + (sbi)->s_cluster_ratio - 1) >> \
@@ -294,13 +295,21 @@ struct ext4_io_submit {
 /*
  * Structure of a blocks group descriptor
  */
+//块组描述符结构体，关键成员包含数据块位图block bitmap，
+//ext4_get_group_desc()函数中对查找块组描述符有详细解释
 struct ext4_group_desc
 {
+    //数据块位图 对应的物理块号
 	__le32	bg_block_bitmap_lo;	/* Blocks bitmap block */
+    //inode位图 对应的物理块号，见ext4_inode_bitmap()
 	__le32	bg_inode_bitmap_lo;	/* Inodes bitmap block */
+    //由 bg_inode_table_lo 和 bg_inode_table_hi 组合得到 bg这个块组的inode table的起始物理块号，见ext4_inode_table()
 	__le32	bg_inode_table_lo;	/* Inodes table block */
+    //与bg_free_blocks_count_hi一起组成块组空闲物理块个数,ext4_mb_mark_diskspace_used->ext4_free_group_clusters_set()中设置
 	__le16	bg_free_blocks_count_lo;/* Free blocks count */
+    //ext4_free_inodes_set()中设置 块组空闲inode个数 低位
 	__le16	bg_free_inodes_count_lo;/* Free inodes count */
+    //ext4_used_dirs_set()中设置块组已分配的目录inode个数
 	__le16	bg_used_dirs_count_lo;	/* Directories count */
 	__le16	bg_flags;		/* EXT4_BG_flags (INODE_UNINIT, etc) */
 	__le32  bg_exclude_bitmap_lo;   /* Exclude bitmap for snapshots */
@@ -312,7 +321,9 @@ struct ext4_group_desc
 	__le32	bg_inode_bitmap_hi;	/* Inodes bitmap block MSB */
 	__le32	bg_inode_table_hi;	/* Inodes table block MSB */
 	__le16	bg_free_blocks_count_hi;/* Free blocks count MSB */
+    //ext4_free_inodes_set()中设置 块组空闲inode个数 高位
 	__le16	bg_free_inodes_count_hi;/* Free inodes count MSB */
+    //ext4_used_dirs_set()中设置 块组的已分配的目录inode个数 高位
 	__le16	bg_used_dirs_count_hi;	/* Directories count MSB */
 	__le16  bg_itable_unused_hi;    /* Unused inodes count MSB */
 	__le32  bg_exclude_bitmap_hi;   /* Exclude bitmap block MSB */
@@ -333,9 +344,10 @@ struct ext4_group_desc
  */
 
 struct flex_groups {
+    //flex group块组空闲的cluster数，其实就是空闲block数，一个cluster一个block
 	atomic64_t	free_clusters;
-	atomic_t	free_inodes;
-	atomic_t	used_dirs;
+	atomic_t	free_inodes;//flex group块组空闲inode数，__ext4_new_inode()中减1
+	atomic_t	used_dirs;//flex group块组使用的目录数，__ext4_new_inode()中加1
 };
 
 #define EXT4_BG_INODE_UNINIT	0x0001 /* Inode table/bitmap not in use */
@@ -348,13 +360,15 @@ struct flex_groups {
 #define EXT4_MIN_DESC_SIZE		32
 #define EXT4_MIN_DESC_SIZE_64BIT	64
 #define	EXT4_MAX_DESC_SIZE		EXT4_MIN_BLOCK_SIZE
-#define EXT4_DESC_SIZE(s)		(EXT4_SB(s)->s_desc_size)
+#define EXT4_DESC_SIZE(s)		(EXT4_SB(s)->s_desc_size)//64字节
 #ifdef __KERNEL__
-# define EXT4_BLOCKS_PER_GROUP(s)	(EXT4_SB(s)->s_blocks_per_group)
-# define EXT4_CLUSTERS_PER_GROUP(s)	(EXT4_SB(s)->s_clusters_per_group)
-# define EXT4_DESC_PER_BLOCK(s)		(EXT4_SB(s)->s_desc_per_block)
-# define EXT4_INODES_PER_GROUP(s)	(EXT4_SB(s)->s_inodes_per_group)
-# define EXT4_DESC_PER_BLOCK_BITS(s)	(EXT4_SB(s)->s_desc_per_block_bits)
+//每个块组(或者flex group块组)的block个数
+# define EXT4_BLOCKS_PER_GROUP(s)	(EXT4_SB(s)->s_blocks_per_group)//32768
+# define EXT4_CLUSTERS_PER_GROUP(s)	(EXT4_SB(s)->s_clusters_per_group)//32768
+# define EXT4_DESC_PER_BLOCK(s)		(EXT4_SB(s)->s_desc_per_block)//64
+//每个块组的最多的inode数
+# define EXT4_INODES_PER_GROUP(s)	(EXT4_SB(s)->s_inodes_per_group)//8192
+# define EXT4_DESC_PER_BLOCK_BITS(s)	(EXT4_SB(s)->s_desc_per_block_bits)//6
 #else
 # define EXT4_BLOCKS_PER_GROUP(s)	((s)->s_blocks_per_group)
 # define EXT4_DESC_PER_BLOCK(s)		(EXT4_BLOCK_SIZE(s) / EXT4_DESC_SIZE(s))
@@ -816,6 +830,7 @@ do {									       \
 /*
  * fourth extended file system inode data in memory
  */
+//__ext4_new_inode()中对ext4_inode_info大量赋值
 struct ext4_inode_info {
     //共15*4=60个字节，一个ext4_extent_header占12字节，一个ext4_extent_idx占12字节，一个ext4_extent占12字节，
     //i_data可以保存1个ext4_extent_header+4个ext4_extent_idx(或4个ext4_extent)
@@ -830,8 +845,9 @@ struct ext4_inode_info {
 	 * place a file's data blocks near its inode block, and new inodes
 	 * near to their parent directory's inode.
 	 */
-	ext4_group_t	i_block_group;
-	ext4_lblk_t	i_dir_start_lookup;//ext4_find_entry()中保存父目录数据的一个物理块号
+	ext4_group_t	i_block_group;//inode所属的块组编号
+	//保存了上一次在dir父目录找到的子目录或子文件的物理块对应的逻辑块号，见ext4_find_entry()
+	ext4_lblk_t	i_dir_start_lookup;
 #if (BITS_PER_LONG < 64)
 	unsigned long	i_state_flags;		/* Dynamic state flags */
 #endif
@@ -896,7 +912,8 @@ struct ext4_inode_info {
 	unsigned int i_es_lru_nr;	/* protected by i_es_lock */
 
 	/* ialloc */
-	ext4_group_t	i_last_alloc_group;//__ext4_new_inode()中赋值
+    //__ext4_new_inode()记录上一次分配inode所属的块组
+	ext4_group_t	i_last_alloc_group;
 
 	/* allocation reservation info for delalloc */
 	/* In case of bigalloc, these refer to clusters rather than blocks */
@@ -1043,11 +1060,15 @@ extern void ext4_set_bits(void *bm, int cur, int len);
  * Structure of the super block
  */
 struct ext4_super_block {
-/*00*/	__le32	s_inodes_count;		/* Inodes count */
+/*00*/	__le32	s_inodes_count;		/* Inodes count */ //文件系统inode个数
+    //s_blocks_count_lo  和 s_blocks_count_hi 组成block个数
 	__le32	s_blocks_count_lo;	/* Blocks count */
 	__le32	s_r_blocks_count_lo;	/* Reserved blocks count */
+    //与 s_free_blocks_count_hi 组成空闲block个数
 	__le32	s_free_blocks_count_lo;	/* Free blocks count */
 /*10*/	__le32	s_free_inodes_count;	/* Free inodes count */
+    //是块组的第一个data block物理块号吗?不是，实际打印是0。应该就是ext4文件系统的第一个物理块号，相对于ext4分区起始地址来说的
+    //使用与赋值见ext4_group_first_block_no和ext4_get_group_no_and_offset
 	__le32	s_first_data_block;	/* First Data Block */
 	__le32	s_log_block_size;	/* Block size */
 	__le32	s_log_cluster_size;	/* Allocation cluster size */
@@ -1114,7 +1135,7 @@ struct ext4_super_block {
 	__le32	s_mkfs_time;		/* When the filesystem was created */
 	__le32	s_jnl_blocks[17];	/* Backup of the journal inode */
 	/* 64bit support valid if EXT4_FEATURE_COMPAT_64BIT */
-/*150*/	__le32	s_blocks_count_hi;	/* Blocks count */
+/*150*/	__le32	s_blocks_count_hi;	/* Blocks count *///与s_blocks_count_lo 组成物理块个数
 	__le32	s_r_blocks_count_hi;	/* Reserved blocks count */
 	__le32	s_free_blocks_count_hi;	/* Free blocks count */
 	__le16	s_min_extra_isize;	/* All inodes have at least # bytes */
@@ -1170,6 +1191,7 @@ struct ext4_super_block {
  */
 struct ext4_sb_info {
 	unsigned long s_desc_size;	/* Size of a group descriptor in bytes */
+    //每个物理块可以容纳的inode数
 	unsigned long s_inodes_per_block;/* Number of inodes per block */
 	unsigned long s_blocks_per_group;/* Number of blocks in a group */
 	unsigned long s_clusters_per_group; /* Number of clusters in a group */
@@ -1177,14 +1199,18 @@ struct ext4_sb_info {
 	unsigned long s_itb_per_group;	/* Number of inode table blocks per group */
 	unsigned long s_gdb_count;	/* Number of group descriptor blocks */
 	unsigned long s_desc_per_block;	/* Number of group descriptors per block */
+    //文件系统块组个数
 	ext4_group_t s_groups_count;	/* Number of groups in the fs */
 	ext4_group_t s_blockfile_groups;/* Groups acceptable for non-extent files */
 	unsigned long s_overhead;  /* # of fs overhead clusters */
 	unsigned int s_cluster_ratio;	/* Number of blocks per cluster */
+    //实际测试是0，应该是一个cluster包含的物理块个数吧
 	unsigned int s_cluster_bits;	/* log2 of s_cluster_ratio */
 	loff_t s_bitmap_maxbytes;	/* max bytes for bitmap files */
 	struct buffer_head * s_sbh;	/* Buffer containing the super block */
+    //指向sb
 	struct ext4_super_block *s_es;	/* Pointer to the super block in the buffer */
+    //保存块组描述符，见ext4_get_group_desc()
 	struct buffer_head **s_group_desc;
 	unsigned int s_mount_opt;
 	unsigned int s_mount_opt2;
@@ -1201,14 +1227,17 @@ struct ext4_sb_info {
 	int s_inode_size;
 	int s_first_ino;
 	unsigned int s_inode_readahead_blks;
-	unsigned int s_inode_goal;
+	unsigned int s_inode_goal;//默认是0
 	spinlock_t s_next_gen_lock;
 	u32 s_next_generation;
 	u32 s_hash_seed[4];
 	int s_def_hash_version;
 	int s_hash_unsigned;	/* 3 if hash should be signed, 0 if not */
+    //ext4总的空闲物理块数个数，ext4_mb_mark_diskspace_used->ext4_free_group_clusters_set()中设置
 	struct percpu_counter s_freeclusters_counter;
+    //空闲的inode数，__ext4_new_inode()中减1
 	struct percpu_counter s_freeinodes_counter;
+    //空闲的目录inode，__ext4_new_inode()中减1
 	struct percpu_counter s_dirs_counter;
 	struct percpu_counter s_dirtyclusters_counter;
 	struct blockgroup_lock *s_blockgroup_lock;
@@ -1293,7 +1322,7 @@ struct ext4_sb_info {
 	/* the size of zero-out chunk */
 	unsigned int s_extent_max_zeroout_kb;
 
-	unsigned int s_log_groups_per_flex;
+	unsigned int s_log_groups_per_flex;// 4
 	struct flex_groups *s_flex_groups;
 	ext4_group_t s_flex_groups_allocated;
 
@@ -1603,11 +1632,12 @@ struct ext4_dir_entry {
  * bigger than 255 chars, it's safe to reclaim the extra byte for the
  * file_type field.
  */
-//父目录下的子文件或子目录信息，用ext4_dir_entry_2表示
+//每个目录下 子目录和子文件 都对应一个ext4_dir_entry_2结构，保存了子文件或子目录
+//的inode编号、名字、名字长度等关键信息
 struct ext4_dir_entry_2 {
     ////父目录下的子文件或子目录inode号
 	__le32	inode;			/* Inode number */
-    //ext4_insert_dentry()中赋值
+    //ext4_insert_dentry()中赋值，一个ext4_dir_entry_2结构占的字节数吧
 	__le16	rec_len;		/* Directory entry length */
 	__u8	name_len;		/* Name length */
 	__u8	file_type;
@@ -1701,7 +1731,7 @@ static inline __le16 ext4_rec_len_to_disk(unsigned len, unsigned blocksize)
  * Hash Tree Directory indexing
  * (c) Daniel Phillips, 2001
  */
-
+//测试没成立
 #define is_dx(dir) (EXT4_HAS_COMPAT_FEATURE(dir->i_sb, \
 				      EXT4_FEATURE_COMPAT_DIR_INDEX) && \
 		    ext4_test_inode_flag((dir), EXT4_INODE_INDEX))
@@ -1766,8 +1796,10 @@ struct dx_hash_info
  */
 struct ext4_iloc//赋值在__ext4_get_inode_loc
 {
-	struct buffer_head *bh;//inode元数据所在的物理块的bh
-	unsigned long offset;
+    //inode结构所在的物理块的bh，这个物理块是inode table里的一个物理块，保存的是一个个inode结构，__ext4_get_inode_loc()赋值
+	struct buffer_head *bh;
+	unsigned long offset;//根据inode号在块组内的偏移计算该inode在inode table的偏移,也是__ext4_get_inode_loc()中赋值
+    //inode所属块组号 ext4_mark_inode_dirty->ext4_reserve_inode_write->ext4_get_inode_loc->__ext4_get_inode_loc()赋值
 	ext4_group_t block_group;
 };
 
@@ -1793,9 +1825,11 @@ struct dir_private_info {
 };
 
 /* calculate the first block number of the group */
+//得到group_no这个块组第一个物理块号，就是该块组的起始物理块号
 static inline ext4_fsblk_t
 ext4_group_first_block_no(struct super_block *sb, ext4_group_t group_no)
 {
+    //group_no(group_no块组第一个物理块号) = 块组(或者flex group块组)号 * 每个块组个block个数 + 第一个块组(或者flex group块组)的第一个物理块号
 	return group_no * (ext4_fsblk_t)EXT4_BLOCKS_PER_GROUP(sb) +
 		le32_to_cpu(EXT4_SB(sb)->s_es->s_first_data_block);
 }
@@ -2273,7 +2307,7 @@ static inline int ext4_has_group_desc_csum(struct super_block *sb)
 					  EXT4_FEATURE_RO_COMPAT_GDT_CSUM) ||
 	       (EXT4_SB(sb)->s_chksum_driver != NULL);
 }
-
+//总block个数
 static inline ext4_fsblk_t ext4_blocks_count(struct ext4_super_block *es)
 {
 	return ((ext4_fsblk_t)le32_to_cpu(es->s_blocks_count_hi) << 32) |
@@ -2285,7 +2319,7 @@ static inline ext4_fsblk_t ext4_r_blocks_count(struct ext4_super_block *es)
 	return ((ext4_fsblk_t)le32_to_cpu(es->s_r_blocks_count_hi) << 32) |
 		le32_to_cpu(es->s_r_blocks_count_lo);
 }
-
+//空闲block个数
 static inline ext4_fsblk_t ext4_free_blocks_count(struct ext4_super_block *es)
 {
 	return ((ext4_fsblk_t)le32_to_cpu(es->s_free_blocks_count_hi) << 32) |
@@ -2352,13 +2386,13 @@ static inline ext4_group_t ext4_get_groups_count(struct super_block *sb)
 	smp_rmb();
 	return ngroups;
 }
-
+//由 块组号除以16 得到flex group块组号
 static inline ext4_group_t ext4_flex_group(struct ext4_sb_info *sbi,
 					     ext4_group_t block_group)
 {
 	return block_group >> sbi->s_log_groups_per_flex;
 }
-
+//一个flex group块组包含的实际块组个数，实际测试是16
 static inline unsigned int ext4_flex_bg_size(struct ext4_sb_info *sbi)
 {
 	return 1 << sbi->s_log_groups_per_flex;

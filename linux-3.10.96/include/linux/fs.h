@@ -568,7 +568,7 @@ struct inode {
 #endif
 
 	/* Stat data, not accessed from path walking */
-    //inode的编号
+    //inode的编号，__ext4_new_inode()中计算
 	unsigned long		i_ino;
 	/*
 	 * Filesystems may only read i_nlink directly.  They shall use the

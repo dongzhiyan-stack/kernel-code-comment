@@ -193,15 +193,16 @@ ext4_fsblk_t ext4_block_bitmap(struct super_block *sb,
 		(EXT4_DESC_SIZE(sb) >= EXT4_MIN_DESC_SIZE_64BIT ?
 		 (ext4_fsblk_t)le32_to_cpu(bg->bg_block_bitmap_hi) << 32 : 0);
 }
-
+//该函数只是返回bg这个块组的inode bitmap的物理块号
 ext4_fsblk_t ext4_inode_bitmap(struct super_block *sb,
 			       struct ext4_group_desc *bg)
 {
+    //由bg->bg_inode_bitmap_lo和bg->bg_inode_bitmap_hi组成高低位
 	return le32_to_cpu(bg->bg_inode_bitmap_lo) |
 		(EXT4_DESC_SIZE(sb) >= EXT4_MIN_DESC_SIZE_64BIT ?
 		 (ext4_fsblk_t)le32_to_cpu(bg->bg_inode_bitmap_hi) << 32 : 0);
 }
-
+//由bg_inode_table_lo和bg_inode_table_hi组合得到 bg这个块组的inode table的起始物理块号
 ext4_fsblk_t ext4_inode_table(struct super_block *sb,
 			      struct ext4_group_desc *bg)
 {
@@ -209,7 +210,7 @@ ext4_fsblk_t ext4_inode_table(struct super_block *sb,
 		(EXT4_DESC_SIZE(sb) >= EXT4_MIN_DESC_SIZE_64BIT ?
 		 (ext4_fsblk_t)le32_to_cpu(bg->bg_inode_table_hi) << 32 : 0);
 }
-
+//就是块组bg的空闲物理块个数
 __u32 ext4_free_group_clusters(struct super_block *sb,
 			       struct ext4_group_desc *bg)
 {
@@ -217,10 +218,10 @@ __u32 ext4_free_group_clusters(struct super_block *sb,
 		(EXT4_DESC_SIZE(sb) >= EXT4_MIN_DESC_SIZE_64BIT ?
 		 (__u32)le16_to_cpu(bg->bg_free_blocks_count_hi) << 16 : 0);
 }
-
+//得到块组的空闲inode个数
 __u32 ext4_free_inodes_count(struct super_block *sb,
 			      struct ext4_group_desc *bg)
-{
+{   //由bg->bg_free_inodes_count_lo 和 bg->bg_free_inodes_count_hi 组成
 	return le16_to_cpu(bg->bg_free_inodes_count_lo) |
 		(EXT4_DESC_SIZE(sb) >= EXT4_MIN_DESC_SIZE_64BIT ?
 		 (__u32)le16_to_cpu(bg->bg_free_inodes_count_hi) << 16 : 0);
@@ -277,11 +278,12 @@ void ext4_free_group_clusters_set(struct super_block *sb,
 void ext4_free_inodes_set(struct super_block *sb,
 			  struct ext4_group_desc *bg, __u32 count)
 {
+    //设置块组最新的空闲inode个数。设置到 bg->bg_free_inodes_count_lo 和 bg->bg_free_inodes_count_hi
 	bg->bg_free_inodes_count_lo = cpu_to_le16((__u16)count);
 	if (EXT4_DESC_SIZE(sb) >= EXT4_MIN_DESC_SIZE_64BIT)
 		bg->bg_free_inodes_count_hi = cpu_to_le16(count >> 16);
 }
-
+//设置块组已分配的目录inode个数
 void ext4_used_dirs_set(struct super_block *sb,
 			  struct ext4_group_desc *bg, __u32 count)
 {
@@ -843,6 +845,7 @@ static struct kmem_cache *ext4_inode_cachep;
 /*
  * Called inside transaction, so use GFP_NOFS
  */
+//分配ext4_inode_info结构并返回它的成员struct inode vfs_inode的地址
 static struct inode *ext4_alloc_inode(struct super_block *sb)
 {
 	struct ext4_inode_info *ei;

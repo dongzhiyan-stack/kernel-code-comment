@@ -2826,6 +2826,9 @@ void ext4_exit_mballoc(void)
  * Check quota and mark chosen space (ac->ac_b_ex) non-free in bitmaps
  * Returns 0 if success or error code
  */
+//执行到该函数，ac->ac_f_ex.fe_group是本次分配的物理块所在块组号，ac->ac_f_ex.fe_start是在ac->ac_f_ex.fe_group块组
+//分配ac->ac_g_ex.fe_len个空闲物理块的起始物理块号。这里是令ext4总的空闲block个数和块组空闲的物理块个数减少ac->ac_b_ex.fe_len个，
+//因为从ac->ac_b_ex.fe_group块组分配了ac->ac_b_ex.fe_len个物理块，则标记该块组的data block bitmap的对应bit位1，表示这些物理块已分配       
 static noinline_for_stack int
 ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 				handle_t *handle, unsigned int reserv_clstrs)
@@ -2845,6 +2848,7 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 	sbi = EXT4_SB(sb);
 
 	err = -EIO;
+    //读取ac->ac_b_ex.fe_group块组的data block bitmap，就是ext4文件系统块组的data block区的bitmap
 	bitmap_bh = ext4_read_block_bitmap(sb, ac->ac_b_ex.fe_group);
 	if (!bitmap_bh)
 		goto out_err;
@@ -2854,6 +2858,7 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 		goto out_err;
 
 	err = -EIO;
+    //得到ac->ac_b_ex.fe_group的块组描述符赋于gdp
 	gdp = ext4_get_group_desc(sb, ac->ac_b_ex.fe_group, &gdp_bh);
 	if (!gdp)
 		goto out_err;
@@ -2895,6 +2900,8 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 		}
 	}
 #endif
+    //本次是在ac->ac_f_ex.fe_group块组分配ac->ac_g_ex.fe_len个空闲物理块的起始物理块号，ac->ac_f_ex.fe_start是个起始物理块号。
+    //因此这是在ext4文件系统块组的data block区的bitmap对应位置的bit位置1，表示这些data block区的物理块被分配了
 	ext4_set_bits(bitmap_bh->b_data, ac->ac_b_ex.fe_start,
 		      ac->ac_b_ex.fe_len);
 	if (gdp->bg_flags & cpu_to_le16(EXT4_BG_BLOCK_UNINIT)) {
@@ -2904,11 +2911,13 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 						ac->ac_b_ex.fe_group, gdp));
 	}
 	len = ext4_free_group_clusters(sb, gdp) - ac->ac_b_ex.fe_len;
+    //块组空闲的物理块个数减少ac->ac_b_ex.fe_len
 	ext4_free_group_clusters_set(sb, gdp, len);
 	ext4_block_bitmap_csum_set(sb, ac->ac_b_ex.fe_group, gdp, bitmap_bh);
 	ext4_group_desc_csum_set(sb, ac->ac_b_ex.fe_group, gdp);
 
 	ext4_unlock_group(sb, ac->ac_b_ex.fe_group);
+    //ext4总的空闲物理块个数减少ac->ac_b_ex.fe_len个
 	percpu_counter_sub(&sbi->s_freeclusters_counter, ac->ac_b_ex.fe_len);
 	/*
 	 * Now reduce the dirty block count also. Should not go negative
@@ -2924,10 +2933,11 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 		atomic64_sub(ac->ac_b_ex.fe_len,
 			     &sbi->s_flex_groups[flex_group].free_clusters);
 	}
-
+    //标记data block bitmap所在物理块bh脏
 	err = ext4_handle_dirty_metadata(handle, NULL, bitmap_bh);
 	if (err)
 		goto out_err;
+    //标记块组描述符所在物理块bh脏
 	err = ext4_handle_dirty_metadata(handle, NULL, gdp_bh);
 
 out_err:
@@ -2959,6 +2969,9 @@ static void ext4_mb_normalize_group_request(struct ext4_allocation_context *ac)
  * Normalization means making request better in terms of
  * size and alignment
  */
+//主要是依照ar->goal这个 分配物理块时的基准物理块号，计算出本次要分配的物理块所在的ac->ac_f_ex.fe_group和
+//并计算它所在ac->ac_f_ex.fe_group块组的物理块号赋于ac->ac_f_ex.fe_start。注意，ac->ac_f_ex.fe_start就是本次在
+//ac->ac_f_ex.fe_group块组找到的起始空闲物理块号，并且连续分配了ac->ac_g_ex.fe_len个空闲物理块号
 static noinline_for_stack void
 ext4_mb_normalize_request(struct ext4_allocation_context *ac,
 				struct ext4_allocation_request *ar)
@@ -2969,6 +2982,7 @@ ext4_mb_normalize_request(struct ext4_allocation_context *ac,
 	loff_t size, start_off;
 	loff_t orig_size __maybe_unused;
 	ext4_lblk_t start;
+    //本次分配物理块的inode
 	struct ext4_inode_info *ei = EXT4_I(ac->ac_inode);
 	struct ext4_prealloc_space *pa;
 
@@ -3130,6 +3144,7 @@ ext4_mb_normalize_request(struct ext4_allocation_context *ac,
 	/* define goal start in order to merge */
 	if (ar->pright && (ar->lright == (start + size))) {
 		/* merge to the right */
+        //根据传入的物理块号ar->pright - size得到它所在的快组号并赋予ac->ac_f_ex.fe_group，得到它所在块组group的偏移物理块号赋于ac->ac_f_ex.fe_start
 		ext4_get_group_no_and_offset(ac->ac_sb, ar->pright - size,
 						&ac->ac_f_ex.fe_group,
 						&ac->ac_f_ex.fe_start);
@@ -3137,6 +3152,7 @@ ext4_mb_normalize_request(struct ext4_allocation_context *ac,
 	}
 	if (ar->pleft && (ar->lleft + 1 == start)) {
 		/* merge to the left */
+        //根据传入的物理块号ar->pleft + 1得到它所在的快组号并赋予ac->ac_f_ex.fe_group，得到它所在块组group的偏移物理块号赋于ac->ac_f_ex.fe_start
 		ext4_get_group_no_and_offset(ac->ac_sb, ar->pleft + 1,
 						&ac->ac_f_ex.fe_group,
 						&ac->ac_f_ex.fe_start);
@@ -4103,7 +4119,7 @@ static void ext4_mb_group_or_file(struct ext4_allocation_context *ac)
 	/* serialize all allocations in the group */
 	mutex_lock(&ac->ac_lg->lg_mutex);
 }
-
+//计算 ac->ac_b_ex.fe_logical、ac->ac_inode、ac->ac_o_ex.fe_logical、ac->ac_o_ex.fe_group、ac->ac_o_ex.fe_start、ac->ac_o_ex.fe_len 初值
 static noinline_for_stack int
 ext4_mb_initialize_context(struct ext4_allocation_context *ac,
 				struct ext4_allocation_request *ar)
@@ -4124,19 +4140,22 @@ ext4_mb_initialize_context(struct ext4_allocation_context *ac,
 		len = EXT4_CLUSTERS_PER_GROUP(sb);
 
 	/* start searching from the goal */
+    //实际分配物理块正是以ar->goal为基准尝试分配物理块
 	goal = ar->goal;
 	if (goal < le32_to_cpu(es->s_first_data_block) ||
 			goal >= ext4_blocks_count(es))
 		goal = le32_to_cpu(es->s_first_data_block);
+    //根据传入的物理块号goal得到它所在的快组号并赋予group，得到它所在块组group的偏移物理块号赋于block
 	ext4_get_group_no_and_offset(sb, goal, &group, &block);
 
 	/* set up allocation goals */
+    //ext4_ext_map_blocks()中赋值map->m_lblk，就是起始逻辑块号
 	ac->ac_b_ex.fe_logical = EXT4_LBLK_CMASK(sbi, ar->logical);
 	ac->ac_status = AC_STATUS_CONTINUE;
 	ac->ac_sb = sb;
-	ac->ac_inode = ar->inode;
+	ac->ac_inode = ar->inode;//文件inode
 	ac->ac_o_ex.fe_logical = ac->ac_b_ex.fe_logical;
-	ac->ac_o_ex.fe_group = group;
+	ac->ac_o_ex.fe_group = group;//块组号
 	ac->ac_o_ex.fe_start = block;
 	ac->ac_o_ex.fe_len = len;
 	ac->ac_g_ex = ac->ac_o_ex;
@@ -4421,7 +4440,7 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 		*errp = -ENOMEM;
 		goto out;
 	}
-
+    //计算 ac->ac_b_ex.fe_logical、ac->ac_inode、ac->ac_o_ex.fe_logical、ac->ac_o_ex.fe_group、ac->ac_o_ex.fe_start、ac->ac_o_ex.fe_len 初值
 	*errp = ext4_mb_initialize_context(ac, ar);
 	if (*errp) {
 		ar->len = 0;
@@ -4429,9 +4448,12 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 	}
 
 	ac->ac_op = EXT4_MB_HISTORY_PREALLOC;
-	if (!ext4_mb_use_preallocated(ac)) {
+	if (!ext4_mb_use_preallocated(ac)) {//先使用之前预分配的物理块
 		ac->ac_op = EXT4_MB_HISTORY_ALLOC;
-		ext4_mb_normalize_request(ac, ar);
+        //主要是依照ar->goal这个 分配物理块时的基准物理块号，计算出本次要分配的物理块所在的ac->ac_f_ex.fe_group和
+        //计算它所在ac->ac_f_ex.fe_group块组的物理块号赋于ac->ac_f_ex.fe_start。注意，ac->ac_f_ex.fe_start就是本次在
+        //ac->ac_f_ex.fe_group块组找到的起始空闲物理块号，并且是在这个基础上连续分配了ac->ac_g_ex.fe_len个空闲物理块号
+		ext4_mb_normalize_request(ac, ar);//分配失败则在这里正常分配物理块
 repeat:
 		/* allocate space in core */
 		*errp = ext4_mb_regular_allocator(ac);
@@ -4448,6 +4470,9 @@ repeat:
 			ext4_mb_new_preallocation(ac);
 	}
 	if (likely(ac->ac_status == AC_STATUS_FOUND)) {
+       //执行到该函数，ac->ac_f_ex.fe_group是本次分配的物理块所在块组号，ac->ac_f_ex.fe_start是在ac->ac_f_ex.fe_group块组
+       //分配ac->ac_g_ex.fe_len个空闲物理块的起始物理块号。这里是令ext4总的空闲block个数和块组空闲的物理块个数减少ac->ac_b_ex.fe_len个，
+       //因为从ac->ac_b_ex.fe_group块组分配了ac->ac_b_ex.fe_len个物理块，则标记该块组的data block bitmap的对应bit位1，表示这些物理块已分配       
 		*errp = ext4_mb_mark_diskspace_used(ac, handle, reserv_clstrs);
 		if (*errp == -EAGAIN) {
 			/*
@@ -4495,7 +4520,7 @@ out:
 	}
 
 	trace_ext4_allocate_blocks(ar, (unsigned long long)block);
-
+    //返回起始物理块
 	return block;
 }
 

@@ -223,7 +223,7 @@ static ext4_fsblk_t ext4_ext_find_goal(struct inode *inode,
 	}
 
 	/* OK. use inode's group */
-    //从inode group分配一个物理块
+    //要为文件inode分配保存数据的物理块了，该函数是从inode所属块组先找一个理想的空闲物理块，后续从这个物理块开始搜索，最终查找本次要分配的物理块
 	return ext4_inode_to_goal_block(inode);
 }
 
@@ -4768,6 +4768,7 @@ static int get_implied_cluster_alloc(struct super_block *sb,
  *
  * return < 0, error case.
  */
+//根据传入的文件或目录inode的逻辑地址map->m_lblk从ext4文件系统的data block区分配map->m_len个物理块，并与逻辑地址map->m_lblk构成映射，并把映射关系保存到ext4 extent结构
 int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 			struct ext4_map_blocks *map, int flags)
 {
@@ -4946,9 +4947,14 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 	else
 		allocated = map->m_len;
 
+    /*注意，执行到这里说明没有从ext4 extent找到本次逻辑地址map->m_lblk映射的物理块，于是就要从ext4文件系统分配map->m_len个物理块，
+    然后与逻辑地址map->m_lblk构成映射。ext4_ext_find_goal()是先找一个目标物理块号ar.goal，然后执行ext4_mb_new_blocks():
+    以ar.goal为基准，搜索分配map->m_len个物理块。最后，再构成与逻辑地址map->m_lblk的映射*/
+    
 	/* allocate new block */
 	ar.inode = inode;
-    //找到map->m_lblk映射的目标起始物理块地址并返回给ar.goal
+    //要为文件inode分配保存数据的物理块了，该函数是从inode所属块组先找一个理想的空闲物理块，后续从这个物理块开始搜索
+    //，最终查找本次要分配的物理块。简单说，找到map->m_lblk逻辑块地址映射的目标 起始物理块地址并返回给ar.goal
 	ar.goal = ext4_ext_find_goal(inode, path, map->m_lblk);
     //ar.logical是逻辑块地址
 	ar.logical = map->m_lblk;
@@ -4973,7 +4979,7 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 		ar.flags = 0;
 	if (flags & EXT4_GET_BLOCKS_NO_NORMALIZE)
 		ar.flags |= EXT4_MB_HINT_NOPREALLOC;
-    //分配map->m_len个物理块，这就是newex逻辑块地址映射的map->m_len个物理块，返回这map->m_len个物理块的起始物理块号newblock。
+    /*分配map->m_len个物理块，这就是map->m_lblk逻辑块地址映射的map->m_len个物理块，返回这map->m_len个物理块的起始物理块号newblock。*/
     //测试结果 newblock 和 ar.goal有时相等，有时不相等。本次映射的起始逻辑块地址是map->m_lblk，映射物理块个数map->m_len，ext4_mb_new_blocks()
     //除了要找到newblock这个起始逻辑块地址，还得保证找到newblock打头的连续map->m_len个物理块，必须是连续的，这才是更重要的。
 	newblock = ext4_mb_new_blocks(handle, &ar, &err);

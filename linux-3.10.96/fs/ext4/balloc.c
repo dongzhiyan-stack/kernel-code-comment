@@ -50,19 +50,22 @@ ext4_group_t ext4_get_group_number(struct super_block *sb,
  * Calculate the block group number and offset into the block/cluster
  * allocation bitmap, given a block number
  */
-void ext4_get_group_no_and_offset(struct super_block *sb, ext4_fsblk_t blocknr,
+//根据传入的物理块号blocknr得到它所在的快组号并赋予blockgrpp，得到它所在块组blockgrpp的偏移赋于offsetp
+void ext4_get_group_no_and_offset(struct super_block *sb, ext4_fsblk_t blocknr,//blocknr是分配物理块时的基准物理块号
 		ext4_group_t *blockgrpp, ext4_grpblk_t *offsetp)
 {
 	struct ext4_super_block *es = EXT4_SB(sb)->s_es;
 	ext4_grpblk_t offset;
-
+    //blocknr最初来自ar->goal，是分配物理块时的基准物理块号，减去s_first_data_block得到的是相对ext4文件系统第一个物理块号
+    //的相对物理块号。但s_first_data_block是0
 	blocknr = blocknr - le32_to_cpu(es->s_first_data_block);
+    //blocknr除以每个块组的物理块个数，除数赋于blocknr则blocknr是该文件inode所属块组号，余数赋于offset则offset是在块组内的偏移
 	offset = do_div(blocknr, EXT4_BLOCKS_PER_GROUP(sb)) >>
-		EXT4_SB(sb)->s_cluster_bits;
+		EXT4_SB(sb)->s_cluster_bits;//s_cluster_bits是0
 	if (offsetp)
-		*offsetp = offset;
+		*offsetp = offset;//在块组内的偏移
 	if (blockgrpp)
-		*blockgrpp = blocknr;
+		*blockgrpp = blocknr;//所在的块组号
 
 }
 
@@ -265,6 +268,7 @@ unsigned ext4_free_clusters_after_init(struct super_block *sb,
  * @bh:			pointer to the buffer head to store the block
  *			group descriptor
  */
+//由块组编号block_group得到块组描述符结构ext4_group_desc，并且令group_desc_bh指向保存块组描述符数据的物理块映射的bh
 struct ext4_group_desc * ext4_get_group_desc(struct super_block *sb,
 					     ext4_group_t block_group,
 					     struct buffer_head **bh)
@@ -281,7 +285,15 @@ struct ext4_group_desc * ext4_get_group_desc(struct super_block *sb,
 
 		return NULL;
 	}
-
+    /*ext4文件系统的组成是 超级块(1个block)+块组描述符(N个block)+Data Block Bitmap(1个block)
+    + inode Bitmap(1个block)+inode table(N个block)+ data block(N个block)。ext4一个物理block
+    大小4k，一个块组描述符ext4_group_desc结构64B，一个block可以容纳64个块组描述符。
+    group_desc = block_group >> EXT4_DESC_PER_BLOCK_BITS(sb)就是group_desc=block_group/64，
+    计算当前的块组号block_group落在第几个物理块(即第group_desc个物理块)，
+    offset = block_group & (EXT4_DESC_PER_BLOCK(sb) - 1)是计算当前的块组号block_group
+    对应的块组描述符在第group_desc个物理块的偏移，准确说是group_desc物理块里的第offset个
+    块组描述符。说着比较抽象，举个例子，一个2个物理块，2*64个块组，那块组号65的块组描述符在哪里?
+    group_desc=65/64=1说明在第2个物理块，offset=65%64=1说明在第2个物理块的第一个块组描述符哪里*/
 	group_desc = block_group >> EXT4_DESC_PER_BLOCK_BITS(sb);
 	offset = block_group & (EXT4_DESC_PER_BLOCK(sb) - 1);
 	if (!sbi->s_group_desc[group_desc]) {
@@ -290,11 +302,12 @@ struct ext4_group_desc * ext4_get_group_desc(struct super_block *sb,
 			   block_group, group_desc, offset);
 		return NULL;
 	}
-
+    //sbi->s_group_desc[group_desc]->b_data保存的数据是目标块组block_group这个块组所在物理块的4K数据，都是块组描述符结构。
+    //offset*EXT4_DESC_SIZE(sb)是目标块组block_group的64字节块组描述符数据在这个物理块4K数据中的的偏移。最终得到block_group这个块组的块组描述符结构
 	desc = (struct ext4_group_desc *)(
 		(__u8 *)sbi->s_group_desc[group_desc]->b_data +
 		offset * EXT4_DESC_SIZE(sb));
-	if (bh)
+	if (bh)//bh指向保存块组描述符数据的buffer_head
 		*bh = sbi->s_group_desc[group_desc];
 	return desc;
 }
@@ -795,15 +808,17 @@ static unsigned ext4_num_base_meta_clusters(struct super_block *sb,
  *	Return the ideal location to start allocating blocks for a
  *	newly created inode.
  */
+//要为文件inode分配保存数据的物理块了，该函数是从inode所属块组先找一个理想的空闲物理块，后续从这个物理块开始搜索，最终查找本次要分配的物理块
 ext4_fsblk_t ext4_inode_to_goal_block(struct inode *inode)
 {
 	struct ext4_inode_info *ei = EXT4_I(inode);
 	ext4_group_t block_group;
 	ext4_grpblk_t colour;
+    //实际测试flex 是16
 	int flex_size = ext4_flex_bg_size(EXT4_SB(inode->i_sb));
 	ext4_fsblk_t bg_start;
 	ext4_fsblk_t last_block;
-
+    //取出inode所属块组号 block_group
 	block_group = ei->i_block_group;
 	if (flex_size >= EXT4_FLEX_SIZE_DIR_ALLOC_SCHEME) {
 		/*
@@ -814,10 +829,12 @@ ext4_fsblk_t ext4_inode_to_goal_block(struct inode *inode)
 		 * tends to speed up directory access and improves
 		 * fsck times.
 		 */
+		//这是令block_group除以16，得到flex group的编号，一个flex group有16个块组
 		block_group &= ~(flex_size-1);
 		if (S_ISREG(inode->i_mode))
 			block_group++;
 	}
+    //bg_start:得到block_group这个块组第一个物理块号，就是该块组的起始物理块号
 	bg_start = ext4_group_first_block_no(inode->i_sb, block_group);
 	last_block = ext4_blocks_count(EXT4_SB(inode->i_sb)->s_es) - 1;
 
@@ -827,12 +844,14 @@ ext4_fsblk_t ext4_inode_to_goal_block(struct inode *inode)
 	 */
 	if (test_opt(inode->i_sb, DELALLOC))
 		return bg_start;
-
+    //根据进程ID计算一个偏移值
 	if (bg_start + EXT4_BLOCKS_PER_GROUP(inode->i_sb) <= last_block)
 		colour = (current->pid % 16) *
 			(EXT4_BLOCKS_PER_GROUP(inode->i_sb) / 16);
 	else
 		colour = (current->pid % 16) * ((last_block - bg_start) / 16);
+    
+    //bg_start+偏移值colour得到理想的要分配的物理块号
 	return bg_start + colour;
 }
 

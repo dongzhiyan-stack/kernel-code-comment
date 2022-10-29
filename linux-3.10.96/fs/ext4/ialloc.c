@@ -111,18 +111,22 @@ void ext4_end_bitmap_read(struct buffer_head *bh, int uptodate)
  *
  * Return buffer_head of bitmap on success or NULL.
  */
+//先根据块组号block_group得到块组描述符ext4_group_desc，再由块组描述符得到保存
+//inode bitmap数据的物理块号，最后读取该inode bitmap物理块的数据到bh并返回
 static struct buffer_head *
 ext4_read_inode_bitmap(struct super_block *sb, ext4_group_t block_group)
 {
 	struct ext4_group_desc *desc;
 	struct buffer_head *bh = NULL;
 	ext4_fsblk_t bitmap_blk;
-
+    //根据块组号block_group得到它对应的块组描述符ext4_group_desc
 	desc = ext4_get_group_desc(sb, block_group, NULL);
 	if (!desc)
 		return NULL;
-
+    
+    //该函数只是返回这个块组的inode bitmap的物理块号bitmap_blk，这个物理块保存了inode bitmap的数据
 	bitmap_blk = ext4_inode_bitmap(sb, desc);
+    //根据inode bitmap的物理块号得到映射的bh
 	bh = sb_getblk(sb, bitmap_blk);
 	if (unlikely(!bh)) {
 		ext4_error(sb, "Cannot read inode bitmap - "
@@ -130,6 +134,8 @@ ext4_read_inode_bitmap(struct super_block *sb, ext4_group_t block_group)
 			    block_group, bitmap_blk);
 		return NULL;
 	}
+    //如果inode bitmap物理块的数据已经读取到了映射的bh，直接返回bh。否则下边执行
+    //submit_bh()读取该物理块数据到bh
 	if (bitmap_uptodate(bh))
 		goto verify;
 
@@ -334,6 +340,7 @@ struct orlov_stats {
  * for a particular block group or flex_bg.  If flex_size is 1, then g
  * is a block group number; otherwise it is flex_bg number.
  */
+//得到块组或者flex group块组的空闲inode数、空闲block数、已使用的目录数
 static void get_orlov_stats(struct super_block *sb, ext4_group_t g,
 			    int flex_size, struct orlov_stats *stats)
 {
@@ -341,12 +348,16 @@ static void get_orlov_stats(struct super_block *sb, ext4_group_t g,
 	struct flex_groups *flex_group = EXT4_SB(sb)->s_flex_groups;
 
 	if (flex_size > 1) {
+        //flex group块组空闲inode数
 		stats->free_inodes = atomic_read(&flex_group[g].free_inodes);
+        //flex group块组空闲的cluster数，其实就是空闲block数，一个cluster一个block
 		stats->free_clusters = atomic64_read(&flex_group[g].free_clusters);
+        //flex group块组已使用的目录数
 		stats->used_dirs = atomic_read(&flex_group[g].used_dirs);
 		return;
 	}
 
+    //到这里说明没有使用 flex group块组，则得到g代表的块组的空闲inode数、空闲block数、已使用的目录树
 	desc = ext4_get_group_desc(sb, g, NULL);
 	if (desc) {
 		stats->free_inodes = ext4_free_inodes_count(sb, desc);
@@ -379,14 +390,36 @@ static void get_orlov_stats(struct super_block *sb, ext4_group_t g,
  * of the groups look good we just look for a group with more
  * free inodes than average (starting at parent's group).
  */
+//找一个空闲inode数充裕、空闲block数充裕、已使用的目录很少的块组，把找到的块组号赋值给group
+/*具体细节是
+1:如果父目录是顶层目录或者根目录，则以best_ndir、avefreei、avefreec 为阈值，从0号块组或者
+flex group块组向后一直查找，找到块组已使用目录数、块组空闲inode数、块组空闲block数符合阈值的
+块组。找到后，如果不是flex group块组，直接返回这个块组号。如果是flex group块组，
+则从该flex group块组找一个空闲inode充足的块组。
 
+2:如果父目录不是顶层目录或者根目录，则以max_dirs、min_inodes、min_clusters为阈值，
+从0号块组或者flex group块组向后一直查找，找到块组已使用目录数、块组空闲inode数、块组空闲
+block数符合阈值的块组。找到后，如果不是flex group块组，如果是flex group块组，
+则从该flex group块组找一个空闲inode充足的块组
+
+3:如果按照步骤1和2找不到合适的块组，则从0号块组或者flex group块组向后一直查找，只要块组
+空闲inode数充裕，直接返回该块组号
+
+总结: parent_group 是个关键，它是搜索空闲块组(有空闲inode和block)的基准块组号
+1:是顶层目录或者根目录时，则采用分散形式查找空闲块组，因为此时parent_group = (unsigned)grp % ngroups，parent_group是个随机值
+2:如果不是顶层目录或根目录，才在父目录所属块组附近查找空闲块组，因为此时parent_group = EXT4_I(parent)->i_block_group，就是父目录所属的块组编号
+3:如果最后找不到合适的空闲块组，那就没那么多限制条件了，从0号块组开始遍历，谁有空闲inode就选中谁作为最终的块组
+*/
 static int find_group_orlov(struct super_block *sb, struct inode *parent,
 			    ext4_group_t *group, umode_t mode,
-			    const struct qstr *qstr)
+			    const struct qstr *qstr)//qstr是创建的目录名字
 {
+    //父inode所属的块组编号
 	ext4_group_t parent_group = EXT4_I(parent)->i_block_group;
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
+    //块组个数
 	ext4_group_t real_ngroups = ext4_get_groups_count(sb);
+    //每个块组的最多的inode数
 	int inodes_per_group = EXT4_INODES_PER_GROUP(sb);
 	unsigned int freei, avefreei, grp_free;
 	ext4_fsblk_t freeb, avefreec;
@@ -396,6 +429,7 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent,
 	ext4_group_t i, grp, g, ngroups;
 	struct ext4_group_desc *desc;
 	struct orlov_stats stats;
+    //flex group包含的块组个数，16
 	int flex_size = ext4_flex_bg_size(sbi);
 	struct dx_hash_info hinfo;
 
@@ -405,21 +439,28 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent,
 			sbi->s_log_groups_per_flex;
 		parent_group >>= sbi->s_log_groups_per_flex;
 	}
-
+    //空闲inode数
 	freei = percpu_counter_read_positive(&sbi->s_freeinodes_counter);
+    //平均每个块组的空闲inode数
 	avefreei = freei / ngroups;
+    //空闲block数
 	freeb = EXT4_C2B(sbi,
 		percpu_counter_read_positive(&sbi->s_freeclusters_counter));
 	avefreec = freeb;
+    //avefreec = avefreec/ngroups 平均每个块组空闲block数
 	do_div(avefreec, ngroups);
 	ndirs = percpu_counter_read_positive(&sbi->s_dirs_counter);
 
+    /*这个if成立应该说明父目录是根目录或者顶层目录*/
 	if (S_ISDIR(mode) &&
-	    ((parent == sb->s_root->d_inode) ||
-	     (ext4_test_inode_flag(parent, EXT4_INODE_TOPDIR)))) {
+	    ((parent == sb->s_root->d_inode) ||//父目录是根文件系统根目录
+	     (ext4_test_inode_flag(parent, EXT4_INODE_TOPDIR))))//顶层目录
+    {
+	    //每个块组最多的inode数
 		int best_ndir = inodes_per_group;
 		int ret = -1;
 
+        //下边这是根据各种规则计算一个初始块组号赋于grp
 		if (qstr) {
 			hinfo.hash_version = DX_HASH_HALF_MD4;
 			hinfo.seed = sbi->s_hash_seed;
@@ -427,25 +468,45 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent,
 			grp = hinfo.hash;
 		} else
 			get_random_bytes(&grp, sizeof(grp));
+        //parent_group就是上边的初始块组号grp
 		parent_group = (unsigned)grp % ngroups;
+
+        //从0号块组依次向后查找，看哪个块组有充裕的inode和block
+        /*有个疑问，如果使用flex group块组的情况下，ngroups应该是flex group组个数，
+        一个flex group组有16个真正的块组*/
 		for (i = 0; i < ngroups; i++) {
 			g = (parent_group + i) % ngroups;
+            //得到块组或者flex group块组的空闲inode数、空闲block数、已使用的目录数
 			get_orlov_stats(sb, g, flex_size, &stats);
+            //当前块组(或者flex group块组)，没有空闲inode，跳过
 			if (!stats.free_inodes)
 				continue;
+            //这个成立说明当前块组(或者flex group块组)已使用的目录太多，高于每个块组最大inode数，跳过
 			if (stats.used_dirs >= best_ndir)
 				continue;
+            //这个成立说明当前块组(或者flex group块组)空闲inode太少，低于平均值，跳过
 			if (stats.free_inodes < avefreei)
 				continue;
+            //这个成立说明当前块组(或者flex group块组)空闲block太少，低于平均值，跳过
 			if (stats.free_clusters < avefreec)
 				continue;
+            
+            /*到这里很奇怪，明明已经找到inode、block等充足的块组g，但却没有跳转for循环，而是
+            继续for循环查找下一个inode充足的块组，直到遍历到最后一个块组，搞不清楚*/
 			grp = g;
 			ret = 0;
+            //这里更新best_ndir!!!!!!!!!
 			best_ndir = stats.used_dirs;
 		}
+
+        //如果上边for循环找到inode充足等的块组，则ret是0。否则没有找到inode、block充足等的块组，
+        //ret是-1，直接跳转到fallback分支
 		if (ret)
 			goto fallback;
+        
 	found_flex_bg:
+        
+        //没有使用flex group块组则直接使用grp作为本次找到的块组号
 		if (flex_size == 1) {
 			*group = grp;
 			return 0;
@@ -458,9 +519,14 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent,
 		 * start at 2nd block group of the flexgroup.  See
 		 * ext4_ext_find_goal() and ext4_find_near().
 		 */
-		grp *= flex_size;
+		//到这里说明grp是flex group块组的编号
+        //令grp乘以flex_size(16)，之后grp应该就是真正的块组号，一个flex group组有16个块组
+        grp *= flex_size;
+
+        //这里应该是在选中的flex group组里的16个块组里，找一个空闲inode充足的块组，
+        //然后执行*group = grp+i就return，这就是最终选中的块组
 		for (i = 0; i < flex_size; i++) {
-			if (grp+i >= real_ngroups)
+			if (grp+i >= real_ngroups)//real_ngroups是最大块组树
 				break;
 			desc = ext4_get_group_desc(sb, grp+i, NULL);
 			if (desc && ext4_free_inodes_count(sb, desc)) {
@@ -471,10 +537,15 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent,
 		goto fallback;
 	}
 
+    /*到这里，一般情况是，父目录不是顶层目录或者根目录*/
+    
+    //计算块组最大目录个数上限max_dirs
 	max_dirs = ndirs / ngroups + inodes_per_group / 16;
+    //减少avefreei，块组空闲inode数下限
 	min_inodes = avefreei - inodes_per_group*flex_size / 4;
 	if (min_inodes < 1)
 		min_inodes = 1;
+    //减少avefreec，块组空闲block数下限
 	min_clusters = avefreec - EXT4_CLUSTERS_PER_GROUP(sb)*flex_size / 4;
 
 	/*
@@ -482,32 +553,50 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent,
 	 * inode for this parent directory
 	 */
 	if (EXT4_I(parent)->i_last_alloc_group != ~0) {
+        //取出父目录上一次分配inode所属的块组号给parent_group，作为本次查找块组的基准值
 		parent_group = EXT4_I(parent)->i_last_alloc_group;
 		if (flex_size > 1)
 			parent_group >>= sbi->s_log_groups_per_flex;
 	}
-
+    //从0号块组向后遍历，找到一个inode充足的块组
 	for (i = 0; i < ngroups; i++) {
+        //其实就是父目录所在group加i
 		grp = (parent_group + i) % ngroups;
+        //得到块组或者flex group块组的空闲inode数、空闲block数、已使用的目录数
 		get_orlov_stats(sb, grp, flex_size, &stats);
+        //这个成立说明当前块组(或者flex group块组)已使用的目录太多，高于每个块组最大inode数，跳过
 		if (stats.used_dirs >= max_dirs)
 			continue;
+        //这个成立说明当前块组(或者flex group块组)空闲inode太少，低于平均值，跳过
 		if (stats.free_inodes < min_inodes)
 			continue;
+        //这个成立说明当前块组(或者flex group块组)空闲block太少，低于平均值，跳过
 		if (stats.free_clusters < min_clusters)
 			continue;
+
+        //到这里说明找到一个空闲inode充裕的块组(或者flex group块组)，块组号是grp。
+        //则跳到found_flex_bg分支，如果是flex group组则从该flex group找一个空闲inode充裕的块组
 		goto found_flex_bg;
 	}
 
 fallback:
 	ngroups = real_ngroups;
+    //平均每个块组空闲inode数
 	avefreei = freei / ngroups;
+
+    /*到这里，说明上边按照 "块组或者flex group块组的空闲inode数、空闲block数、已使用的
+    目录数" 的规则，找不到合适的块组。于是下边放松条件，重新找一个空闲inode充裕的块组*/
+    
 fallback_retry:
+    //父目录所属块组号
 	parent_group = EXT4_I(parent)->i_block_group;
+    //从0号块组或者flex group块组向后遍历，找到一个inode充足的块组或者flex group块组
 	for (i = 0; i < ngroups; i++) {
+        //其实就是父目录所在块组号或者flex group块组号加i得到快组号grp
 		grp = (parent_group + i) % ngroups;
 		desc = ext4_get_group_desc(sb, grp, NULL);
 		if (desc) {
+            //如果grp这个块组或者flex group块组空闲inode数大于avefreei(平均每个块组空闲inode数)，那它就是本次选中的块组
 			grp_free = ext4_free_inodes_count(sb, desc);
 			if (grp_free && grp_free >= avefreei) {
 				*group = grp;
@@ -527,10 +616,13 @@ fallback_retry:
 
 	return -1;
 }
-
+//使用flex group时，先在父目录所属flex group的16个块组里找一个有空闲inode的块组，找不到就
+//执行find_group_orlov()找一个有充裕空闲inode和block的flex group块组。不使用flex group时，先看父目录所属块组有没有
+//空闲的inode和block，有就返回父目录的块组号。没有就遍历一个个块组，看哪个块组有空闲的inode。
 static int find_group_other(struct super_block *sb, struct inode *parent,
 			    ext4_group_t *group, umode_t mode)
 {
+    //父目录所在块组
 	ext4_group_t parent_group = EXT4_I(parent)->i_block_group;
 	ext4_group_t i, last, ngroups = ext4_get_groups_count(sb);
 	struct ext4_group_desc *desc;
@@ -543,21 +635,28 @@ static int find_group_other(struct super_block *sb, struct inode *parent,
 	 * parent directory's inode information so that use that flex
 	 * group for future allocations.
 	 */
-	if (flex_size > 1) {
+	if (flex_size > 1)//使用了flex group块组
+    {
 		int retry = 0;
 
 	try_again:
+        //parent_group是父目录，这里计算的parent_group是父目录所属flex group块组里的第一个块组号
 		parent_group &= ~(flex_size-1);
+        //last是parent_group所属flex group块组里最后一个块组号
 		last = parent_group + flex_size;
 		if (last > ngroups)
 			last = ngroups;
+        //从flex group块组里第1个块组搜索到最后1个块组
 		for  (i = parent_group; i < last; i++) {
+            //取出该块组的描述符
 			desc = ext4_get_group_desc(sb, i, NULL);
+            //该块组有空闲的inode，那它就是选中的块组
 			if (desc && ext4_free_inodes_count(sb, desc)) {
 				*group = i;
 				return 0;
 			}
 		}
+        //这里是取出父目录分配inode所属块组号i_last_alloc_group，再尝试一次
 		if (!retry && EXT4_I(parent)->i_last_alloc_group != ~0) {
 			retry = 1;
 			parent_group = EXT4_I(parent)->i_last_alloc_group;
@@ -568,15 +667,23 @@ static int find_group_other(struct super_block *sb, struct inode *parent,
 		 * to find a new flex group; we pass in the mode to
 		 * avoid the topdir algorithms.
 		 */
+		 
+		/*到这里说明在父目录所属flex group中的所16个块组，都没有空闲inode，于是下边执行
+        find_group_orlov()再找一个合适的flex group块组*/
 		*group = parent_group + flex_size;
 		if (*group > ngroups)
 			*group = 0;
+        
+        //找一个空闲inode数充裕、空闲block数充裕、已使用的目录很少的flex group块组，把找到的flex group块组号赋值给group
 		return find_group_orlov(sb, parent, group, mode, NULL);
 	}
 
+    /*执行到这里，说明没有使用flex group*/
+    
 	/*
 	 * Try to place the inode in its parent directory
 	 */
+	//如果父目录所属块组有空闲inode和block，那这个块组就是本次选中的块组
 	*group = parent_group;
 	desc = ext4_get_group_desc(sb, *group, NULL);
 	if (desc && ext4_free_inodes_count(sb, desc) &&
@@ -592,17 +699,25 @@ static int find_group_other(struct super_block *sb, struct inode *parent,
 	 *
 	 * So add our directory's i_ino into the starting point for the hash.
 	 */
+
+    /*执行到这里，说明没有使用flex group，并且父目录所属块组没有空闲的inode和block*/
+
+    //这里计算后group应该是父目录所在块组的下一个块组号
 	*group = (*group + parent->i_ino) % ngroups;
 
 	/*
 	 * Use a quadratic hash to find a group with a free inode and some free
 	 * blocks.
 	 */
-	for (i = 1; i < ngroups; i <<= 1) {
+	//从group对应的块组一直向后搜索
+	for (i = 1; i < ngroups; i <<= 1) {//搞不清楚i <<= 1 是什么意思???????
+	    //group块组号每次增加1、2、4、8、16.......
 		*group += i;
 		if (*group >= ngroups)
 			*group -= ngroups;
+
 		desc = ext4_get_group_desc(sb, *group, NULL);
+        //新找到的块组group有空闲的inode和block，那它就是要找到的块组
 		if (desc && ext4_free_inodes_count(sb, desc) &&
 		    ext4_free_group_clusters(sb, desc))
 			return 0;
@@ -612,11 +727,16 @@ static int find_group_other(struct super_block *sb, struct inode *parent,
 	 * That failed: try linear search for a free inode, even if that group
 	 * has no free blocks.
 	 */
+
+    /*执行到这里，还没找到合适的块组，于是下边放宽查找块组的限制条件*/
 	*group = parent_group;
+
 	for (i = 0; i < ngroups; i++) {
+        //group块组号每次只增加1
 		if (++*group >= ngroups)
 			*group = 0;
 		desc = ext4_get_group_desc(sb, *group, NULL);
+        //新找到的块组group有空闲的inode，那它就是要找到的块组，这里不再看是否有空闲block限制
 		if (desc && ext4_free_inodes_count(sb, desc))
 			return 0;
 	}
@@ -636,8 +756,8 @@ static int find_group_other(struct super_block *sb, struct inode *parent,
  */
 //找到一个合适的块组，从这个块组分配一个空闲inode
 struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
-			       umode_t mode, const struct qstr *qstr,
-			       __u32 goal, uid_t *owner, int handle_type,
+			       umode_t mode, const struct qstr *qstr,//qstr是待创建的目录或文件名字
+			       __u32 goal, uid_t *owner, int handle_type,//创建目录和文件时goal都是0
 			       unsigned int line_no, int nblocks)
 {
 	struct super_block *sb;
@@ -659,14 +779,16 @@ struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
 		return ERR_PTR(-EPERM);
 
 	sb = dir->i_sb;
-    //块组数
+    //总块组个数
 	ngroups = ext4_get_groups_count(sb);
 	trace_ext4_request_inode(dir, mode);
-    //先分配一个inode结构
+    //分配ext4_inode_info结构并返回它的成员struct inode vfs_inode的地址
 	inode = new_inode(sb);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
+    //由inode得到ext4_inode_info
 	ei = EXT4_I(inode);
+    //由sb得到ext4_sb_info
 	sbi = EXT4_SB(sb);
 
 	/*
@@ -686,24 +808,25 @@ struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
 		inode_init_owner(inode, dir, mode);
 	dquot_initialize(inode);
 
-	if (!goal)//
-		goal = sbi->s_inode_goal;
+	if (!goal)//创建目录和文件时goal都是0
+		goal = sbi->s_inode_goal;//sbi->s_inode_goal是0
 
-	if (goal && goal <= le32_to_cpu(sbi->s_es->s_inodes_count)) {//不成立
+	if (goal && goal <= le32_to_cpu(sbi->s_es->s_inodes_count)) {//if不成立
 		group = (goal - 1) / EXT4_INODES_PER_GROUP(sb);
 		ino = (goal - 1) % EXT4_INODES_PER_GROUP(sb);
 		ret2 = 0;
 		goto got_group;
 	}
 
-    //找到一个合适的块组，尽可能在父目录所在块组，靠近父目录，块组号保存group。
-	if (S_ISDIR(mode))
+    /*下边为新创建的文件或目录先找到一个有空闲inode和空闲block的块组，优先查找父目录所属块组。查找失败则遍历所有块组，
+       看哪个有空闲inode和block。找到合适块组把块组号赋值给group，接着会在该块组分配一个空闲的inode编号*/
+	if (S_ISDIR(mode))//创建的是文件inode
 		ret2 = find_group_orlov(sb, dir, &group, mode, qstr);
-	else
+	else//创建的是文件inode
 		ret2 = find_group_other(sb, dir, &group, mode);
 
 got_group:
-    //保存父目录最近分配inode个块组号
+    //记录最近一次分配的inode所属的块组。到这里group就是本次要分配的inode所属的块组编号
 	EXT4_I(dir)->i_last_alloc_group = group;
 	err = -ENOSPC;
 	if (ret2 == -1)
@@ -714,9 +837,10 @@ got_group:
 	 * unless we get unlucky and it turns out the group we selected
 	 * had its last inode grabbed by someone else.
 	 */
-	for (i = 0; i < ngroups; i++, ino = 0) {
+	for (i = 0; i < ngroups; i++, ino = 0) {//ngroups是ext4文件系统总的块组数
 		err = -EIO;
-        //根据块组号group得到块组描述符结构ext4_group_desc赋值于gdp
+        //由块组编号group得到块组描述符结构ext4_group_desc，并且令group_desc_bh指向保存
+        //块组描述符数据的物理块映射的bh
 		gdp = ext4_get_group_desc(sb, group, &group_desc_bh);
 		if (!gdp)
 			goto out;
@@ -724,7 +848,8 @@ got_group:
 		/*
 		 * Check free inodes count before loading bitmap.
 		 */
-		//当前块组没有空闲的inode，continue查找下一个块组
+		//块组要是空闲inode不够了，group加1指向下一个块组，如果group是最后一个块组则从
+		//第一个块组开始
 		if (ext4_free_inodes_count(sb, gdp) == 0) {
 			if (++group == ngroups)
 				group = 0;
@@ -732,17 +857,27 @@ got_group:
 		}
 
 		brelse(inode_bitmap_bh);
-        //读取group块组的inode table
+        //先根据块组号group得到块组描述符ext4_group_desc，再由块组描述符得到保存
+        //inode bitmap数据的物理块号，最后读取该inode bitmap物理块的4K数据到inode_bitmap_bh
+        //并返回。注意，每个块组的inode bitmap应该只占一个物理块，最大数据量是4K
 		inode_bitmap_bh = ext4_read_inode_bitmap(sb, group);
 		if (!inode_bitmap_bh)
 			goto out;
 
 repeat_in_this_group:
-        //在inode talbe里查找一个空闲的inode 号
+        /*一个块组内，inode bitmap占一个物理块，4K大小，总计有4k*8个bit。因此，理论上
+        一个块组内最多可以容纳4k*8个inode，但实际上只有EXT4_INODES_PER_GROUP(sb)个，即
+        8192个，这个应该是综合考虑的结果，一个块组实际容纳不了4k*8个inode。*/
+        //在inode bitmap对应的inode_bitmap_bh->b_data[]这4K数据中，找一个空闲的inode号。
+        //每在inode bitmap找一个空闲inode号，在对应的inode bitmap的bit位置1。比如
+        //inode bitmap的buf即inode_bitmap_bh->b_data[]的第1个字节的第1个bit是0，则
+        //给本次的inode分配的inode编号就是0，然后下边把这个bit位置1。下次分配新的inode，
+        //找到inode_bitmap_bh->b_data[]的第1个字节的第2个bit，则为该新inode分配的编号是1.
+        //inode_bitmap_bh->b_data[]某个bit位是1表示对应编号inode分配了，为0表示该bit位对应的inode空闲
 		ino = ext4_find_next_zero_bit((unsigned long *)
 					      inode_bitmap_bh->b_data,
 					      EXT4_INODES_PER_GROUP(sb), ino);
-        //找到的inode号不能太大
+        //新分配的inode编号大于最大值，则说明当前块组inode用完了，则去下一个块组分配inode
 		if (ino >= EXT4_INODES_PER_GROUP(sb))
 			goto next_group;
 		if (group == 0 && (ino+1) < EXT4_FIRST_INO(sb)) {
@@ -767,16 +902,21 @@ repeat_in_this_group:
 			goto out;
 		}
 		ext4_lock_group(sb, group);
-        //块组的inode table的ino 这个inode号出置1，表示这个inode分配走了。设置成功返回0
+        //把inode bitmap的buf即inode_bitmap_bh->b_data[]数组的ino对应的bit位置1，表示该
+        //bit位对应的inode已经分配了，下次再分配inode就跳过该bit位，找一个新的是0的bit位。
 		ret2 = ext4_test_and_set_bit(ino, inode_bitmap_bh->b_data);
 		ext4_unlock_group(sb, group);
+        //搞不清楚为什么这里要加1?我猜测应该是以1为最小inode编号，以1为base
 		ino++;		/* the inode bitmap is zero-based */
-        //从块组总成功得到一个inode，返回
-		if (!ret2)
+		if (!ret2)//在group块组成功分配一个inode编号是ino的inode(空闲的inode)，跳出循环
 			goto got; /* we grabbed the inode! */
+
+        //执行到这里，说明没有找一个空闲的inode编号，则跳到repeat_in_this_group分支重新在
+        //inode bitmap的buf即inode_bitmap_bh->b_data[]数组重新找一个空闲的inode编号
 		if (ino < EXT4_INODES_PER_GROUP(sb))
 			goto repeat_in_this_group;
 next_group:
+        //到这里说明已经遍历到最后一个块组，还是没找到有空闲inode的块组，那就从第一个块组中找一个空闲的inode
 		if (++group == ngroups)
 			group = 0;
 	}
@@ -785,6 +925,8 @@ next_group:
 
 got:
 	BUFFER_TRACE(inode_bitmap_bh, "call ext4_handle_dirty_metadata");
+    //inode bitmap的buf即inode_bitmap_bh->b_data[]数组的数据脏了，因为上边分配一个空闲的
+    //inode，把该buf里inode编号对应的bit位置1
 	err = ext4_handle_dirty_metadata(handle, NULL, inode_bitmap_bh);
 	if (err) {
 		ext4_std_error(sb, err);
@@ -863,9 +1005,10 @@ got:
 	} else {
 		ext4_lock_group(sb, group);
 	}
-    //group这个块组空闲inode数减少一个
+    //令gdp对应的块组空闲的inode数减1
 	ext4_free_inodes_set(sb, gdp, ext4_free_inodes_count(sb, gdp) - 1);
 	if (S_ISDIR(mode)) {
+        //设置块组的已分配的目录inode个数加1
 		ext4_used_dirs_set(sb, gdp, ext4_used_dirs_count(sb, gdp) + 1);
 		if (sbi->s_log_groups_per_flex) {
 			ext4_group_t f = ext4_flex_group(sbi, group);
@@ -881,25 +1024,26 @@ got:
 	ext4_unlock_group(sb, group);
 
 	BUFFER_TRACE(group_desc_bh, "call ext4_handle_dirty_metadata");
+    //前边修改了块组描述符的数据，比如块组空闲inode数，现在使块组描述符的buffer_head标记脏
 	err = ext4_handle_dirty_metadata(handle, NULL, group_desc_bh);
 	if (err) {
 		ext4_std_error(sb, err);
 		goto out;
 	}
-
+    //空闲inode数减1
 	percpu_counter_dec(&sbi->s_freeinodes_counter);
 	if (S_ISDIR(mode))
-		percpu_counter_inc(&sbi->s_dirs_counter);
+		percpu_counter_inc(&sbi->s_dirs_counter);//当前要创建的是目录时减1
 
-	if (sbi->s_log_groups_per_flex) {
+	if (sbi->s_log_groups_per_flex) {// 4
 		flex_group = ext4_flex_group(sbi, group);
 		atomic_dec(&sbi->s_flex_groups[flex_group].free_inodes);
 	}
-    //inode的真实编号=块组中的inode号 + group块组号*每个块组的inode数
+    //根据为inode分配的块组编号group和在块组内找到的一个空闲inode号，计算最终的inode编号
 	inode->i_ino = ino + group * EXT4_INODES_PER_GROUP(sb);
 	/* This is the optimal IO size (for stat), not the fs block size */
 	inode->i_blocks = 0;
-    //inode更新修改时间
+    //计算当前inode的创建和修改时间
 	inode->i_mtime = inode->i_atime = inode->i_ctime = ei->i_crtime =
 						       ext4_current_time(inode);
     //对struct ext4_inode_info *ei赋值

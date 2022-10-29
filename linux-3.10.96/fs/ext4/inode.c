@@ -558,7 +558,7 @@ static void ext4_map_blocks_es_recheck(handle_t *handle,
  *
  * It returns the error in case of allocation failure.
  */
-//为bh的找到磁盘物理块，函数返回时map.m_pblk就是bh映射的第一个磁盘物理块地址吧，成功返回值大于0
+//根据传入的文件或目录inode的逻辑地址map->m_lblk从ext4文件系统的data block区分配map->m_len个物理块，并与逻辑地址map->m_lblk构成映射，并把映射关系保存到ext4 extent结构
 int ext4_map_blocks(handle_t *handle, struct inode *inode,
 		    struct ext4_map_blocks *map, int flags)
 {
@@ -605,7 +605,7 @@ int ext4_map_blocks(handle_t *handle, struct inode *inode,
 	if (!(flags & EXT4_GET_BLOCKS_NO_LOCK))
 		down_read((&EXT4_I(inode)->i_data_sem));
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
-        //完成文件逻辑块地址与物理块地址的映射
+        //根据传入的文件或目录inode的逻辑地址map->m_lblk从ext4文件系统的data block区分配map->m_len个物理块，并与逻辑地址map->m_lblk构成映射，并把映射关系保存到ext4 extent结构
 		retval = ext4_ext_map_blocks(handle, inode, map, flags &
 					     EXT4_GET_BLOCKS_KEEP_SIZE);
 	} else {
@@ -834,6 +834,7 @@ int ext4_get_block(struct inode *inode, sector_t iblock,
 /*
  * `handle' can be NULL if create is zero
  */
+//根据传入的文件或目录inode的逻辑地址block从ext4文件系统的data block区分配1个物理块，并与逻辑地址block构成映射，最后返回这物理块的bh
 struct buffer_head *ext4_getblk(handle_t *handle, struct inode *inode,
 				ext4_lblk_t block, int create, int *errp)
 {
@@ -845,6 +846,7 @@ struct buffer_head *ext4_getblk(handle_t *handle, struct inode *inode,
 
 	map.m_lblk = block;
 	map.m_len = 1;
+    //根据传入的文件或目录inode的逻辑地址map->m_lblk从ext4文件系统的data block区分配1个物理块，并与逻辑地址map->m_lblk构成映射，并把映射关系保存到ext4 extent结构
 	err = ext4_map_blocks(handle, inode, &map,
 			      create ? EXT4_GET_BLOCKS_CREATE : 0);
 
@@ -857,7 +859,7 @@ struct buffer_head *ext4_getblk(handle_t *handle, struct inode *inode,
 		*errp = err;
 	if (err <= 0)
 		return NULL;
-
+    //map.m_pblk就是上边为文件inode分配的起始物理块，这里是找到它的bh
 	bh = sb_getblk(inode->i_sb, map.m_pblk);
 	if (unlikely(!bh)) {
 		*errp = -ENOMEM;
@@ -896,18 +898,20 @@ struct buffer_head *ext4_getblk(handle_t *handle, struct inode *inode,
 	}
 	return bh;
 }
-
-struct buffer_head *ext4_bread(handle_t *handle, struct inode *inode,
+//根据传入的文件或目录inode的逻辑地址block从ext4文件系统的data block区分配1个物理块，并与逻辑地址block构成映射，最后返回这物理块的bh
+struct buffer_head *ext4_bread(handle_t *handle, struct inode *inode,//inode是父目录的
 			       ext4_lblk_t block, int create, int *err)
 {
 	struct buffer_head *bh;
-
+    //根据传入的文件或目录inode的逻辑地址block从ext4文件系统的data block区分配1个物理块，并与逻辑地址block构成映射，最后返回这物理块的bh
 	bh = ext4_getblk(handle, inode, block, create, err);
 	if (!bh)
 		return bh;
 	if (buffer_uptodate(bh))
 		return bh;
+    //读取bh映射的物理块的数据到bh
 	ll_rw_block(READ | REQ_META | REQ_PRIO, 1, &bh);
+    //等待bh物理块的数据读取到bh
 	wait_on_buffer(bh);
 	if (buffer_uptodate(bh))
 		return bh;
@@ -3969,6 +3973,7 @@ out_stop:
  * data in memory that is needed to recreate the on-disk version of this
  * inode.
  */
+//根据inode编号得到它在 所属的块组的inode table的物理块号，这个物理块保存的是该块组的inode table，这个inode table保存了这个inode结构
 static int __ext4_get_inode_loc(struct inode *inode,
 				struct ext4_iloc *iloc, int in_mem)
 {
@@ -3981,9 +3986,9 @@ static int __ext4_get_inode_loc(struct inode *inode,
 	iloc->bh = NULL;
 	if (!ext4_valid_inum(sb, inode->i_ino))
 		return -EIO;
-    //inode的物理块号除以每块组inode个数，计算出该inode在第几个块组，每个块组容纳的最大inode个数是一致的
+    //inode的编号号除以每块组inode个数，计算出该inode在第几个块组，每个块组容纳的最大inode个数是一致的
 	iloc->block_group = (inode->i_ino - 1) / EXT4_INODES_PER_GROUP(sb);
-    //根据块组号得到该inode的块组描述符
+    //根据块组号得到该inode所属的块组描述符
 	gdp = ext4_get_group_desc(sb, iloc->block_group, NULL);
 	if (!gdp)
 		return -EIO;
@@ -3991,12 +3996,14 @@ static int __ext4_get_inode_loc(struct inode *inode,
 	/*
 	 * Figure out the offset within the block group inode table
 	 */
-	//每个物理块inode个数
+	//每个物理块可以容纳的inode个数
 	inodes_per_block = EXT4_SB(sb)->s_inodes_per_block;
-    //该inode在块组内的偏移
+    //inode_offset是该inode编号在块组内的偏移
 	inode_offset = ((inode->i_ino - 1) %
 			EXT4_INODES_PER_GROUP(sb));
-    //貌似是求出inode的物理块号?奇怪inode->i_ino不就是物理块号?哎，该复习ext4代码了
+    //ext4_inode_table(sb, gdp)是得到inode所属块组inode table所在的起始物理块号，(inode_offset / inodes_per_block)是
+    //根据inode号在块组内的偏移计算该inode在inode table的偏移，二者相加就是该inode在该块组的inode table的物理块号
+    //ext4_inode_table(sb, gdp)是块组的inode table所在的起始物理块号，这里计算的block，是inode table，里边保存了该inode结构
 	block = ext4_inode_table(sb, gdp) + (inode_offset / inodes_per_block);
 	iloc->offset = (inode_offset % inodes_per_block) * EXT4_INODE_SIZE(sb);
     //这应该是得到inode元数据所在的物理块对应的bh吧，注意，这不是inode对应的文件的数据所在的物理块的bh
@@ -4110,7 +4117,7 @@ has_buffer:
 	iloc->bh = bh;
 	return 0;
 }
-
+//根据inode编号得到它在 所属的块组的inode table的物理块号，这个物理块保存的是该块组的inode table，这个inode table保存了这个inode结构
 int ext4_get_inode_loc(struct inode *inode, struct ext4_iloc *iloc)
 {
 	/* We have all inode data except xattrs in memory here. */
@@ -5034,7 +5041,8 @@ ext4_reserve_inode_write(handle_t *handle, struct inode *inode,
 			 struct ext4_iloc *iloc)
 {
 	int err;
-    //应该是得到inode元数据所在物理块的bh,存于iloc->bh
+    //根据inode编号得到它在 所属的块组的inode table的物理块号，这个物理块保存的是该块组的inode table，这个inode table保存了这个inode结构
+    //最后得到inode元数据所在物理块的bh,存于iloc->bh
 	err = ext4_get_inode_loc(inode, iloc);
 	if (!err) {
 		BUFFER_TRACE(iloc->bh, "get_write_access");
@@ -5105,6 +5113,8 @@ int ext4_mark_inode_dirty(handle_t *handle, struct inode *inode)
 	might_sleep();
 	trace_ext4_mark_inode_dirty(inode, _RET_IP_);
     //建立bh与jh的联系，二者一一对应，把jh添加到handle->h_transaction指向的transaction的BJ_Reserved链表
+    //根据inode编号得到它在 所属的块组的inode table的物理块号，这个物理块保存的是该块组的inode table，这个inode table保存了这个inode结构
+    //最后得到inode元数据所在物理块的bh,存于iloc->bh
 	err = ext4_reserve_inode_write(handle, inode, &iloc);
 	if (ext4_handle_valid(handle) &&
 	    EXT4_I(inode)->i_extra_isize < sbi->s_want_extra_isize &&

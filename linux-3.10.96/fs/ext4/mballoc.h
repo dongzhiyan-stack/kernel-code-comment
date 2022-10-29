@@ -135,9 +135,13 @@ enum {
 };
 
 struct ext4_free_extent {
+    //起始逻辑块号，ext4_mb_new_blocks->ext4_mb_initialize_context()中赋值，来自ar->logical，本质是ext4_ext_map_blocks()中赋值的map->m_lblk
 	ext4_lblk_t fe_logical;
+    //分配的起始物理块号，相对于块组起始物理块
 	ext4_grpblk_t fe_start;	/* In cluster units */
+    //要分配物理块的文件inode所属块组号
 	ext4_group_t fe_group;
+    //要分配的物理块个数
 	ext4_grpblk_t fe_len;	/* In cluster units */
 };
 
@@ -159,6 +163,7 @@ struct ext4_locality_group {
 	spinlock_t		lg_prealloc_lock;
 };
 
+//该结构保存ext4 mballoc分配物理块的信息，ext4_mb_new_blocks->ext4_mb_initialize_context()中赋值
 struct ext4_allocation_context {
 	struct inode *ac_inode;
 	struct super_block *ac_sb;
